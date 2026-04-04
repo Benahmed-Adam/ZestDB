@@ -1,16 +1,21 @@
-#include "ZestDB.hpp"
-#include "Logger.hpp"
-#include "node.hpp"
-
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#include "Logger.hpp"
+#include "ZestDB.hpp"
+#include "node.hpp"
 
 namespace fs = std::filesystem;
 
 ZestDB::ZestDB()
 {
     this->boot();
+    this->indexManager = new IndexManager(this->settings);
+}
+
+ZestDB::~ZestDB() {
+    delete this->indexManager;
 }
 
 void ZestDB::boot()
@@ -37,7 +42,7 @@ void ZestDB::boot()
         // Set settings values
         this->settings.DbPath = node["DbPath"].get_value_or<std::string>(current_path.string());
     } catch (const std::exception& e) {
-        ZestLog(LogLevel::ERROR, "Failed to parse config: " + std::string(e.what()));
+        ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         exit(-1);
     }
 
@@ -57,5 +62,9 @@ void ZestDB::boot()
             exit(-1);
         }
         this->settings.IndexPath = indexPath;
+    } else {
+        this->settings.IndexPath = this->settings.DbPath / "INDEX";
     }
+
+    ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
 }
