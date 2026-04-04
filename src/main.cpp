@@ -1,9 +1,10 @@
+#include "ZestDB.hpp"
 #include <iostream>
 
 int main()
 {
 
-    std::cout << "a" << std::endl;
+    ZestDB db;
 
     return 0;
 }
