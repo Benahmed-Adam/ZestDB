@@ -1,5 +1,6 @@
 #include <string>
+#include <filesystem>
 
 struct Settings {
-    std::string DbPath;
+    std::filesystem::path DbPath;
 };
