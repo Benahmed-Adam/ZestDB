@@ -15,11 +15,11 @@ struct IndexEntry {
 
 class IndexManager {
 public:
-    IndexManager(Settings& settings);
+    IndexManager(const Settings& settings);
     ~IndexManager();
-    IndexEntry search(std::string& key);
-    void update(std::string& key, IndexEntry& entry);
-    void insert(IndexEntry& key);
+    IndexEntry search(const std::string& key);
+    void update(const std::string& key, const IndexEntry& entry);
+    void insert(const IndexEntry& key);
 private:
     std::filesystem::path indexPath;
     std::fstream index;

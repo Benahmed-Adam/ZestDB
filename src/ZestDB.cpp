@@ -8,7 +8,7 @@
 
 namespace fs = std::filesystem;
 
-ZestDB::ZestDB()
+ZestDB::ZestDB() : cache(100000)
 {
     this->boot();
     this->indexManager = new IndexManager(this->settings);

@@ -4,6 +4,7 @@
 
 #include "IndexManager.hpp"
 #include "Settings.hpp"
+#include "LRUCache.hpp"
 
 class ZestDB {
 public:
@@ -14,4 +15,5 @@ private:
 
     Settings settings;
     IndexManager* indexManager;
+    LRUCache cache;
 };

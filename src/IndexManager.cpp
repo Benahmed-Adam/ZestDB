@@ -1,7 +1,7 @@
 #include "IndexManager.hpp"
 #include "Logger.hpp"
 
-IndexManager::IndexManager(Settings& settings)
+IndexManager::IndexManager(const Settings& settings)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = settings.IndexPath;
@@ -13,7 +13,7 @@ IndexManager::~IndexManager()
     this->index.close();
 }
 
-IndexEntry IndexManager::search(std::string& key)
+IndexEntry IndexManager::search(const std::string& key)
 {
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
@@ -35,7 +35,7 @@ IndexEntry IndexManager::search(std::string& key)
     return { "", -1, 0, 0, 0 };
 }
 
-void IndexManager::update(std::string& key, IndexEntry& entry)
+void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
@@ -58,7 +58,7 @@ void IndexManager::update(std::string& key, IndexEntry& entry)
     }
 }
 
-void IndexManager::insert(IndexEntry& entry)
+void IndexManager::insert(const IndexEntry& entry)
 {
     this->index.seekp(0, std::ios::end);
     this->index.write((char*)&entry, sizeof(entry));
