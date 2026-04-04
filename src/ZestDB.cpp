@@ -56,5 +56,6 @@ void ZestDB::boot()
             ZestLog(LogLevel::ERROR, "Failed to create INDEX at " + indexPath.string());
             exit(-1);
         }
+        this->settings.IndexPath = indexPath;
     }
 }
