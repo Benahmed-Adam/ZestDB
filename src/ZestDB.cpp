@@ -68,3 +68,37 @@ void ZestDB::boot()
 
     ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
 }
+
+std::string ZestDB::get(const std::string& key) {
+    IndexEntry entry = this->cache.get(key);
+
+    if (entry.segmentId == -1) {
+        entry = this->indexManager->search(key);
+    }
+
+    if (entry.segmentId != -1) {
+        std::string res = "gaaaaaaaaah";
+        //TODO reechercher dans le disque
+        return res;
+    }
+
+    return "nope";
+}
+
+void ZestDB::set(const std::string& key, const std::string& value) {
+    // TODO Enreegistrer sur le disque & récupérer le IndexEntry, insérer dans indexManager puis dans le cache
+}
+
+void ZestDB::del(const std::string key) {
+    IndexEntry entry = this->cache.get(key);
+
+    if (entry.segmentId == -1) {
+        entry = this->indexManager->search(key);
+    } 
+    
+    if (entry.segmentId != -1) {
+        entry.isTombstone = true;
+        this->indexManager->update(key, entry);
+        this->cache.remove(key);
+    }
+}

@@ -5,7 +5,7 @@ LRUCache::LRUCache(unsigned int cap) : capacity(cap) {}
 IndexEntry LRUCache::get(const std::string& key) {
     auto it = map.find(key);
     if (it == map.end()) {
-        return IndexEntry();
+        return {"", -1, 0, 0, 0};
     }
 
     lru_list.erase(it->second.second);
