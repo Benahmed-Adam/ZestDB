@@ -8,14 +8,18 @@
 
 namespace fs = std::filesystem;
 
-ZestDB::ZestDB() : cache(100000)
+ZestDB::ZestDB()
+    : cache(100000)
 {
     this->boot();
     this->indexManager = new IndexManager(this->settings);
+    this->storageManager = new StorageManager(this->settings);
 }
 
-ZestDB::~ZestDB() {
+ZestDB::~ZestDB()
+{
     delete this->indexManager;
+    delete this->storageManager;
 }
 
 void ZestDB::boot()
@@ -69,7 +73,8 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
 }
 
-std::string ZestDB::get(const std::string& key) {
+std::string ZestDB::get(const std::string& key)
+{
     IndexEntry entry = this->cache.get(key);
 
     if (entry.segmentId == -1) {
@@ -77,25 +82,29 @@ std::string ZestDB::get(const std::string& key) {
     }
 
     if (entry.segmentId != -1) {
-        std::string res = "gaaaaaaaaah";
-        //TODO reechercher dans le disque
-        return res;
+        return this->storageManager->read(entry);
     }
 
     return "nope";
 }
 
-void ZestDB::set(const std::string& key, const std::string& value) {
+void ZestDB::set(const std::string& key, const std::string& value)
+{
     // TODO Enreegistrer sur le disque & récupérer le IndexEntry, insérer dans indexManager puis dans le cache
+    IndexEntry entry = this->storageManager->append(value);
+    memcpy(entry.key, key.c_str(), key.size());
+    this->indexManager->insert(entry);
+    cache.put(key, entry);
 }
 
-void ZestDB::del(const std::string key) {
+void ZestDB::del(const std::string key)
+{
     IndexEntry entry = this->cache.get(key);
 
     if (entry.segmentId == -1) {
         entry = this->indexManager->search(key);
-    } 
-    
+    }
+
     if (entry.segmentId != -1) {
         entry.isTombstone = true;
         this->indexManager->update(key, entry);

@@ -1,22 +1,27 @@
 #include "LRUCache.hpp"
 
-LRUCache::LRUCache(unsigned int cap) : capacity(cap) {}
+LRUCache::LRUCache(unsigned int cap)
+    : capacity(cap)
+{
+}
 
-IndexEntry LRUCache::get(const std::string& key) {
+IndexEntry LRUCache::get(const std::string& key)
+{
     auto it = map.find(key);
     if (it == map.end()) {
-        return {"", -1, 0, 0, 0};
+        return { "", -1, 0, 0, 0 };
     }
 
     lru_list.erase(it->second.second);
     lru_list.push_front(key);
-    
+
     it->second.second = lru_list.begin();
 
     return it->second.first;
 }
 
-void LRUCache::put(const std::string& key, const IndexEntry& entry) {
+void LRUCache::put(const std::string& key, const IndexEntry& entry)
+{
     auto it = map.find(key);
 
     if (it != map.end()) {
@@ -30,10 +35,11 @@ void LRUCache::put(const std::string& key, const IndexEntry& entry) {
     }
 
     lru_list.push_front(key);
-    map[key] = {entry, lru_list.begin()};
+    map[key] = { entry, lru_list.begin() };
 }
 
-void LRUCache::remove(const std::string& key) {
+void LRUCache::remove(const std::string& key)
+{
     auto it = map.find(key);
     if (it != map.end()) {
         lru_list.erase(it->second.second);
