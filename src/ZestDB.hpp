@@ -27,5 +27,5 @@ private:
     Settings settings;
     IndexManager* indexManager;
     StorageManager* storageManager;
-    LRUCache cache;
+    LRUCache* cache;
 };

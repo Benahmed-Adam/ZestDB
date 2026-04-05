@@ -9,12 +9,12 @@
 namespace fs = std::filesystem;
 
 ZestDB::ZestDB()
-    : cache(100000)
 {
     ZestLog(LogLevel::DEBUG, "Initializing ZestDB...");
     this->boot();
     this->indexManager = new IndexManager(this->settings);
     this->storageManager = new StorageManager(this->settings);
+    this->cache = new LRUCache(this->settings.CacheSize);
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 }
 
@@ -22,6 +22,7 @@ ZestDB::~ZestDB()
 {
     delete this->indexManager;
     delete this->storageManager;
+    delete this->cache;
 }
 
 void ZestDB::boot()
@@ -50,6 +51,9 @@ void ZestDB::boot()
         this->settings.SegSize = node["SegSize"].get_value_or<unsigned long>(128000);
         this->settings.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
+        this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
+        this->settings.KeyValidation = node["KeyValidation"].get_value_or<std::string>("");
+        this->settings.ValueValidation = node["ValueValidation"].get_value_or<std::string>("");
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         exit(-1);
@@ -64,6 +68,9 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "SegSize : " + std::to_string(this->settings.SegSize));
     ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+    ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
+    // ZestLog(LogLevel::DEBUG, "KeyValidation : " + this->settings.KeyValidation);
+    // ZestLog(LogLevel::DEBUG, "ValueValidation : " + this->settings.ValueValidation);
 
     if (!fs::exists(this->settings.DbPath / "INDEX")) {
         fs::path indexPath = this->settings.DbPath / "INDEX";
@@ -98,8 +105,13 @@ std::string ZestDB::get(const std::string& key)
         return "The key is too long !";
     }
 
+    if (!std::regex_match(key, this->settings.KeyValidation)) {
+        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
+        return "The key does not respect the KeyValidation regex !";
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
-    IndexEntry entry = this->cache.get(key);
+    IndexEntry entry = this->cache->get(key);
 
     if (entry.segmentId == -1) {
         ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
@@ -127,12 +139,22 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
         return ResultType::ERROR;
     }
 
+    if (!std::regex_match(key, this->settings.KeyValidation)) {
+        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
+        return ResultType::ERROR;
+    }
+
+    if (!std::regex_match(value, this->settings.ValueValidation)) {
+        ZestLog(LogLevel::ERROR, "ZestDB::get - The value does not respect the ValueValidation regex !");
+        return ResultType::ERROR;
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
     memcpy(entry.key, key.c_str(), key.size());
     this->indexManager->insert(entry);
-    this->cache.put(key, entry);
+    this->cache->put(key, entry);
     ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
     return ResultType::SUCCESS;
 }
@@ -144,8 +166,13 @@ ResultType ZestDB::del(const std::string key)
         return ResultType::ERROR;
     }
 
+    if (!std::regex_match(key, this->settings.KeyValidation)) {
+        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
+        return ResultType::ERROR;
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
-    IndexEntry entry = this->cache.get(key);
+    IndexEntry entry = this->cache->get(key);
 
     if (entry.segmentId == -1) {
         ZestLog(LogLevel::DEBUG, "ZestDB::del - key not in cache, searching index");
@@ -155,7 +182,7 @@ ResultType ZestDB::del(const std::string key)
     if (entry.segmentId != -1 && !entry.isTombstone) {
         entry.isTombstone = true;
         this->indexManager->update(key, entry);
-        this->cache.remove(key);
+        this->cache->remove(key);
         ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
         return ResultType::SUCCESS;
     } else {

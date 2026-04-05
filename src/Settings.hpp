@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <regex>
 
 struct Settings {
     std::filesystem::path DbPath;
@@ -8,4 +9,7 @@ struct Settings {
     unsigned long SegSize;
     unsigned int MaxKeySize;
     unsigned int MaxValueSize;
+    unsigned int CacheSize;
+    std::regex KeyValidation;
+    std::regex ValueValidation;
 };
