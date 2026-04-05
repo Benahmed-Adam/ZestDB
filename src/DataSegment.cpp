@@ -4,7 +4,13 @@ DataSegment::DataSegment(const Settings& settings, int id)
     : segmentId(id)
     , full(false)
 {
-    this->segment.open(settings.DbPath / "seg" / (std::to_string(id) + ".seg"), std::ios::in | std::ios::out | std::ios::binary);
+    std::filesystem::path segPath = settings.DbPath / "seg" / (std::to_string(id) + ".seg");
+    this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+    if (!this->segment.is_open()) {
+        this->segment.open(segPath, std::ios::out | std::ios::binary | std::ios::trunc);
+        this->segment.close();
+        this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+    }
 }
 
 DataSegment::~DataSegment()
@@ -44,6 +50,7 @@ bool DataSegment::isFull() const
     return this->full;
 }
 
-int DataSegment::getSegmentId() const {
+int DataSegment::getSegmentId() const
+{
     return this->segmentId;
 }

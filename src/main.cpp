@@ -4,6 +4,6 @@
 int main()
 {
     ZestDB db;
-    db.set("caca", "boooooyaaaa");
+    std::cout << db.get("caca");
     return 0;
 }
