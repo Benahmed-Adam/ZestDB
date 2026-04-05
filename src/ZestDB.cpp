@@ -71,6 +71,11 @@ void ZestDB::boot()
     }
 
     ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
+
+    if (!fs::exists(this->settings.DbPath / "seg")) {
+        ZestLog(LogLevel::WARNING, "Creating seeg folder at " + (this->settings.DbPath / "seg").string());
+        fs::create_directory(this->settings.DbPath / "seg");
+    }
 }
 
 std::string ZestDB::get(const std::string& key)
@@ -90,7 +95,6 @@ std::string ZestDB::get(const std::string& key)
 
 void ZestDB::set(const std::string& key, const std::string& value)
 {
-    // TODO Enreegistrer sur le disque & récupérer le IndexEntry, insérer dans indexManager puis dans le cache
     IndexEntry entry = this->storageManager->append(value);
     memcpy(entry.key, key.c_str(), key.size());
     this->indexManager->insert(entry);
