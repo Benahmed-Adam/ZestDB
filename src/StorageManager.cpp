@@ -37,7 +37,7 @@ IndexEntry StorageManager::append(const std::string& value)
 
     unsigned long pos = currentSeg->write(value);
 
-    if (pos == 128001) {
+    if (pos == this->settings.SegSize + 1) {
         ZestLog(LogLevel::DEBUG, "StorageManager::append - segment full, creating new segment");
         int nextId = currentSeg->getSegmentId() + 1;
 

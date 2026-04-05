@@ -16,6 +16,6 @@ public:
 private:
     int segmentId;
     bool full;
-
+    Settings settings;
     std::fstream segment;
 };

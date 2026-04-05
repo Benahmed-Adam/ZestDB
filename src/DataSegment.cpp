@@ -1,12 +1,12 @@
 #include "DataSegment.hpp"
 #include "Logger.hpp"
 
-DataSegment::DataSegment(const Settings& settings, int id)
+DataSegment::DataSegment(const Settings& set, int id)
     : segmentId(id)
     , full(false)
 {
     ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
-    std::filesystem::path segPath = settings.DbPath / "seg" / (std::to_string(id) + ".seg");
+    std::filesystem::path segPath = set.DbPath / "seg" / (std::to_string(id) + ".seg");
     this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     if (!this->segment.is_open()) {
         ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating new segment file: " + segPath.string());
@@ -14,6 +14,7 @@ DataSegment::DataSegment(const Settings& settings, int id)
         this->segment.close();
         this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     }
+    this->settings = set;
 }
 
 DataSegment::~DataSegment()
@@ -26,10 +27,10 @@ unsigned long DataSegment::write(const std::string& value)
     this->segment.seekp(0, std::ios::end);
     unsigned long position = static_cast<unsigned long>(this->segment.tellp());
 
-    if (position >= 128000 || position + value.size() >= 128000) {
+    if (position >= this->settings.SegSize || position + value.size() >= this->settings.SegSize) {
         ZestLog(LogLevel::DEBUG, "DataSegment::write - segment " + std::to_string(segmentId) + " is full");
         this->full = true;
-        return 128001;
+        return this->settings.SegSize + 1;
     }
 
     this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));

@@ -1,1 +1,4 @@
 DbPath: /mnt/c/Users/Adam/Documents/C++_Projects/ZestDB/DB
+SegSize: 128
+MaxKeySize: 64
+MaxValueSize: 100

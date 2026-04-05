@@ -47,12 +47,23 @@ void ZestDB::boot()
 
         // Set settings values
         this->settings.DbPath = node["DbPath"].get_value_or<std::string>(current_path.string());
+        this->settings.SegSize = node["SegSize"].get_value_or<unsigned long>(128000);
+        this->settings.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
+        this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         exit(-1);
     }
 
+    if (this->settings.MaxValueSize >= this->settings.SegSize) {
+        ZestLog(LogLevel::CRITICAL, "MaxValueSize is higher than SegSize ! MaxValueSize : " + std::to_string(this->settings.MaxValueSize) + " | SegSize : " + std::to_string(this->settings.SegSize));
+        exit(-1);
+    }
+
     ZestLog(LogLevel::DEBUG, "Database path : " + this->settings.DbPath.string());
+    ZestLog(LogLevel::DEBUG, "SegSize : " + std::to_string(this->settings.SegSize));
+    ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+    ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
 
     if (!fs::exists(this->settings.DbPath / "INDEX")) {
         fs::path indexPath = this->settings.DbPath / "INDEX";
@@ -75,13 +86,18 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
 
     if (!fs::exists(this->settings.DbPath / "seg")) {
-        ZestLog(LogLevel::WARNING, "Creating seeg folder at " + (this->settings.DbPath / "seg").string());
+        ZestLog(LogLevel::WARNING, "Creating seg folder at " + (this->settings.DbPath / "seg").string());
         fs::create_directory(this->settings.DbPath / "seg");
     }
 }
 
 std::string ZestDB::get(const std::string& key)
 {
+    if (key.size() >= this->settings.MaxKeySize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::get - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return "The key is too long !";
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
     IndexEntry entry = this->cache.get(key);
 
@@ -99,8 +115,18 @@ std::string ZestDB::get(const std::string& key)
     return "";
 }
 
-void ZestDB::set(const std::string& key, const std::string& value)
+ResultType ZestDB::set(const std::string& key, const std::string& value)
 {
+    if (key.size() >= this->settings.MaxKeySize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::set - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return ResultType::ERROR;
+    }
+
+    if (value.size() >= this->settings.MaxValueSize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::set - The value is too long ! MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+        return ResultType::ERROR;
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
@@ -108,10 +134,16 @@ void ZestDB::set(const std::string& key, const std::string& value)
     this->indexManager->insert(entry);
     this->cache.put(key, entry);
     ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
+    return ResultType::SUCCESS;
 }
 
-void ZestDB::del(const std::string key)
+ResultType ZestDB::del(const std::string key)
 {
+    if (key.size() >= this->settings.MaxKeySize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::del - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return ResultType::ERROR;
+    }
+
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
     IndexEntry entry = this->cache.get(key);
 
@@ -125,7 +157,9 @@ void ZestDB::del(const std::string key)
         this->indexManager->update(key, entry);
         this->cache.remove(key);
         ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
+        return ResultType::SUCCESS;
     } else {
         ZestLog(LogLevel::WARNING, "ZestDB::del - key not found: " + key);
+        return ResultType::ERROR;
     }
 }
