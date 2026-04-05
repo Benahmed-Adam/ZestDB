@@ -1,12 +1,15 @@
 #include "DataSegment.hpp"
+#include "Logger.hpp"
 
 DataSegment::DataSegment(const Settings& settings, int id)
     : segmentId(id)
     , full(false)
 {
+    ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
     std::filesystem::path segPath = settings.DbPath / "seg" / (std::to_string(id) + ".seg");
     this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     if (!this->segment.is_open()) {
+        ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating new segment file: " + segPath.string());
         this->segment.open(segPath, std::ios::out | std::ios::binary | std::ios::trunc);
         this->segment.close();
         this->segment.open(segPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
@@ -24,6 +27,7 @@ unsigned long DataSegment::write(const std::string& value)
     unsigned long position = static_cast<unsigned long>(this->segment.tellp());
 
     if (position >= 128000 || position + value.size() >= 128000) {
+        ZestLog(LogLevel::DEBUG, "DataSegment::write - segment " + std::to_string(segmentId) + " is full");
         this->full = true;
         return 128001;
     }
@@ -31,11 +35,13 @@ unsigned long DataSegment::write(const std::string& value)
     this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));
     this->segment.flush();
 
+    ZestLog(LogLevel::DEBUG, "DataSegment::write - wrote " + std::to_string(value.size()) + " bytes at offset: " + std::to_string(position));
     return position;
 }
 
 std::string DataSegment::read(unsigned long offset, unsigned int size)
 {
+    ZestLog(LogLevel::DEBUG, "DataSegment::read - reading " + std::to_string(size) + " bytes from offset: " + std::to_string(offset));
     std::string res;
     res.resize(size);
 

@@ -15,6 +15,7 @@ IndexManager::~IndexManager()
 
 IndexEntry IndexManager::search(const std::string& key)
 {
+    ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
 
@@ -23,20 +24,23 @@ IndexEntry IndexManager::search(const std::string& key)
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&entry, sizeof(entry)) && !entry.isTombstone)
+        if (!this->index.read((char*)&entry, sizeof(entry)) && entry.isTombstone)
             break;
 
         if (std::string(entry.key) == key) {
+            ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key + " in segment: " + std::to_string(entry.segmentId));
             return entry;
         }
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
     }
 
+    ZestLog(LogLevel::DEBUG, "IndexManager::search - key not found: " + key);
     return { "", -1, 0, 0, 0 };
 }
 
 void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
+    ZestLog(LogLevel::DEBUG, "IndexManager::update - updating key: " + key);
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
 
@@ -52,6 +56,7 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
             this->index.seekp(position, std::ios::beg);
             this->index.write((char*)&entry, sizeof(entry));
             this->index.flush();
+            ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated: " + key);
             return;
         }
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
@@ -60,7 +65,9 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
 void IndexManager::insert(const IndexEntry& entry)
 {
+    ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting key: " + std::string(entry.key) + " to segment: " + std::to_string(entry.segmentId));
     this->index.seekp(0, std::ios::end);
     this->index.write((char*)&entry, sizeof(entry));
     this->index.flush();
+    ZestLog(LogLevel::DEBUG, "IndexManager::insert - key inserted successfully");
 }

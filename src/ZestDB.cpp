@@ -11,9 +11,11 @@ namespace fs = std::filesystem;
 ZestDB::ZestDB()
     : cache(100000)
 {
+    ZestLog(LogLevel::DEBUG, "Initializing ZestDB...");
     this->boot();
     this->indexManager = new IndexManager(this->settings);
     this->storageManager = new StorageManager(this->settings);
+    ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 }
 
 ZestDB::~ZestDB()
@@ -80,38 +82,50 @@ void ZestDB::boot()
 
 std::string ZestDB::get(const std::string& key)
 {
+    ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
     IndexEntry entry = this->cache.get(key);
 
     if (entry.segmentId == -1) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
         entry = this->indexManager->search(key);
     }
 
     if (entry.segmentId != -1) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::get - found in segment: " + std::to_string(entry.segmentId));
         return this->storageManager->read(entry);
     }
 
+    ZestLog(LogLevel::WARNING, "ZestDB::get - key not found: " + key);
     return "nope";
 }
 
 void ZestDB::set(const std::string& key, const std::string& value)
 {
+    ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
     IndexEntry entry = this->storageManager->append(value);
+    ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
     memcpy(entry.key, key.c_str(), key.size());
     this->indexManager->insert(entry);
-    cache.put(key, entry);
+    this->cache.put(key, entry);
+    ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
 }
 
 void ZestDB::del(const std::string key)
 {
+    ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
     IndexEntry entry = this->cache.get(key);
 
     if (entry.segmentId == -1) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::del - key not in cache, searching index");
         entry = this->indexManager->search(key);
     }
 
-    if (entry.segmentId != -1) {
+    if (entry.segmentId != -1 && !entry.isTombstone) {
         entry.isTombstone = true;
         this->indexManager->update(key, entry);
         this->cache.remove(key);
+        ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
+    } else {
+        ZestLog(LogLevel::WARNING, "ZestDB::del - key not found: " + key);
     }
 }
