@@ -21,17 +21,22 @@ IndexEntry IndexManager::search(const std::string& key)
 
     std::streamoff position = 0;
     IndexEntry entry;
+    IndexEntry foundEntry = { "", -1, 0, 0, 0 };
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&entry, sizeof(entry)) && entry.isTombstone)
+        if (!this->index.read((char*)&entry, sizeof(entry)))
             break;
 
-        if (std::string(entry.key) == key) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key + " in segment: " + std::to_string(entry.segmentId));
-            return entry;
+        if (std::string(entry.key) == key && !entry.isTombstone) {
+            foundEntry = entry;
         }
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
+    }
+
+    if (foundEntry.segmentId != -1) {
+        ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key + " in segment: " + std::to_string(foundEntry.segmentId));
+        return foundEntry;
     }
 
     ZestLog(LogLevel::DEBUG, "IndexManager::search - key not found: " + key);
@@ -65,7 +70,31 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
 void IndexManager::insert(const IndexEntry& entry)
 {
-    ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting key: " + std::string(entry.key) + " to segment: " + std::to_string(entry.segmentId));
+    std::string keyStr(entry.key);
+    ZestLog(LogLevel::DEBUG, "IndexManager::insert - checking if key exists: " + keyStr);
+
+    index.seekg(0, std::ios::end);
+    std::streamoff fsize = index.tellg();
+
+    std::streamoff position = 0;
+    IndexEntry e;
+
+    while (position < fsize) {
+        this->index.seekg(position, std::ios::beg);
+        if (!this->index.read((char*)&e, sizeof(e)))
+            break;
+
+        if (std::string(e.key) == keyStr && !e.isTombstone) {
+            ZestLog(LogLevel::WARNING, "IndexManager::insert - key already exists, updating instead: " + keyStr);
+            this->index.seekp(position, std::ios::beg);
+            this->index.write((char*)&entry, sizeof(entry));
+            this->index.flush();
+            return;
+        }
+        position += static_cast<std::streamoff>(sizeof(IndexEntry));
+    }
+
+    ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting new key: " + keyStr + " to segment: " + std::to_string(entry.segmentId));
     this->index.seekp(0, std::ios::end);
     this->index.write((char*)&entry, sizeof(entry));
     this->index.flush();

@@ -96,7 +96,7 @@ std::string ZestDB::get(const std::string& key)
     }
 
     ZestLog(LogLevel::WARNING, "ZestDB::get - key not found: " + key);
-    return "nope";
+    return "";
 }
 
 void ZestDB::set(const std::string& key, const std::string& value)

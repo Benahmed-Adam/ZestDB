@@ -61,5 +61,5 @@ std::string StorageManager::read(const IndexEntry& entry)
     }
 
     ZestLog(LogLevel::ERROR, "StorageManager::read - segment not found: " + std::to_string(entry.segmentId));
-    return "nope";
+    return "";
 }
