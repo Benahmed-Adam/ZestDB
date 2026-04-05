@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "DataSegment.hpp"
 #include "IndexManager.hpp"
@@ -12,9 +13,8 @@ public:
     StorageManager(const Settings& settings);
     IndexEntry append(const std::string& value);
     std::string read(const IndexEntry& entry);
-
 private:
-    void createNewSegment();
-    std::vector<DataSegment> segments;
+    void boot();
+    std::vector<std::unique_ptr<DataSegment>> segments;
     Settings settings;
 };

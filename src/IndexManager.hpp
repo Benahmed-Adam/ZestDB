@@ -8,7 +8,7 @@
 struct IndexEntry {
     char key[64];
     int segmentId;
-    long offset;
+    unsigned long offset;
     unsigned int size;
     bool isTombstone;
 };
