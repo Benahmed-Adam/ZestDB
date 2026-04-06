@@ -98,16 +98,16 @@ void ZestDB::boot()
     }
 }
 
-std::string ZestDB::get(const std::string& key)
+ResultType ZestDB::get(const std::string& key)
 {
     if (key.size() >= this->settings.MaxKeySize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::get - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
-        return "The key is too long !";
+        ZestLog(LogLevel::ERROR, "ZestDB::get - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
     if (!std::regex_match(key, this->settings.KeyValidation)) {
-        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
-        return "The key does not respect the KeyValidation regex !";
+        ZestLog(LogLevel::ERROR, "ZestDB::get - " + std::string(Messages::KEY_VALIDATION_FAILED));
+        return { ResultType::Code::ERROR, Messages::KEY_VALIDATION_FAILED };
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
@@ -120,33 +120,33 @@ std::string ZestDB::get(const std::string& key)
 
     if (entry.segmentId != -1) {
         ZestLog(LogLevel::DEBUG, "ZestDB::get - found in segment: " + std::to_string(entry.segmentId));
-        return this->storageManager->read(entry);
+        return { ResultType::Code::SUCCESS, this->storageManager->read(entry) };
     }
 
     ZestLog(LogLevel::WARNING, "ZestDB::get - key not found: " + key);
-    return "";
+    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND };
 }
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
 {
     if (key.size() >= this->settings.MaxKeySize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::set - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::set - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
     if (value.size() >= this->settings.MaxValueSize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::set - The value is too long ! MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::set - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+        return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
     }
 
     if (!std::regex_match(key, this->settings.KeyValidation)) {
-        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::get - " + std::string(Messages::KEY_VALIDATION_FAILED));
+        return { ResultType::Code::ERROR, Messages::KEY_VALIDATION_FAILED };
     }
 
     if (!std::regex_match(value, this->settings.ValueValidation)) {
-        ZestLog(LogLevel::ERROR, "ZestDB::get - The value does not respect the ValueValidation regex !");
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::set - " + std::string(Messages::VALUE_VALIDATION_FAILED));
+        return { ResultType::Code::ERROR, Messages::VALUE_VALIDATION_FAILED };
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
@@ -156,19 +156,19 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     this->indexManager->insert(entry);
     this->cache->put(key, entry);
     ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
-    return ResultType::SUCCESS;
+    return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
 }
 
-ResultType ZestDB::del(const std::string key)
+ResultType ZestDB::del(const std::string& key)
 {
     if (key.size() >= this->settings.MaxKeySize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::del - The key is too long ! MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::del - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
     if (!std::regex_match(key, this->settings.KeyValidation)) {
-        ZestLog(LogLevel::ERROR, "ZestDB::get - The key does not respect the KeyValidation regex !");
-        return ResultType::ERROR;
+        ZestLog(LogLevel::ERROR, "ZestDB::del - " + std::string(Messages::KEY_VALIDATION_FAILED));
+        return { ResultType::Code::ERROR, Messages::KEY_VALIDATION_FAILED };
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
@@ -184,9 +184,9 @@ ResultType ZestDB::del(const std::string key)
         this->indexManager->update(key, entry);
         this->cache->remove(key);
         ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
-        return ResultType::SUCCESS;
+        return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_DEL) + key };
     } else {
         ZestLog(LogLevel::WARNING, "ZestDB::del - key not found: " + key);
-        return ResultType::ERROR;
+        return { ResultType::Code::ERROR, std::string(Messages::KEY_NOT_FOUND) + ": " + key };
     }
 }

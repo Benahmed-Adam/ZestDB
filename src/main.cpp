@@ -38,11 +38,11 @@ int main()
             if (!iss.eof()) {
                 std::cerr << "Warning: extra text ignored after key" << std::endl;
             }
-            std::string result = db.get(key);
-            if (result == "") {
-                std::cout << "(not found)" << std::endl;
+            ResultType result = db.get(key);
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << result.message << std::endl;
             } else {
-                std::cout << result << std::endl;
+                std::cout << "(not found): " << result.message << std::endl;
             }
         } else if (cmd == "s") {
             std::string key, value;
@@ -61,10 +61,10 @@ int main()
                 value += " " + rest;
             }
             ResultType result = db.set(key, value);
-            if (result == ResultType::SUCCESS) {
-                std::cout << "OK" << std::endl;
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << "OK: " << result.message << std::endl;
             } else {
-                std::cout << "ERROR" << std::endl;
+                std::cout << "ERROR: " << result.message << std::endl;
             }
         } else if (cmd == "d") {
             std::string key;
@@ -77,14 +77,11 @@ int main()
                 std::cerr << "Warning: extra text ignored after key" << std::endl;
             }
             ResultType result = db.del(key);
-            if (result == ResultType::SUCCESS) {
-                std::cout << "OK" << std::endl;
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << "OK: " << result.message << std::endl;
             } else {
-                std::cout << "ERROR" << std::endl;
+                std::cout << "ERROR: " << result.message << std::endl;
             }
-        } else {
-            std::cerr << "Unknown command: " << cmd << std::endl;
-            std::cout << "Type 'h' for help" << std::endl;
         }
     }
 
