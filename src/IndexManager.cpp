@@ -54,8 +54,7 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&e, sizeof(e)))
-            break;
+        if (!this->index.read((char*)&e, sizeof(e))) break;
 
         if (std::string(e.key) == key) {
             this->index.seekp(position, std::ios::beg);
@@ -81,8 +80,7 @@ void IndexManager::insert(const IndexEntry& entry)
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&e, sizeof(e)))
-            break;
+        if (!this->index.read((char*)&e, sizeof(e))) break;
 
         if (std::string(e.key) == keyStr && !e.isTombstone) {
             ZestLog(LogLevel::WARNING, "IndexManager::insert - key already exists, updating instead: " + keyStr);
@@ -99,4 +97,25 @@ void IndexManager::insert(const IndexEntry& entry)
     this->index.write((char*)&entry, sizeof(entry));
     this->index.flush();
     ZestLog(LogLevel::DEBUG, "IndexManager::insert - key inserted successfully");
+}
+
+std::vector<IndexEntry> IndexManager::getAll() {
+    std::vector<IndexEntry> res;
+
+    index.seekg(0, std::ios::end);
+    std::streamoff fsize = index.tellg();
+
+    std::streamoff position = 0;
+    IndexEntry e;
+
+    while (position < fsize) {
+        this->index.seekg(position, std::ios::beg);
+        if (!this->index.read((char*)&e, sizeof(e))) break;
+
+        if (!e.isTombstone) res.push_back(e);
+        
+        position += static_cast<std::streamoff>(sizeof(IndexEntry));
+    }
+
+    return res;
 }

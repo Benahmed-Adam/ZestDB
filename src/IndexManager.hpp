@@ -20,6 +20,7 @@ public:
     IndexEntry search(const std::string& key);
     void update(const std::string& key, const IndexEntry& entry);
     void insert(const IndexEntry& key);
+    std::vector<IndexEntry> getAll();
 
 private:
     std::filesystem::path indexPath;

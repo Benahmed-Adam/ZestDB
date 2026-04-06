@@ -190,3 +190,29 @@ ResultType ZestDB::del(const std::string& key)
         return { ResultType::Code::ERROR, std::string(Messages::KEY_NOT_FOUND) + ": " + key };
     }
 }
+
+ResultType ZestDB::getBy(const std::string& patern)
+{
+    std::regex reg(patern);
+    std::vector<IndexEntry> entries = this->indexManager->getAll();
+    std::ostringstream oss;
+
+    for (const IndexEntry& entry : entries) {
+
+        std::string key(entry.key);
+        if (std::regex_match(key, reg)) {
+            std::string value = this->storageManager->read(entry);
+            oss << key << ":" << value << ";";
+        }
+    }
+
+    return { ResultType::Code::SUCCESS, oss.str() };
+}
+
+// ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
+// {
+// }
+
+// ResultType ZestDB::delBy(const std::string& patern)
+// {
+// }

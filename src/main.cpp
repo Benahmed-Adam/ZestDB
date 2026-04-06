@@ -35,9 +35,6 @@ int main()
                 std::cout << "Usage: g <key>" << std::endl;
                 continue;
             }
-            if (!iss.eof()) {
-                std::cerr << "Warning: extra text ignored after key" << std::endl;
-            }
             ResultType result = db.get(key);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << result.message << std::endl;
@@ -73,14 +70,24 @@ int main()
                 std::cout << "Usage: d <key>" << std::endl;
                 continue;
             }
-            if (!iss.eof()) {
-                std::cerr << "Warning: extra text ignored after key" << std::endl;
-            }
             ResultType result = db.del(key);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {
                 std::cout << "ERROR: " << result.message << std::endl;
+            }
+        } else if (cmd == "gb") {
+            std::string pattern;
+            if (!(iss >> pattern)) {
+                std::cerr << "Error: missing pattern" << std::endl;
+                std::cout << "Usage: gb <pattern>" << std::endl;
+                continue;
+            }
+            ResultType result = db.getBy(pattern);
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << result.message << std::endl;
+            } else {
+                std::cout << "(not found): " << result.message << std::endl;
             }
         }
     }
