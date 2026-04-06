@@ -193,18 +193,31 @@ ResultType ZestDB::del(const std::string& key)
 
 ResultType ZestDB::getBy(const std::string& patern)
 {
-    std::regex reg(patern);
+    ZestLog(LogLevel::DEBUG, "ZestDB::getBy - searching with pattern: " + patern);
+
+    std::regex reg;
+    try {
+        reg = std::regex(patern);
+    } catch (const std::regex_error& e) {
+        ZestLog(LogLevel::ERROR, "ZestDB::getBy - invalid regex pattern: " + std::string(e.what()));
+        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+    }
+
     std::vector<IndexEntry> entries = this->indexManager->getAll();
     std::ostringstream oss;
+    int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
-
         std::string key(entry.key);
         if (std::regex_match(key, reg)) {
+            ZestLog(LogLevel::DEBUG, "ZestDB::getBy - match found: " + key);
             std::string value = this->storageManager->read(entry);
             oss << key << ":" << value << ";";
+            matchCount++;
         }
     }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::getBy - total matches: " + std::to_string(matchCount));
 
     return { ResultType::Code::SUCCESS, oss.str() };
 }
