@@ -25,8 +25,10 @@ IndexEntry LRUCache::get(const std::string& key)
     return it->second.first;
 }
 
-void LRUCache::put(const std::string& key, const IndexEntry& entry)
+void LRUCache::put(const IndexEntry& entry)
 {
+    std::string key(entry.key);
+    
     ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key);
     auto it = map.find(key);
 

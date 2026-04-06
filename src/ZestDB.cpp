@@ -1,3 +1,4 @@
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -154,7 +155,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
     memcpy(entry.key, key.c_str(), key.size());
     this->indexManager->insert(entry);
-    this->cache->put(key, entry);
+    this->cache->put(entry);
     ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
     return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
 }
@@ -195,6 +196,11 @@ ResultType ZestDB::getBy(const std::string& patern)
 {
     ZestLog(LogLevel::DEBUG, "ZestDB::getBy - searching with pattern: " + patern);
 
+    if (patern.empty()) {
+        ZestLog(LogLevel::ERROR, "ZestDB::getBy - pattern cannot be empty");
+        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+    }
+
     std::regex reg;
     try {
         reg = std::regex(patern);
@@ -222,9 +228,52 @@ ResultType ZestDB::getBy(const std::string& patern)
     return { ResultType::Code::SUCCESS, oss.str() };
 }
 
-// ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
-// {
-// }
+ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
+{
+    ZestLog(LogLevel::DEBUG, "ZestDB::setBy - searching with pattern: " + patern);
+
+    if (patern.empty()) {
+        ZestLog(LogLevel::ERROR, "ZestDB::setBy - pattern cannot be empty");
+        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+    }
+
+    if (value.size() >= this->settings.MaxValueSize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::setBy - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+        return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
+    }
+
+    if (!std::regex_match(value, this->settings.ValueValidation)) {
+        ZestLog(LogLevel::ERROR, "ZestDB::setBy - " + std::string(Messages::VALUE_VALIDATION_FAILED));
+        return { ResultType::Code::ERROR, Messages::VALUE_VALIDATION_FAILED };
+    }
+
+    std::regex reg;
+    try {
+        reg = std::regex(patern);
+    } catch (const std::regex_error& e) {
+        ZestLog(LogLevel::ERROR, "ZestDB::setBy - invalid regex pattern: " + std::string(e.what()));
+        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+    }
+
+    std::vector<IndexEntry> entries = this->indexManager->getAll();
+    int matchCount = 0;
+
+    for (const IndexEntry& entry : entries) {
+        std::string key(entry.key);
+        if (std::regex_match(key, reg)) {
+            ZestLog(LogLevel::DEBUG, "ZestDB::setBy - match found: " + key);
+            IndexEntry newEntry = this->storageManager->append(value);
+            memcpy(newEntry.key, entry.key, sizeof(entry.key));
+            this->indexManager->update(key, newEntry);
+            this->cache->put(newEntry);
+            matchCount++;
+        }
+    }
+
+    ZestLog(LogLevel::INFO, "ZestDB::setBy - successfully updated " + std::to_string(matchCount) + " entries");
+
+    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
+}
 
 // ResultType ZestDB::delBy(const std::string& patern)
 // {

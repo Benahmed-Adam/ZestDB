@@ -10,7 +10,7 @@ public:
     LRUCache(unsigned int cap);
 
     IndexEntry get(const std::string& key);
-    void put(const std::string& key, const IndexEntry& entry);
+    void put(const IndexEntry& entry);
     void remove(const std::string& key);
 
 private:
