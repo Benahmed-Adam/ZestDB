@@ -55,6 +55,9 @@ void ZestDB::boot()
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
         this->settings.KeyValidation = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidation = node["ValueValidation"].get_value_or<std::string>("");
+
+        this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
+        setLoggerDebugMode(this->settings.isDebug);
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         exit(-1);
@@ -70,6 +73,7 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
     ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
+    ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
     // ZestLog(LogLevel::DEBUG, "KeyValidation : " + this->settings.KeyValidation);
     // ZestLog(LogLevel::DEBUG, "ValueValidation : " + this->settings.ValueValidation);
 
@@ -262,10 +266,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         std::string key(entry.key);
         if (std::regex_match(key, reg)) {
             ZestLog(LogLevel::DEBUG, "ZestDB::setBy - match found: " + key);
-            IndexEntry newEntry = this->storageManager->append(value);
-            memcpy(newEntry.key, entry.key, sizeof(entry.key));
-            this->indexManager->update(key, newEntry);
-            this->cache->put(newEntry);
+            this->set(entry.key, value);
             matchCount++;
         }
     }

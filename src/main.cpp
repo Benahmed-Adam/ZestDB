@@ -4,11 +4,45 @@
 #include <sstream>
 #include <string>
 
-int main()
+void populate(ZestDB& db)
 {
+    for (int i = 0; i < 1000; ++i) {
+        std::string key = "key_" + std::to_string(i);
+        std::string value = "value_" + std::to_string(i) + "_" + std::string(100, 'x');
+        db.set(key, value);
+    }
+
+    for (int i = 0; i < 100; ++i) {
+        std::string key = "dup_" + std::to_string(i);
+        db.set(key, "first");
+        db.set(key, "second");
+        db.set(key, "third");
+    }
+
+    std::string longKey(300, 'k');
+    db.set(longKey, "long key test");
+
+    std::string longValue(10000, 'v');
+    db.set("long_value", longValue);
+
+    for (int i = 0; i < 50; ++i) {
+        db.del("key_" + std::to_string(i));
+    }
+
+    db.set("empty", "");
+    db.set("special", "abc\ndef\tghi\r\n");
+    db.set("unicode", "émojis: 🎉 € 中文");
+}
+
+int main(int argc, char** argv)
+{
+    (void)argv;
+    
     ZestDB db;
 
     std::cout << std::endl;
+
+    if (argc > 1) populate(db);
 
     std::string line;
     while (true) {
@@ -88,6 +122,28 @@ int main()
                 std::cout << result.message << std::endl;
             } else {
                 std::cout << "(not found): " << result.message << std::endl;
+            }
+        } else if (cmd == "sb") {
+            std::string pattern, value;
+            if (!(iss >> pattern)) {
+                std::cerr << "Error: missing pattern" << std::endl;
+                std::cout << "Usage: sb <pattern> <value>" << std::endl;
+                continue;
+            }
+            if (!(iss >> value)) {
+                std::cerr << "Error: missing value" << std::endl;
+                std::cout << "Usage: sb <pattern> <value>" << std::endl;
+                continue;
+            }
+            std::string rest;
+            while (iss >> rest) {
+                value += " " + rest;
+            }
+            ResultType result = db.setBy(pattern, value);
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << "OK: " << result.message << std::endl;
+            } else {
+                std::cout << "ERROR: " << result.message << std::endl;
             }
         }
     }

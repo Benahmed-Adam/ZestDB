@@ -12,4 +12,6 @@ struct Settings {
     unsigned int CacheSize;
     std::regex KeyValidation;
     std::regex ValueValidation;
+
+    bool isDebug;
 };

@@ -4,6 +4,13 @@
 
 #include "Logger.hpp"
 
+static bool isDebug = false;
+
+void setLoggerDebugMode(bool enabled)
+{
+    isDebug = enabled;
+}
+
 std::string levelToString(LogLevel level)
 {
     switch (level) {
@@ -40,6 +47,9 @@ std::string levelToColorCode(LogLevel level)
 
 void ZestLog(LogLevel level, const std::string& message)
 {
+    if (!isDebug && level == LogLevel::DEBUG)
+        return;
+
     time_t now = time(0);
     tm* timeinfo = localtime(&now);
     char timestamp[20];
