@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 
 #include "Settings.hpp"
 
@@ -25,4 +26,5 @@ public:
 private:
     std::filesystem::path indexPath;
     std::fstream index;
+    std::mutex mtx;
 };

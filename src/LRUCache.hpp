@@ -4,6 +4,7 @@
 #include <list>
 #include <string>
 #include <unordered_map>
+#include <mutex>
 
 class LRUCache {
 public:
@@ -20,4 +21,5 @@ private:
 
     using MapIter = std::list<std::string>::iterator;
     std::unordered_map<std::string, std::pair<IndexEntry, MapIter>> map;
+    std::mutex mtx;
 };

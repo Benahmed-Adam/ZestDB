@@ -16,6 +16,8 @@ IndexEntry LRUCache::get(const std::string& key)
         return { "", -1, 0, 0, 0 };
     }
 
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     lru_list.erase(it->second.second);
     lru_list.push_front(key);
 
@@ -31,6 +33,8 @@ void LRUCache::put(const IndexEntry& entry)
     
     ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key);
     auto it = map.find(key);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
 
     if (it != map.end()) {
         lru_list.erase(it->second.second);
@@ -52,6 +56,9 @@ void LRUCache::remove(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::remove - removing key: " + key);
     auto it = map.find(key);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     if (it != map.end()) {
         lru_list.erase(it->second.second);
         map.erase(it);

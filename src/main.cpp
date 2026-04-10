@@ -37,12 +37,13 @@ void populate(ZestDB& db)
 int main(int argc, char** argv)
 {
     (void)argv;
-    
+
     ZestDB db;
 
     std::cout << std::endl;
 
-    if (argc > 1) populate(db);
+    if (argc > 1)
+        populate(db);
 
     std::string line;
     while (true) {
@@ -140,6 +141,19 @@ int main(int argc, char** argv)
                 value += " " + rest;
             }
             ResultType result = db.setBy(pattern, value);
+            if (result.code == ResultType::Code::SUCCESS) {
+                std::cout << "OK: " << result.message << std::endl;
+            } else {
+                std::cout << "ERROR: " << result.message << std::endl;
+            }
+        } else if (cmd == "db") {
+            std::string pattern;
+            if (!(iss >> pattern)) {
+                std::cerr << "Error: missing pattern" << std::endl;
+                std::cout << "Usage: db <pattern>" << std::endl;
+                continue;
+            }
+            ResultType result = db.delBy(pattern);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {

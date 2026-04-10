@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
@@ -41,9 +42,13 @@ public:
 
 private:
     void boot();
+    void fillCache();
 
     Settings settings;
     IndexManager* indexManager;
     StorageManager* storageManager;
     LRUCache* cache;
+
+    std::mutex setDelMtx;
+    std::mutex getMtx;
 };

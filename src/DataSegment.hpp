@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fstream>
+#include <mutex>
 
 #include "Settings.hpp"
 
@@ -18,4 +19,5 @@ private:
     bool full;
     Settings settings;
     std::fstream segment;
+    std::mutex mtx;
 };

@@ -16,6 +16,9 @@ IndexManager::~IndexManager()
 IndexEntry IndexManager::search(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
 
@@ -46,6 +49,9 @@ IndexEntry IndexManager::search(const std::string& key)
 void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
     ZestLog(LogLevel::DEBUG, "IndexManager::update - updating key: " + key);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
+    
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
 
@@ -71,6 +77,8 @@ void IndexManager::insert(const IndexEntry& entry)
 {
     std::string keyStr(entry.key);
     ZestLog(LogLevel::DEBUG, "IndexManager::insert - checking if key exists: " + keyStr);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
 
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
@@ -102,6 +110,8 @@ void IndexManager::insert(const IndexEntry& entry)
 std::vector<IndexEntry> IndexManager::getAll() {
     std::vector<IndexEntry> res;
 
+    std::lock_guard<std::mutex> lock(this->mtx);
+    
     index.seekg(0, std::ios::end);
     std::streamoff fsize = index.tellg();
 

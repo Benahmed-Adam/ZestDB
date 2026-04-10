@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -17,6 +18,12 @@ ZestDB::ZestDB()
     this->storageManager = new StorageManager(this->settings);
     this->cache = new LRUCache(this->settings.CacheSize);
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
+
+    std::thread t([this]() {
+        this->fillCache();
+    });
+
+    t.detach();
 }
 
 ZestDB::~ZestDB()
@@ -103,6 +110,19 @@ void ZestDB::boot()
     }
 }
 
+void ZestDB::fillCache()
+{
+    ZestLog(LogLevel::INFO, "Filling up the cache...");
+    std::vector<IndexEntry> entries = this->indexManager->getAll();
+    int numKeysInserted = 0;
+    for (unsigned int i = 0; i < this->settings.CacheSize && i < entries.size(); i++) {
+        ZestLog(LogLevel::DEBUG, "Inserting the key : " + std::string(entries[i].key) + " in the cache");
+        this->cache->put(entries[i]);
+        numKeysInserted++;
+    }
+    ZestLog(LogLevel::INFO, "Cache filled successfully with " + std::to_string(numKeysInserted) + " keys");
+}
+
 ResultType ZestDB::get(const std::string& key)
 {
     if (key.size() >= this->settings.MaxKeySize) {
@@ -116,6 +136,9 @@ ResultType ZestDB::get(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
+
+    std::lock_guard<std::mutex> lock(this->getMtx);
+
     IndexEntry entry = this->cache->get(key);
 
     if (entry.segmentId == -1) {
@@ -155,6 +178,9 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
+
+    std::lock_guard<std::mutex> lock(this->setDelMtx);
+
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
     memcpy(entry.key, key.c_str(), key.size());
@@ -177,6 +203,9 @@ ResultType ZestDB::del(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
+
+    std::lock_guard<std::mutex> lock(this->setDelMtx);
+
     IndexEntry entry = this->cache->get(key);
 
     if (entry.segmentId == -1) {
@@ -221,7 +250,7 @@ ResultType ZestDB::getBy(const std::string& patern)
         std::string key(entry.key);
         if (std::regex_match(key, reg)) {
             ZestLog(LogLevel::DEBUG, "ZestDB::getBy - match found: " + key);
-            std::string value = this->storageManager->read(entry);
+            std::string value = this->get(key).message;
             oss << key << ":" << value << ";";
             matchCount++;
         }

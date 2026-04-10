@@ -24,6 +24,8 @@ DataSegment::~DataSegment()
 
 unsigned long DataSegment::write(const std::string& value)
 {
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     this->segment.seekp(0, std::ios::end);
     unsigned long position = static_cast<unsigned long>(this->segment.tellp());
 
@@ -45,6 +47,8 @@ std::string DataSegment::read(unsigned long offset, unsigned int size)
     ZestLog(LogLevel::DEBUG, "DataSegment::read - reading " + std::to_string(size) + " bytes from offset: " + std::to_string(offset));
     std::string res;
     res.resize(size);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
 
     this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
     this->segment.read(&res[0], size);
