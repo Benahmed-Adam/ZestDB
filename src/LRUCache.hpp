@@ -2,16 +2,21 @@
 
 #include "IndexManager.hpp"
 #include <list>
+#include <mutex>
 #include <string>
 #include <unordered_map>
-#include <mutex>
+
+struct CacheEntry {
+    IndexEntry index;
+    std::string value;
+};
 
 class LRUCache {
 public:
     LRUCache(unsigned int cap);
 
-    IndexEntry get(const std::string& key);
-    void put(const IndexEntry& entry);
+    CacheEntry get(const std::string& key);
+    void put(const IndexEntry& entry, const std::string& value);
     void remove(const std::string& key);
 
 private:
@@ -20,6 +25,6 @@ private:
     std::list<std::string> lru_list;
 
     using MapIter = std::list<std::string>::iterator;
-    std::unordered_map<std::string, std::pair<IndexEntry, MapIter>> map;
+    std::unordered_map<std::string, std::pair<CacheEntry, MapIter>> map;
     std::mutex mtx;
 };

@@ -7,13 +7,13 @@ LRUCache::LRUCache(unsigned int cap)
     ZestLog(LogLevel::DEBUG, "LRUCache::LRUCache - created cache with capacity: " + std::to_string(cap));
 }
 
-IndexEntry LRUCache::get(const std::string& key)
+CacheEntry LRUCache::get(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::get - looking for key: " + key);
     auto it = map.find(key);
     if (it == map.end()) {
         ZestLog(LogLevel::DEBUG, "LRUCache::get - key not in cache");
-        return { "", -1, 0, 0, 0 };
+        return { { "", -1, 0, 0, 0 }, "" };
     }
 
     std::lock_guard<std::mutex> lock(this->mtx);
@@ -27,10 +27,10 @@ IndexEntry LRUCache::get(const std::string& key)
     return it->second.first;
 }
 
-void LRUCache::put(const IndexEntry& entry)
+void LRUCache::put(const IndexEntry& entry, const std::string& value)
 {
     std::string key(entry.key);
-    
+
     ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key);
     auto it = map.find(key);
 
@@ -48,7 +48,7 @@ void LRUCache::put(const IndexEntry& entry)
     }
 
     lru_list.push_front(key);
-    map[key] = { entry, lru_list.begin() };
+    map[key] = { { entry, value }, lru_list.begin() };
     ZestLog(LogLevel::DEBUG, "LRUCache::put - key inserted, cache size: " + std::to_string(map.size()));
 }
 
