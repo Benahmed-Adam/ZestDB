@@ -276,6 +276,35 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
 }
 
-// ResultType ZestDB::delBy(const std::string& patern)
-// {
-// }
+ResultType ZestDB::delBy(const std::string& patern)
+{
+    if (patern.empty()) {
+        ZestLog(LogLevel::ERROR, "ZestDB::delBy - pattern cannot be empty");
+        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+    }
+
+    std::regex reg;
+    try {
+        reg = std::regex(patern);
+    } catch (const std::regex_error& e) {
+        ZestLog(LogLevel::ERROR, "ZestDB::delBy - invalid regex pattern: " + std::string(e.what()));
+        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+    }
+
+    std::vector<IndexEntry> entries = this->indexManager->getAll();
+    std::ostringstream oss;
+    int matchCount = 0;
+
+    for (const IndexEntry& entry : entries) {
+        std::string key(entry.key);
+        if (std::regex_match(key, reg)) {
+            ZestLog(LogLevel::DEBUG, "ZestDB::delBy - match found: " + key);
+            this->del(key);
+            matchCount++;
+        }
+    }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::delBy - total matches: " + std::to_string(matchCount));
+
+    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(matchCount) + " entries" };
+}
