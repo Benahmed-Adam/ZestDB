@@ -6,6 +6,8 @@ CacheSize: 1000 # Max number of values in the cache
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
 
+NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
+
 isDebug: false # Degug mode for the logger
 
 users:

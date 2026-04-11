@@ -57,9 +57,9 @@ ZestDB::ZestDB()
     future.wait();
 
     this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!this->handleRequest(req)) {
+        if (!this->handleRequest(req) || !std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
             res.status = 401;
-            res.set_content("Unauthorized: missing or invalid Authorization header", "text/plain");
+            res.set_content("Unauthorized", "text/plain");
             return;
         }
 
@@ -181,6 +181,7 @@ void ZestDB::boot()
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
+        this->settings.NetworkValidationStr = node["ValueValidation"].get_value_or<std::string>("");
 
         if (!this->settings.KeyValidationStr.empty()) {
             try {
@@ -197,6 +198,15 @@ void ZestDB::boot()
             } catch (const std::regex_error& e) {
                 ZestLog(LogLevel::CRITICAL, "Invalid ValueValidation regex: " + std::string(e.what()));
                 throw std::runtime_error("Invalid ValueValidation regex");
+            }
+        }
+
+        if (!this->settings.NetworkValidationStr.empty()) {
+            try {
+                this->settings.NetworkValidation = std::regex(this->settings.NetworkValidationStr);
+            } catch (const std::regex_error& e) {
+                ZestLog(LogLevel::CRITICAL, "Invalid NetworkValidation regex: " + std::string(e.what()));
+                throw std::runtime_error("Invalid NetworkValidation regex");
             }
         }
 

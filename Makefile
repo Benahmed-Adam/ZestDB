@@ -26,7 +26,7 @@ clean:
 	rm -rf $(OBJDIR) $(BINDIR)
 
 format:
-	find src -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
+	find src -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i --verbose {} +
 
 run: $(OUTPUT)
 	./$(OUTPUT)
