@@ -1,4 +1,4 @@
-#include <cstring>
+#include <string>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -178,6 +178,7 @@ void ZestDB::boot()
         this->settings.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
+        this->settings.Port = node["Port"].get_value_or<int>(7321);
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
@@ -232,12 +233,18 @@ void ZestDB::boot()
         throw std::runtime_error("MaxValueSize >= SegSize");
     }
 
+    if (this->settings.Port < 0) {
+        ZestLog(LogLevel::CRITICAL, "Port cant be lower that zero");
+        throw std::runtime_error("Port < 0");
+    }
+
     ZestLog(LogLevel::DEBUG, "Database path : " + this->settings.DbPath.string());
     ZestLog(LogLevel::DEBUG, "SegSize : " + std::to_string(this->settings.SegSize));
     ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
     ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
+    ZestLog(LogLevel::DEBUG, "Port : " + std::to_string(this->settings.Port));
 
     if (!fs::exists(this->settings.DbPath / "INDEX")) {
         fs::path indexPath = this->settings.DbPath / "INDEX";

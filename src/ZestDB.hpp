@@ -45,8 +45,8 @@ public:
 
     std::string execCmd(const std::string& command);
 
+    Settings settings;
     httplib::Server srv;
-
 private:
     void boot();
     void fillCache();
@@ -54,7 +54,6 @@ private:
     bool validateValue(const std::string& value) const;
     bool handleRequest(const httplib::Request& req);
 
-    Settings settings;
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;

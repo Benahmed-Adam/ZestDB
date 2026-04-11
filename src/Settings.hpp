@@ -11,6 +11,8 @@ struct Settings {
     unsigned int MaxKeySize;
     unsigned int MaxValueSize;
     unsigned int CacheSize;
+    int Port;
+
     std::regex KeyValidation;
     std::regex ValueValidation;
     std::regex NetworkValidation;

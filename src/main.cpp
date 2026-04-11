@@ -76,7 +76,7 @@ int main(int argc, char** argv)
 
     std::thread t(cmd, &db);
 
-    db.srv.listen("0.0.0.0", 8080);
+    db.srv.listen("0.0.0.0", db.settings.Port);
 
     t.join();
 

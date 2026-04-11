@@ -32,7 +32,7 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
 {
     std::string key(entry.key);
 
-    ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key);
+    ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key + " with value: " + value);
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
