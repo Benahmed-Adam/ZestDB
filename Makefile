@@ -1,5 +1,6 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR)
+LDFLAGS = -lcrypto
 
 SRCDIR = src
 OBJDIR = obj

@@ -3,11 +3,13 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
+#include "httplib.hpp"
 
 struct ResultType {
     enum class Code {
@@ -41,12 +43,14 @@ public:
     ResultType setBy(const std::string& patern, const std::string& value);
     ResultType delBy(const std::string& patern);
 
+    httplib::Server srv;
 private:
     void boot();
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
-
+    bool handleRequest(const httplib::Request& req, httplib::Response& res);
+    
     Settings settings;
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
@@ -54,4 +58,6 @@ private:
 
     std::mutex mtx;
     std::atomic<bool> initialized;
+
+    std::unordered_map<std::string, std::string> users;
 };

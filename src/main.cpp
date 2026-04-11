@@ -1,9 +1,10 @@
-#include "Logger.hpp"
-#include "ZestDB.hpp"
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+
+#include "Logger.hpp"
+#include "ZestDB.hpp"
 
 void populate(ZestDB* db)
 {
@@ -35,19 +36,8 @@ void populate(ZestDB* db)
     db->set("unicode", "émojis: 🎉 € 中文");
 }
 
-int main(int argc, char** argv)
+void cmd(ZestDB* db)
 {
-    (void)argv;
-
-    ZestDB db;
-
-    std::cout << std::endl;
-
-    if (argc > 1){
-        std::thread t(populate, &db);
-        t.detach();
-    }
-
     std::string line;
     while (true) {
         std::cout << "zestdb> ";
@@ -65,6 +55,7 @@ int main(int argc, char** argv)
 
         if (cmd == "q" || cmd == "quit") {
             std::cout << "Goodbye!" << std::endl;
+            db->srv.stop();
             break;
         } else if (cmd == "g") {
             std::string key;
@@ -73,7 +64,7 @@ int main(int argc, char** argv)
                 std::cout << "Usage: g <key>" << std::endl;
                 continue;
             }
-            ResultType result = db.get(key);
+            ResultType result = db->get(key);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << result.message << std::endl;
             } else {
@@ -95,7 +86,7 @@ int main(int argc, char** argv)
             while (iss >> rest) {
                 value += " " + rest;
             }
-            ResultType result = db.set(key, value);
+            ResultType result = db->set(key, value);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {
@@ -108,7 +99,7 @@ int main(int argc, char** argv)
                 std::cout << "Usage: d <key>" << std::endl;
                 continue;
             }
-            ResultType result = db.del(key);
+            ResultType result = db->del(key);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {
@@ -121,7 +112,7 @@ int main(int argc, char** argv)
                 std::cout << "Usage: gb <pattern>" << std::endl;
                 continue;
             }
-            ResultType result = db.getBy(pattern);
+            ResultType result = db->getBy(pattern);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << result.message << std::endl;
             } else {
@@ -143,7 +134,7 @@ int main(int argc, char** argv)
             while (iss >> rest) {
                 value += " " + rest;
             }
-            ResultType result = db.setBy(pattern, value);
+            ResultType result = db->setBy(pattern, value);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {
@@ -156,7 +147,7 @@ int main(int argc, char** argv)
                 std::cout << "Usage: db <pattern>" << std::endl;
                 continue;
             }
-            ResultType result = db.delBy(pattern);
+            ResultType result = db->delBy(pattern);
             if (result.code == ResultType::Code::SUCCESS) {
                 std::cout << "OK: " << result.message << std::endl;
             } else {
@@ -164,6 +155,22 @@ int main(int argc, char** argv)
             }
         }
     }
+}
+
+int main(int argc, char** argv)
+{
+    ZestDB db;
+
+    if (argc > 1 && std::string(argv[1]) == "pop"){
+        std::thread t(populate, &db);
+        t.detach();
+    }
+
+    std::thread t(cmd, &db);
+
+    db.srv.listen("0.0.0.0", 8080);
+
+    t.join();
 
     return 0;
 }

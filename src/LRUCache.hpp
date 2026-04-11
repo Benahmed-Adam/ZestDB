@@ -1,10 +1,11 @@
 #pragma once
 
-#include "IndexManager.hpp"
 #include <list>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
+#include "IndexManager.hpp"
 
 struct CacheEntry {
     IndexEntry index;

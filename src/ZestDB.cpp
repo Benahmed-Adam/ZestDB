@@ -3,6 +3,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <openssl/evp.h>
 #include <thread>
 
 #include "Logger.hpp"
@@ -10,6 +11,26 @@
 #include "node.hpp"
 
 namespace fs = std::filesystem;
+
+std::string sha256(const std::string& str)
+{
+    EVP_MD_CTX* context = EVP_MD_CTX_new();
+    const EVP_MD* md = EVP_sha256();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int lengthOfHash = 0;
+
+    EVP_DigestInit_ex(context, md, nullptr);
+    EVP_DigestUpdate(context, str.c_str(), str.size());
+    EVP_DigestFinal_ex(context, hash, &lengthOfHash);
+
+    EVP_MD_CTX_free(context);
+
+    std::stringstream ss;
+    for (unsigned int i = 0; i < lengthOfHash; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
 
 ZestDB::ZestDB()
     : initialized(false)
@@ -34,6 +55,14 @@ ZestDB::ZestDB()
 
     t.detach();
     future.wait();
+
+    this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
+        if (this->handleRequest(req, res)) {
+            res.set_content("yaaaaaaaa", "text/plain");
+        } else {
+            res.set_content("nooooooooo", "text/plain");
+        }
+    });
 }
 
 ZestDB::~ZestDB()
@@ -79,6 +108,38 @@ bool ZestDB::validateValue(const std::string& value) const
             return false;
         }
     }
+    return true;
+}
+
+bool ZestDB::handleRequest(const httplib::Request& req, httplib::Response& res)
+{
+    (void)res;
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - start");
+    const std::string authorization = req.get_header_value("Authorization");
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization header: " + authorization);
+
+    if (authorization == "") {
+        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization empty");
+        return false;
+    }
+
+    unsigned int point = authorization.find(".");
+    std::string username = authorization.substr(0, point);
+    std::string token = authorization.substr(point + 1, authorization.size());
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - username: " + username + ", token: " + token);
+
+    if (this->users.find(username) == this->users.end()) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - user not found: " + username);
+        return false;
+    }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - stored token: " + this->users[username]);
+    if (this->users[username] != token) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - token mismatch");
+        return false;
+    }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - success");
     return true;
 }
 
@@ -132,6 +193,16 @@ void ZestDB::boot()
 
         this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
         setLoggerDebugMode(this->settings.isDebug);
+
+        if (node.contains("users") && node["users"].is_sequence()) {
+            for (auto& user_node : node["users"]) {
+                std::string username = user_node["user"].get_value<std::string>();
+                std::string password = user_node["password"].get_value<std::string>();
+
+                this->users[username] = sha256(username + password);
+                ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
+            }
+        }
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         throw std::runtime_error("Failed to parse config: " + std::string(e.what()));
