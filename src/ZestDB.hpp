@@ -51,7 +51,7 @@ private:
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
-    bool handleRequest(const httplib::Request& req, httplib::Response& res);
+    bool handleRequest(const httplib::Request& req);
     
     Settings settings;
     std::unique_ptr<IndexManager> indexManager;
@@ -63,3 +63,5 @@ private:
 
     std::unordered_map<std::string, std::string> users;
 };
+
+std::string sha256(const std::string& str);

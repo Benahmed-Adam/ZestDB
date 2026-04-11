@@ -57,11 +57,21 @@ ZestDB::ZestDB()
     future.wait();
 
     this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
-        if (this->handleRequest(req, res)) {
-            res.set_content("yaaaaaaaa", "text/plain");
-        } else {
-            res.set_content("nooooooooo", "text/plain");
+        if (!this->handleRequest(req)) {
+            res.status = 401;
+            res.set_content("Unauthorized: missing or invalid Authorization header", "text/plain");
+            return;
         }
+
+        std::string cmd = req.get_param_value("cmd");
+        if (cmd == "") {
+            res.status = 400;
+            res.set_content("Bad Request: missing 'cmd' parameter. Usage: /?cmd=<command>", "text/plain");
+            return;
+        }
+
+        std::string result = this->execCmd(cmd);
+        res.set_content(result, "text/plain");
     });
 }
 
@@ -111,9 +121,8 @@ bool ZestDB::validateValue(const std::string& value) const
     return true;
 }
 
-bool ZestDB::handleRequest(const httplib::Request& req, httplib::Response& res)
+bool ZestDB::handleRequest(const httplib::Request& req)
 {
-    (void)res;
     ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - start");
     const std::string authorization = req.get_header_value("Authorization");
     ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization header: " + authorization);
@@ -200,7 +209,7 @@ void ZestDB::boot()
                 std::string password = user_node["password"].get_value<std::string>();
 
                 this->users[username] = sha256(username + password);
-                //ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
+                // ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
             }
         }
     } catch (const std::exception& e) {
@@ -490,7 +499,8 @@ ResultType ZestDB::delBy(const std::string& patern)
     return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(matchCount) + " entries" };
 }
 
-std::string ZestDB::execCmd(const std::string& command) {
+std::string ZestDB::execCmd(const std::string& command)
+{
     std::istringstream iss(command);
     std::string cmd;
     iss >> cmd;
@@ -586,7 +596,7 @@ std::string ZestDB::execCmd(const std::string& command) {
             oss << "ERROR: " << result.message << std::endl;
         }
     } else {
-        oss << "Command not found" << std::endl;
+        oss << "ERROR: Command not found" << std::endl;
         oss << "Type h for help" << std::endl;
     }
 
