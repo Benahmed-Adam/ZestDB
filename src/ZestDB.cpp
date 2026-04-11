@@ -200,7 +200,7 @@ void ZestDB::boot()
                 std::string password = user_node["password"].get_value<std::string>();
 
                 this->users[username] = sha256(username + password);
-                ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
+                //ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
             }
         }
     } catch (const std::exception& e) {
@@ -488,4 +488,107 @@ ResultType ZestDB::delBy(const std::string& patern)
     ZestLog(LogLevel::DEBUG, "ZestDB::delBy - total matches: " + std::to_string(matchCount));
 
     return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(matchCount) + " entries" };
+}
+
+std::string ZestDB::execCmd(const std::string& command) {
+    std::istringstream iss(command);
+    std::string cmd;
+    iss >> cmd;
+
+    std::ostringstream oss;
+
+    if (cmd == "g" || cmd == "get") {
+        std::string key;
+        if (!(iss >> key)) {
+            oss << "Error: missing key" << std::endl;
+            oss << "Usage: get <key>" << std::endl;
+        }
+        ResultType result = this->get(key);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << result.message << std::endl;
+        } else {
+            oss << "(not found): " << result.message << std::endl;
+        }
+    } else if (cmd == "s" || cmd == "set") {
+        std::string key, value;
+        if (!(iss >> key)) {
+            oss << "Error: missing key" << std::endl;
+            oss << "Usage: set <key> <value>" << std::endl;
+        }
+        if (!(iss >> value)) {
+            oss << "Error: missing value" << std::endl;
+            oss << "Usage: set <key> <value>" << std::endl;
+        }
+        std::string rest;
+        while (iss >> rest) {
+            value += " " + rest;
+        }
+        ResultType result = this->set(key, value);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << "OK: " << result.message << std::endl;
+        } else {
+            oss << "ERROR: " << result.message << std::endl;
+        }
+    } else if (cmd == "d" || cmd == "del") {
+        std::string key;
+        if (!(iss >> key)) {
+            oss << "Error: missing key" << std::endl;
+            oss << "Usage: del <key>" << std::endl;
+        }
+        ResultType result = this->del(key);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << "OK: " << result.message << std::endl;
+        } else {
+            oss << "ERROR: " << result.message << std::endl;
+        }
+    } else if (cmd == "gb" || cmd == "getby") {
+        std::string pattern;
+        if (!(iss >> pattern)) {
+            oss << "Error: missing pattern" << std::endl;
+            oss << "Usage: getby <pattern>" << std::endl;
+        }
+        ResultType result = this->getBy(pattern);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << result.message << std::endl;
+        } else {
+            oss << "(not found): " << result.message << std::endl;
+        }
+    } else if (cmd == "sb" || cmd == "setby") {
+        std::string pattern, value;
+        if (!(iss >> pattern)) {
+            oss << "Error: missing pattern" << std::endl;
+            oss << "Usage: setby <pattern> <value>" << std::endl;
+        }
+        if (!(iss >> value)) {
+            oss << "Error: missing value" << std::endl;
+            oss << "Usage: setby <pattern> <value>" << std::endl;
+        }
+        std::string rest;
+        while (iss >> rest) {
+            value += " " + rest;
+        }
+        ResultType result = this->setBy(pattern, value);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << "OK: " << result.message << std::endl;
+        } else {
+            oss << "ERROR: " << result.message << std::endl;
+        }
+    } else if (cmd == "db" || cmd == "delby") {
+        std::string pattern;
+        if (!(iss >> pattern)) {
+            oss << "Error: missing pattern" << std::endl;
+            oss << "Usage: delby <pattern>" << std::endl;
+        }
+        ResultType result = this->delBy(pattern);
+        if (result.code == ResultType::Code::SUCCESS) {
+            oss << "OK: " << result.message << std::endl;
+        } else {
+            oss << "ERROR: " << result.message << std::endl;
+        }
+    } else {
+        oss << "Command not found" << std::endl;
+        oss << "Type h for help" << std::endl;
+    }
+
+    return oss.str();
 }

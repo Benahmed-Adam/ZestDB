@@ -43,6 +43,8 @@ public:
     ResultType setBy(const std::string& patern, const std::string& value);
     ResultType delBy(const std::string& patern);
 
+    std::string execCmd(const std::string& command);
+
     httplib::Server srv;
 private:
     void boot();

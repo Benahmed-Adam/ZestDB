@@ -57,102 +57,10 @@ void cmd(ZestDB* db)
             std::cout << "Goodbye!" << std::endl;
             db->srv.stop();
             break;
-        } else if (cmd == "g") {
-            std::string key;
-            if (!(iss >> key)) {
-                std::cerr << "Error: missing key" << std::endl;
-                std::cout << "Usage: g <key>" << std::endl;
-                continue;
-            }
-            ResultType result = db->get(key);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << result.message << std::endl;
-            } else {
-                std::cout << "(not found): " << result.message << std::endl;
-            }
-        } else if (cmd == "s") {
-            std::string key, value;
-            if (!(iss >> key)) {
-                std::cerr << "Error: missing key" << std::endl;
-                std::cout << "Usage: s <key> <value>" << std::endl;
-                continue;
-            }
-            if (!(iss >> value)) {
-                std::cerr << "Error: missing value" << std::endl;
-                std::cout << "Usage: s <key> <value>" << std::endl;
-                continue;
-            }
-            std::string rest;
-            while (iss >> rest) {
-                value += " " + rest;
-            }
-            ResultType result = db->set(key, value);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << "OK: " << result.message << std::endl;
-            } else {
-                std::cout << "ERROR: " << result.message << std::endl;
-            }
-        } else if (cmd == "d") {
-            std::string key;
-            if (!(iss >> key)) {
-                std::cerr << "Error: missing key" << std::endl;
-                std::cout << "Usage: d <key>" << std::endl;
-                continue;
-            }
-            ResultType result = db->del(key);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << "OK: " << result.message << std::endl;
-            } else {
-                std::cout << "ERROR: " << result.message << std::endl;
-            }
-        } else if (cmd == "gb") {
-            std::string pattern;
-            if (!(iss >> pattern)) {
-                std::cerr << "Error: missing pattern" << std::endl;
-                std::cout << "Usage: gb <pattern>" << std::endl;
-                continue;
-            }
-            ResultType result = db->getBy(pattern);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << result.message << std::endl;
-            } else {
-                std::cout << "(not found): " << result.message << std::endl;
-            }
-        } else if (cmd == "sb") {
-            std::string pattern, value;
-            if (!(iss >> pattern)) {
-                std::cerr << "Error: missing pattern" << std::endl;
-                std::cout << "Usage: sb <pattern> <value>" << std::endl;
-                continue;
-            }
-            if (!(iss >> value)) {
-                std::cerr << "Error: missing value" << std::endl;
-                std::cout << "Usage: sb <pattern> <value>" << std::endl;
-                continue;
-            }
-            std::string rest;
-            while (iss >> rest) {
-                value += " " + rest;
-            }
-            ResultType result = db->setBy(pattern, value);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << "OK: " << result.message << std::endl;
-            } else {
-                std::cout << "ERROR: " << result.message << std::endl;
-            }
-        } else if (cmd == "db") {
-            std::string pattern;
-            if (!(iss >> pattern)) {
-                std::cerr << "Error: missing pattern" << std::endl;
-                std::cout << "Usage: db <pattern>" << std::endl;
-                continue;
-            }
-            ResultType result = db->delBy(pattern);
-            if (result.code == ResultType::Code::SUCCESS) {
-                std::cout << "OK: " << result.message << std::endl;
-            } else {
-                std::cout << "ERROR: " << result.message << std::endl;
-            }
+        } else if (cmd == "h" || cmd == "help") {
+            std::cout << "HELP !!" << std::endl;
+        } else {
+            std::cout << db->execCmd(line);
         }
     }
 }
