@@ -46,13 +46,14 @@ public:
     std::string execCmd(const std::string& command);
 
     httplib::Server srv;
+
 private:
     void boot();
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
     bool handleRequest(const httplib::Request& req);
-    
+
     Settings settings;
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;

@@ -69,7 +69,7 @@ int main(int argc, char** argv)
 {
     ZestDB db;
 
-    if (argc > 1 && std::string(argv[1]) == "pop"){
+    if (argc > 1 && std::string(argv[1]) == "pop") {
         std::thread t(populate, &db);
         t.detach();
     }

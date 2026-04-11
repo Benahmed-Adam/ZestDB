@@ -1,8 +1,8 @@
 #include <iostream>
 #include <mutex>
 
-#include "StorageManager.hpp"
 #include "Logger.hpp"
+#include "StorageManager.hpp"
 
 StorageManager::StorageManager(const Settings& s)
 {
