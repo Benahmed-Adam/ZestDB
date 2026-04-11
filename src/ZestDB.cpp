@@ -182,7 +182,7 @@ void ZestDB::boot()
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
-        this->settings.NetworkValidationStr = node["ValueValidation"].get_value_or<std::string>("");
+        this->settings.NetworkValidationStr = node["NetworkValidation"].get_value_or<std::string>("");
 
         if (!this->settings.KeyValidationStr.empty()) {
             try {
