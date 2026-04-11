@@ -10,13 +10,14 @@ LRUCache::LRUCache(unsigned int cap)
 CacheEntry LRUCache::get(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::get - looking for key: " + key);
+
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     auto it = map.find(key);
     if (it == map.end()) {
         ZestLog(LogLevel::DEBUG, "LRUCache::get - key not in cache");
-        return { { "", -1, 0, 0, 0 }, "" };
+        return { { "", -1, 0, 0, false }, "" };
     }
-
-    std::lock_guard<std::mutex> lock(this->mtx);
 
     lru_list.erase(it->second.second);
     lru_list.push_front(key);
@@ -32,9 +33,10 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
     std::string key(entry.key);
 
     ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key);
-    auto it = map.find(key);
 
     std::lock_guard<std::mutex> lock(this->mtx);
+
+    auto it = map.find(key);
 
     if (it != map.end()) {
         lru_list.erase(it->second.second);
@@ -55,9 +57,10 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
 void LRUCache::remove(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::remove - removing key: " + key);
-    auto it = map.find(key);
 
     std::lock_guard<std::mutex> lock(this->mtx);
+
+    auto it = map.find(key);
 
     if (it != map.end()) {
         lru_list.erase(it->second.second);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 
@@ -43,12 +44,14 @@ public:
 private:
     void boot();
     void fillCache();
+    bool validateKey(const std::string& key) const;
+    bool validateValue(const std::string& value) const;
 
     Settings settings;
-    IndexManager* indexManager;
-    StorageManager* storageManager;
-    LRUCache* cache;
+    std::unique_ptr<IndexManager> indexManager;
+    std::unique_ptr<StorageManager> storageManager;
+    std::unique_ptr<LRUCache> cache;
 
-    std::mutex setDelMtx;
-    std::mutex getMtx;
+    std::mutex mtx;
+    std::atomic<bool> initialized;
 };

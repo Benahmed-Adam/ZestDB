@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -18,4 +19,5 @@ private:
     void boot();
     std::vector<std::unique_ptr<DataSegment>> segments;
     Settings settings;
+    std::mutex mtx;
 };

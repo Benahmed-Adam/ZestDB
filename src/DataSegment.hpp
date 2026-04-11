@@ -15,6 +15,7 @@ public:
     int getSegmentId() const;
 
 private:
+    void checkFull();
     int segmentId;
     bool full;
     Settings settings;

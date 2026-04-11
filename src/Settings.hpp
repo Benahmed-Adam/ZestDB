@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <regex>
+#include <string>
 
 struct Settings {
     std::filesystem::path DbPath;
@@ -12,6 +13,8 @@ struct Settings {
     unsigned int CacheSize;
     std::regex KeyValidation;
     std::regex ValueValidation;
+    std::string KeyValidationStr;
+    std::string ValueValidationStr;
 
     bool isDebug;
 };
