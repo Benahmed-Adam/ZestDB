@@ -2,7 +2,7 @@
 #include "Logger.hpp"
 
 LRUCache::LRUCache(unsigned int cap)
-    : capacity(cap)
+    : this->capacity(cap)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::LRUCache - created cache with capacity: " + std::to_string(cap));
 }
@@ -13,16 +13,16 @@ CacheEntry LRUCache::get(const std::string& key)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    auto it = map.find(key);
-    if (it == map.end()) {
+    auto it = this->map.find(key);
+    if (it == this->map.end()) {
         ZestLog(LogLevel::DEBUG, "LRUCache::get - key not in cache");
         return { { "", -1, 0, 0, false }, "" };
     }
 
-    lru_list.erase(it->second.second);
-    lru_list.push_front(key);
+    this->lru_list.erase(it->second.second);
+    this->lru_list.push_front(key);
 
-    it->second.second = lru_list.begin();
+    it->second.second = this->lru_list.begin();
 
     ZestLog(LogLevel::DEBUG, "LRUCache::get - key found in cache");
     return it->second.first;
@@ -36,22 +36,22 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    auto it = map.find(key);
+    auto it = this->map.find(key);
 
-    if (it != map.end()) {
-        lru_list.erase(it->second.second);
+    if (it != this->map.end()) {
+        this->lru_list.erase(it->second.second);
     } else {
-        if (map.size() >= capacity) {
+        if (this->map.size() >= this->capacity) {
             ZestLog(LogLevel::DEBUG, "LRUCache::put - cache full, evicting LRU item");
-            std::string last = lru_list.back();
-            lru_list.pop_back();
-            map.erase(last);
+            std::string last = this->lru_list.back();
+            this->lru_list.pop_back();
+            this->map.erase(last);
         }
     }
 
-    lru_list.push_front(key);
-    map[key] = { { entry, value }, lru_list.begin() };
-    ZestLog(LogLevel::DEBUG, "LRUCache::put - key inserted, cache size: " + std::to_string(map.size()));
+    this->lru_list.push_front(key);
+    this->map[key] = { { entry, value }, this->lru_list.begin() };
+    ZestLog(LogLevel::DEBUG, "LRUCache::put - key inserted, cache size: " + std::to_string(this->map.size()));
 }
 
 void LRUCache::remove(const std::string& key)
@@ -60,11 +60,11 @@ void LRUCache::remove(const std::string& key)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    auto it = map.find(key);
+    auto it = this->map.find(key);
 
-    if (it != map.end()) {
-        lru_list.erase(it->second.second);
-        map.erase(it);
+    if (it != this->map.end()) {
+        this->lru_list.erase(it->second.second);
+        this->map.erase(it);
         ZestLog(LogLevel::DEBUG, "LRUCache::remove - key removed");
     }
 }

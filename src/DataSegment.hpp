@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <fstream>
 #include <mutex>
 
@@ -13,11 +14,13 @@ public:
     std::string read(unsigned long offset, unsigned int size);
     bool isFull() const;
     int getSegmentId() const;
+    unsigned long getWritePosition() const;
+    void refreshFullStatus();
 
 private:
-    void checkFull();
+    void openSegment();
     int segmentId;
-    bool full;
+    std::atomic<unsigned long> currentOffset;
     Settings settings;
     std::fstream segment;
     std::mutex mtx;

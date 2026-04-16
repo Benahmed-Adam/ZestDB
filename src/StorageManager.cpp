@@ -8,6 +8,7 @@ StorageManager::StorageManager(const Settings& s)
 {
     ZestLog(LogLevel::DEBUG, "Initializing StorageManager...");
     this->settings = s;
+    this->latestSegmentId = 0;
     this->boot();
     ZestLog(LogLevel::DEBUG, "StorageManager initialized");
 }
@@ -27,49 +28,71 @@ void StorageManager::boot()
     if (nb == 0) {
         ZestLog(LogLevel::INFO, "StorageManager::boot - no segments found, creating segment 1");
         this->segments.push_back(std::make_unique<DataSegment>(this->settings, 1));
+        this->latestSegmentId = 1;
     } else {
         std::sort(this->segments.begin(), this->segments.end(),
             [](const std::unique_ptr<DataSegment>& a, const std::unique_ptr<DataSegment>& b) {
                 return a->getSegmentId() < b->getSegmentId();
             });
-        ZestLog(LogLevel::DEBUG, "StorageManager::boot - found " + std::to_string(nb) + " segments");
+        this->latestSegmentId = this->segments.back()->getSegmentId();
+        ZestLog(LogLevel::DEBUG, "StorageManager::boot - found " + std::to_string(nb) + " segments, latest: " + std::to_string(this->latestSegmentId.load()));
     }
+}
+
+IndexEntry StorageManager::appendToSegment(DataSegment* seg, const std::string& value)
+{
+    unsigned long pos = seg->write(value);
+
+    if (pos == this->settings.SegSize + 1) {
+        ZestLog(LogLevel::DEBUG, "StorageManager::appendToSegment - segment full");
+        return { "", -1, 0, 0, false };
+    }
+
+    ZestLog(LogLevel::DEBUG, "StorageManager::appendToSegment - written to segment: " + std::to_string(seg->getSegmentId()) + " at offset: " + std::to_string(pos));
+    return { "", seg->getSegmentId(), pos, (unsigned int)value.size(), false };
 }
 
 IndexEntry StorageManager::append(const std::string& value)
 {
     ZestLog(LogLevel::DEBUG, "StorageManager::append - writing value of size: " + std::to_string(value.size()));
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    while (true) {
+        int currentId = this->latestSegmentId.load();
 
-    DataSegment* currentSeg = this->segments.back().get();
-
-    unsigned long pos = currentSeg->write(value);
-
-    if (pos == this->settings.SegSize + 1) {
-        ZestLog(LogLevel::DEBUG, "StorageManager::append - segment full, creating new segment");
-        int nextId = currentSeg->getSegmentId() + 1;
-
-        this->segments.push_back(std::make_unique<DataSegment>(this->settings, nextId));
-
-        currentSeg = this->segments.back().get();
-        pos = currentSeg->write(value);
-
-        if (pos == this->settings.SegSize + 1) {
-            ZestLog(LogLevel::ERROR, "StorageManager::append - failed to write to new segment");
-            return { "", -1, 0, 0, false };
+        {
+            std::lock_guard<std::mutex> lock(this->segmentsMtx);
+            for (auto& segPtr : this->segments) {
+                if (segPtr->getSegmentId() == currentId && !segPtr->isFull()) {
+                    IndexEntry entry = this->appendToSegment(segPtr.get(), value);
+                    if (entry.segmentId != -1) {
+                        return entry;
+                    }
+                }
+            }
         }
-    }
 
-    ZestLog(LogLevel::DEBUG, "StorageManager::append - written to segment: " + std::to_string(currentSeg->getSegmentId()) + " at offset: " + std::to_string(pos));
-    return { "", currentSeg->getSegmentId(), pos, (unsigned int)value.size(), false };
+        int nextId = currentId + 1;
+        if (this->latestSegmentId.compare_exchange_weak(currentId, nextId)) {
+            std::lock_guard<std::mutex> lock(this->segmentsMtx);
+            ZestLog(LogLevel::DEBUG, "StorageManager::append - creating new segment: " + std::to_string(nextId));
+            this->segments.push_back(std::make_unique<DataSegment>(this->settings, nextId));
+
+            DataSegment* newSeg = this->segments.back().get();
+            IndexEntry entry = this->appendToSegment(newSeg, value);
+            if (entry.segmentId != -1) {
+                return entry;
+            }
+        }
+
+        currentId = this->latestSegmentId.load();
+    }
 }
 
 std::string StorageManager::read(const IndexEntry& entry)
 {
     ZestLog(LogLevel::DEBUG, "StorageManager::read - segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset) + ", size: " + std::to_string(entry.size));
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::lock_guard<std::mutex> lock(this->segmentsMtx);
 
     for (auto& segPtr : this->segments) {
         if (segPtr->getSegmentId() == entry.segmentId) {

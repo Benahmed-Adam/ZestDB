@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -17,7 +18,9 @@ public:
 
 private:
     void boot();
+    IndexEntry appendToSegment(DataSegment* seg, const std::string& value);
     std::vector<std::unique_ptr<DataSegment>> segments;
+    std::atomic<int> latestSegmentId;
     Settings settings;
-    std::mutex mtx;
+    std::mutex segmentsMtx;
 };

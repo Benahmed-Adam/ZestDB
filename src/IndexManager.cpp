@@ -26,8 +26,8 @@ IndexEntry IndexManager::search(const std::string& key)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    index.seekg(0, std::ios::end);
-    std::streamoff fsize = index.tellg();
+    this->index.seekg(0, std::ios::end);
+    std::streamoff fsize = this->index.tellg();
 
     std::streamoff position = 0;
     IndexEntry entry;
@@ -64,8 +64,8 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    index.seekg(0, std::ios::end);
-    std::streamoff fsize = index.tellg();
+    this->index.seekg(0, std::ios::end);
+    std::streamoff fsize = this->index.tellg();
 
     std::streamoff position = 0;
     IndexEntry e;
@@ -100,8 +100,8 @@ void IndexManager::insert(const IndexEntry& entry)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    index.seekg(0, std::ios::end);
-    std::streamoff fsize = index.tellg();
+    this->index.seekg(0, std::ios::end);
+    std::streamoff fsize = this->index.tellg();
 
     std::streamoff position = 0;
     IndexEntry e;
@@ -147,8 +147,8 @@ std::vector<IndexEntry> IndexManager::getAll()
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    index.seekg(0, std::ios::end);
-    std::streamoff fsize = index.tellg();
+    this->index.seekg(0, std::ios::end);
+    std::streamoff fsize = this->index.tellg();
 
     std::streamoff position = 0;
     IndexEntry e;

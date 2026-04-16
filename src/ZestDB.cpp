@@ -1,9 +1,9 @@
-#include <string>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <iostream>
 #include <openssl/evp.h>
+#include <string>
 #include <thread>
 
 #include "Logger.hpp"
@@ -33,7 +33,7 @@ std::string sha256(const std::string& str)
 }
 
 ZestDB::ZestDB()
-    : initialized(false)
+    : this->initialized(false)
 {
     ZestLog(LogLevel::DEBUG, "Initializing ZestDB...");
     this->boot();
@@ -42,7 +42,7 @@ ZestDB::ZestDB()
     this->storageManager = std::make_unique<StorageManager>(this->settings);
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
 
-    initialized.store(true);
+    this->initialized.store(true);
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 
     std::promise<void> promise;
@@ -274,7 +274,7 @@ void ZestDB::boot()
 
 void ZestDB::fillCache()
 {
-    if (!initialized.load()) {
+    if (!this->initialized.load()) {
         ZestLog(LogLevel::WARNING, "ZestDB::fillCache - not initialized yet, waiting...");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -300,7 +300,7 @@ void ZestDB::fillCache()
 
 ResultType ZestDB::get(const std::string& key)
 {
-    if (!validateKey(key)) {
+    if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
@@ -331,11 +331,11 @@ ResultType ZestDB::get(const std::string& key)
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
 {
-    if (!validateKey(key)) {
+    if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
-    if (!validateValue(value)) {
+    if (!this->validateValue(value)) {
         return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
     }
 
@@ -359,7 +359,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
 ResultType ZestDB::del(const std::string& key)
 {
-    if (!validateKey(key)) {
+    if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
@@ -436,7 +436,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, "Pattern cannot be empty" };
     }
 
-    if (!validateValue(value)) {
+    if (!this->validateValue(value)) {
         return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
     }
 
