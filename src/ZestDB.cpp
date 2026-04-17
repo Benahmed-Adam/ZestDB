@@ -33,7 +33,7 @@ std::string sha256(const std::string& str)
 }
 
 ZestDB::ZestDB()
-    : this->initialized(false)
+    : initialized(false)
 {
     ZestLog(LogLevel::DEBUG, "Initializing ZestDB...");
     this->boot();
@@ -280,6 +280,9 @@ void ZestDB::fillCache()
     }
 
     ZestLog(LogLevel::INFO, "Filling up the cache...");
+
+    std::lock_guard<std::mutex> lock(this->mtx);
+
     std::vector<IndexEntry> entries = this->indexManager->getAll();
     int numKeysInserted = 0;
 
@@ -306,22 +309,31 @@ ResultType ZestDB::get(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    {
+        std::lock_guard<std::mutex> lock(this->cacheMtx);
+        CacheEntry cacheEntry = this->cache->get(key);
 
-    CacheEntry cacheEntry = this->cache->get(key);
-
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::get - found in cache");
-        return { ResultType::Code::SUCCESS, cacheEntry.value };
+        if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
+            ZestLog(LogLevel::DEBUG, "ZestDB::get - found in cache");
+            return { ResultType::Code::SUCCESS, cacheEntry.value };
+        }
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
-    IndexEntry entry = this->indexManager->search(key);
+
+    IndexEntry entry;
+    {
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        entry = this->indexManager->search(key);
+    }
 
     if (entry.segmentId != -1 && !entry.isTombstone) {
         ZestLog(LogLevel::DEBUG, "ZestDB::get - found in segment: " + std::to_string(entry.segmentId));
         std::string value = this->storageManager->read(entry);
+
+        std::lock_guard<std::mutex> lock(this->cacheMtx);
         this->cache->put(entry, value);
+
         return { ResultType::Code::SUCCESS, value };
     }
 
@@ -341,8 +353,6 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
 
-    std::lock_guard<std::mutex> lock(this->mtx);
-
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
 
@@ -351,8 +361,16 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     memcpy(entry.key, key.c_str(), copySize);
     entry.key[copySize] = '\0';
 
-    this->indexManager->insert(entry);
-    this->cache->put(entry, value);
+    {
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        this->indexManager->insert(entry);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(this->cacheMtx);
+        this->cache->put(entry, value);
+    }
+
     ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
     return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
 }
@@ -365,19 +383,32 @@ ResultType ZestDB::del(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    IndexEntry entry;
 
-    CacheEntry cacheEntry = this->cache->get(key);
+    {
+        std::lock_guard<std::mutex> lock(this->cacheMtx);
+        CacheEntry cacheEntry = this->cache->get(key);
 
-    if (cacheEntry.index.segmentId == -1) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::del - key not in cache, searching index");
-        cacheEntry.index = this->indexManager->search(key);
+        if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
+            entry = cacheEntry.index;
+        }
     }
 
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        cacheEntry.index.isTombstone = true;
-        this->indexManager->update(key, cacheEntry.index);
+    if (entry.segmentId == -1) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::del - key not in cache, searching index");
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        entry = this->indexManager->search(key);
+    }
+
+    if (entry.segmentId != -1 && !entry.isTombstone) {
+        entry.isTombstone = true;
+
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        this->indexManager->update(key, entry);
+
+        std::lock_guard<std::mutex> lockCache(this->cacheMtx);
         this->cache->remove(key);
+
         ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
         return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_DEL) + key };
     } else {
@@ -403,9 +434,12 @@ ResultType ZestDB::getBy(const std::string& patern)
         return { ResultType::Code::ERROR, "Invalid regex pattern" };
     }
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::vector<IndexEntry> entries;
+    {
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        entries = this->indexManager->getAll();
+    }
 
-    std::vector<IndexEntry> entries = this->indexManager->getAll();
     std::ostringstream oss;
     int matchCount = 0;
 
@@ -448,9 +482,12 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, "Invalid regex pattern" };
     }
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::vector<IndexEntry> entries;
+    {
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        entries = this->indexManager->getAll();
+    }
 
-    std::vector<IndexEntry> entries = this->indexManager->getAll();
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
@@ -465,8 +502,17 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
             size_t copySize = (key.size() < sizeof(newEntry.key) - 1) ? key.size() : sizeof(newEntry.key) - 1;
             memcpy(newEntry.key, key.c_str(), copySize);
             newEntry.key[copySize] = '\0';
-            this->indexManager->insert(newEntry);
-            this->cache->put(newEntry, value);
+
+            {
+                std::lock_guard<std::mutex> lockIndex(this->indexMtx);
+                this->indexManager->insert(newEntry);
+            }
+
+            {
+                std::lock_guard<std::mutex> lockCache(this->cacheMtx);
+                this->cache->put(newEntry, value);
+            }
+
             matchCount++;
         }
     }
@@ -491,9 +537,12 @@ ResultType ZestDB::delBy(const std::string& patern)
         return { ResultType::Code::ERROR, "Invalid regex pattern" };
     }
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::vector<IndexEntry> entries;
+    {
+        std::lock_guard<std::mutex> lock(this->indexMtx);
+        entries = this->indexManager->getAll();
+    }
 
-    std::vector<IndexEntry> entries = this->indexManager->getAll();
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
@@ -505,8 +554,17 @@ ResultType ZestDB::delBy(const std::string& patern)
             ZestLog(LogLevel::DEBUG, "ZestDB::delBy - match found: " + key);
             IndexEntry tombstoneEntry = entry;
             tombstoneEntry.isTombstone = true;
-            this->indexManager->update(key, tombstoneEntry);
-            this->cache->remove(key);
+
+            {
+                std::lock_guard<std::mutex> lockIndex(this->indexMtx);
+                this->indexManager->update(key, tombstoneEntry);
+            }
+
+            {
+                std::lock_guard<std::mutex> lockCache(this->cacheMtx);
+                this->cache->remove(key);
+            }
+
             matchCount++;
         }
     }

@@ -2,7 +2,7 @@
 #include "Logger.hpp"
 
 LRUCache::LRUCache(unsigned int cap)
-    : this->capacity(cap)
+    : capacity(cap)
 {
     ZestLog(LogLevel::DEBUG, "LRUCache::LRUCache - created cache with capacity: " + std::to_string(cap));
 }

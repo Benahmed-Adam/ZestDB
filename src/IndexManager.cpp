@@ -69,7 +69,7 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
     std::streamoff position = 0;
     IndexEntry e;
-    bool updated = false;
+    std::streamoff lastValidPosition = -1;
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
@@ -78,17 +78,17 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
         std::string eKey(e.key);
         if (eKey == key && !e.isTombstone) {
-            this->index.seekp(position, std::ios::beg);
-            this->index.write((char*)&entry, sizeof(entry));
-            this->index.flush();
-            ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated: " + key);
-            updated = true;
-            break;
+            lastValidPosition = position;
         }
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
     }
 
-    if (!updated) {
+    if (lastValidPosition != -1) {
+        this->index.seekp(lastValidPosition, std::ios::beg);
+        this->index.write((char*)&entry, sizeof(entry));
+        this->index.flush();
+        ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated: " + key);
+    } else {
         ZestLog(LogLevel::WARNING, "IndexManager::update - key not found for update: " + key);
     }
 }

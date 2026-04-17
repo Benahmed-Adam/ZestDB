@@ -4,9 +4,9 @@
 #include "Logger.hpp"
 
 DataSegment::DataSegment(const Settings& set, int id)
-    : this->segmentId(id)
-, this->currentOffset(0)
-, this->settings(set)
+    : segmentId(id)
+    , currentOffset(0)
+    , settings(set)
 {
     ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
     this->openSegment();

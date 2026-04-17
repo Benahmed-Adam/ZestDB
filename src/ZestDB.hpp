@@ -47,6 +47,7 @@ public:
 
     Settings settings;
     httplib::Server srv;
+
 private:
     void boot();
     void fillCache();
@@ -59,6 +60,8 @@ private:
     std::unique_ptr<LRUCache> cache;
 
     std::mutex mtx;
+    std::mutex cacheMtx;
+    std::mutex indexMtx;
     std::atomic<bool> initialized;
 
     std::unordered_map<std::string, std::string> users;
