@@ -5,12 +5,15 @@ IndexManager::IndexManager(const Settings& settings)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = settings.IndexPath;
+    
     this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
     if (!this->index.is_open()) {
         this->index.open(this->indexPath, std::ios::out | std::ios::binary);
         this->index.close();
         this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
     }
+
+    this->loadIndexIntoMemory();
 }
 
 IndexManager::~IndexManager()
@@ -20,19 +23,14 @@ IndexManager::~IndexManager()
     }
 }
 
-IndexEntry IndexManager::search(const std::string& key)
+void IndexManager::loadIndexIntoMemory()
 {
-    ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
-
     std::lock_guard<std::mutex> lock(this->mtx);
-
     this->index.seekg(0, std::ios::end);
     std::streamoff fsize = this->index.tellg();
 
     std::streamoff position = 0;
     IndexEntry entry;
-    IndexEntry foundEntry = { "", -1, 0, 0, false };
-    bool found = false;
 
     while (position < fsize) {
         this->index.seekg(position, std::ios::beg);
@@ -40,18 +38,32 @@ IndexEntry IndexManager::search(const std::string& key)
             break;
 
         std::string entryKey(entry.key);
-        if (entryKey == key && !entry.isTombstone) {
-            if (!found) {
-                foundEntry = entry;
-                found = true;
-            }
+        if (entry.isTombstone) {
+            this->tombstoneOffsets.push_back(position);
+        } else {
+            this->memoryTree[entryKey] = position;
         }
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
     }
+    ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
+}
 
-    if (found) {
-        ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key + " in segment: " + std::to_string(foundEntry.segmentId));
-        return foundEntry;
+IndexEntry IndexManager::search(const std::string& key)
+{
+    ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
+    std::lock_guard<std::mutex> lock(this->mtx);
+
+    auto it = this->memoryTree.find(key);
+    if (it != this->memoryTree.end()) {
+        std::streamoff offset = it->second;
+        
+        this->index.seekg(offset, std::ios::beg);
+        IndexEntry entry;
+        
+        if (this->index.read((char*)&entry, sizeof(entry)) && !entry.isTombstone) {
+            ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key);
+            return entry;
+        }
     }
 
     ZestLog(LogLevel::DEBUG, "IndexManager::search - key not found: " + key);
@@ -61,33 +73,22 @@ IndexEntry IndexManager::search(const std::string& key)
 void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
     ZestLog(LogLevel::DEBUG, "IndexManager::update - updating key: " + key);
-
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    this->index.seekg(0, std::ios::end);
-    std::streamoff fsize = this->index.tellg();
+    auto it = this->memoryTree.find(key);
+    if (it != this->memoryTree.end()) {
+        std::streamoff offset = it->second;
 
-    std::streamoff position = 0;
-    IndexEntry e;
-    std::streamoff lastValidPosition = -1;
-
-    while (position < fsize) {
-        this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&e, sizeof(e)))
-            break;
-
-        std::string eKey(e.key);
-        if (eKey == key && !e.isTombstone) {
-            lastValidPosition = position;
-        }
-        position += static_cast<std::streamoff>(sizeof(IndexEntry));
-    }
-
-    if (lastValidPosition != -1) {
-        this->index.seekp(lastValidPosition, std::ios::beg);
-        this->index.write((char*)&entry, sizeof(entry));
+        this->index.seekp(offset, std::ios::beg);
+        this->index.write((const char*)&entry, sizeof(entry));
         this->index.flush();
-        ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated: " + key);
+
+        if (entry.isTombstone) {
+            this->memoryTree.erase(it);
+            this->tombstoneOffsets.push_back(offset);
+        }
+
+        ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated at offset: " + std::to_string(offset));
     } else {
         ZestLog(LogLevel::WARNING, "IndexManager::update - key not found for update: " + key);
     }
@@ -97,59 +98,44 @@ void IndexManager::insert(const IndexEntry& entry)
 {
     std::string keyStr(entry.key);
     ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting key: " + keyStr);
-
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    this->index.seekg(0, std::ios::end);
-    std::streamoff fsize = this->index.tellg();
-
-    std::streamoff position = 0;
-    IndexEntry e;
-    std::streamoff insertPosition = -1;
-
-    while (position < fsize) {
-        this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&e, sizeof(e)))
-            break;
-
-        std::string eKey(e.key);
-        if (eKey == keyStr && !e.isTombstone) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, updating: " + keyStr);
-            this->index.seekp(position, std::ios::beg);
-            this->index.write((char*)&entry, sizeof(entry));
-            this->index.flush();
-            return;
-        }
-
-        if (eKey == keyStr && e.isTombstone && insertPosition == -1) {
-            insertPosition = position;
-        }
-
-        position += static_cast<std::streamoff>(sizeof(IndexEntry));
+    auto it = this->memoryTree.find(keyStr);
+    if (it != this->memoryTree.end()) {
+        ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, updating in place");
+        std::streamoff offset = it->second;
+        this->index.seekp(offset, std::ios::beg);
+        this->index.write((const char*)&entry, sizeof(entry));
+        this->index.flush();
+        return;
     }
 
-    if (insertPosition != -1) {
-        this->index.seekp(insertPosition, std::ios::beg);
-        this->index.write((char*)&entry, sizeof(entry));
-        this->index.flush();
-        ZestLog(LogLevel::DEBUG, "IndexManager::insert - reusing tombstone slot for key: " + keyStr);
+    std::streamoff insertPosition;
+
+    if (!this->tombstoneOffsets.empty()) {
+        insertPosition = this->tombstoneOffsets.back();
+        this->tombstoneOffsets.pop_back();
+        ZestLog(LogLevel::DEBUG, "IndexManager::insert - reusing tombstone slot");
     } else {
         this->index.seekp(0, std::ios::end);
-        this->index.write((char*)&entry, sizeof(entry));
-        this->index.flush();
-        ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserted new key: " + keyStr);
+        insertPosition = this->index.tellp();
     }
+
+    this->index.seekp(insertPosition, std::ios::beg);
+    this->index.write((const char*)&entry, sizeof(entry));
+    this->index.flush();
+
+    this->memoryTree[keyStr] = insertPosition;
 }
 
 std::vector<IndexEntry> IndexManager::getAll()
 {
     std::vector<IndexEntry> res;
-
     std::lock_guard<std::mutex> lock(this->mtx);
 
     this->index.seekg(0, std::ios::end);
     std::streamoff fsize = this->index.tellg();
-
+    
     std::streamoff position = 0;
     IndexEntry e;
 
@@ -161,7 +147,6 @@ std::vector<IndexEntry> IndexManager::getAll()
         if (!e.isTombstone && e.segmentId != -1) {
             res.push_back(e);
         }
-
         position += static_cast<std::streamoff>(sizeof(IndexEntry));
     }
 

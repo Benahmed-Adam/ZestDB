@@ -1,7 +1,7 @@
 DbPath: /mnt/c/Users/Adam/Documents/C++_Projects/ZestDB/DB # Path to the folder containing db files
-SegSize: 1280 # Max data segment size
-MaxKeySize: 1000 # Max key length
-MaxValueSize: 1000 # Max value length
+SegSize: 128000 # Max data segment size
+MaxKeySize: 100000 # Max key length
+MaxValueSize: 100000 # Max value length
 CacheSize: 1000 # Max number of values in the cache
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
