@@ -3,6 +3,7 @@
 #include <future>
 #include <iostream>
 #include <openssl/evp.h>
+#include <sstream>
 #include <string>
 #include <thread>
 
@@ -57,7 +58,7 @@ ZestDB::ZestDB()
     t.detach();
     future.wait();
 
-    this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
+    this->srv.Get("/cmd", [this](const httplib::Request& req, httplib::Response& res) {
         if (!this->handleRequest(req) || !std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
             res.status = 401;
             res.set_content("Unauthorized", "text/plain");
@@ -73,6 +74,20 @@ ZestDB::ZestDB()
 
         std::string result = this->execCmd(cmd);
         res.set_content(result, "text/plain");
+    });
+
+    this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
+        (void)req;
+        fs::path indexPath = fs::current_path() / "public" / "index.html";
+        if (fs::exists(indexPath)) {
+            std::ifstream file(indexPath);
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            res.set_content(buffer.str(), "text/html");
+        } else {
+            res.status = 404;
+            res.set_content("Not Found", "text/plain");
+        }
     });
 
     std::thread compactorThread([this]() {
