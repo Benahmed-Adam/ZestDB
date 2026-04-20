@@ -11,6 +11,7 @@ struct Settings {
     unsigned int MaxKeySize;
     unsigned int MaxValueSize;
     unsigned int CacheSize;
+    unsigned int CompactingInterval;
     int Port;
 
     std::regex KeyValidation;
@@ -21,4 +22,5 @@ struct Settings {
     std::string NetworkValidationStr;
 
     bool isDebug;
+    bool isRunning = true;
 };

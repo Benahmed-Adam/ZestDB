@@ -10,6 +10,7 @@
 #include "Settings.hpp"
 #include "StorageManager.hpp"
 #include "httplib.hpp"
+#include "Compactor.hpp"
 
 struct ResultType {
     enum class Code {
@@ -58,11 +59,13 @@ private:
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
+    std::unique_ptr<Compactor> compactor;
 
     std::mutex mtx;
     std::mutex cacheMtx;
     std::mutex indexMtx;
     std::atomic<bool> initialized;
+    bool isCompacting;
 
     std::unordered_map<std::string, std::string> users;
 };

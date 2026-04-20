@@ -56,6 +56,7 @@ void cmd(ZestDB* db)
         if (cmd == "q" || cmd == "quit") {
             std::cout << "Goodbye!" << std::endl;
             db->srv.stop();
+            db->settings.isRunning = false;
             break;
         } else if (cmd == "h" || cmd == "help") {
             std::cout << "HELP !!" << std::endl;

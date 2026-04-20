@@ -26,6 +26,7 @@ public:
     void insert(const IndexEntry& entry);
     std::vector<IndexEntry> getAll();
 
+    bool isCompacting;
 private:
     std::filesystem::path indexPath;
     std::fstream index;

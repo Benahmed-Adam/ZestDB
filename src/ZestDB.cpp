@@ -41,6 +41,7 @@ ZestDB::ZestDB()
     this->indexManager = std::make_unique<IndexManager>(this->settings);
     this->storageManager = std::make_unique<StorageManager>(this->settings);
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
+    this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
 
     this->initialized.store(true);
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
@@ -73,6 +74,12 @@ ZestDB::ZestDB()
         std::string result = this->execCmd(cmd);
         res.set_content(result, "text/plain");
     });
+
+    std::thread compactorThread([this]() {
+        this->compactor->run(*this->indexManager, this->settings.isRunning);
+    });
+
+    compactorThread.detach();
 }
 
 ZestDB::~ZestDB()
@@ -178,6 +185,7 @@ void ZestDB::boot()
         this->settings.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
+        this->settings.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
         this->settings.Port = node["Port"].get_value_or<int>(7321);
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
@@ -243,6 +251,7 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
     ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
+    ZestLog(LogLevel::DEBUG, "CompactingInterval : " + std::to_string(this->settings.CompactingInterval));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
     ZestLog(LogLevel::DEBUG, "Port : " + std::to_string(this->settings.Port));
 
