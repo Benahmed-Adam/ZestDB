@@ -5,12 +5,12 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "Compactor.hpp"
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
 #include "httplib.hpp"
-#include "Compactor.hpp"
 
 struct ResultType {
     enum class Code {
@@ -29,6 +29,18 @@ struct Messages {
     static constexpr const char* VALUE_VALIDATION_FAILED = "The value does not respect the ValueValidation regex !";
     static constexpr const char* SUCCESS_SET = "Successfully set key: ";
     static constexpr const char* SUCCESS_DEL = "Successfully deleted key: ";
+    static constexpr const char* PATTERN_EMPTY = "Pattern cannot be empty";
+    static constexpr const char* INVALID_REGEX = "Invalid regex pattern";
+    static constexpr const char* MISSING_KEY = "Error: missing key";
+    static constexpr const char* MISSING_VALUE = "Error: missing value";
+    static constexpr const char* MISSING_PATTERN = "Error: missing pattern";
+    static constexpr const char* USAGE_GET = "Usage: get <key>";
+    static constexpr const char* USAGE_SET = "Usage: set <key> <value>";
+    static constexpr const char* USAGE_GETBY = "Usage: getby <pattern>";
+    static constexpr const char* USAGE_SETBY = "Usage: setby <pattern> <value>";
+    static constexpr const char* USAGE_DELBY = "Usage: delby <pattern>";
+    static constexpr const char* CMD_NOT_FOUND = "Command not found";
+    static constexpr const char* TYPE_HELP = "Type h for help";
 };
 
 class ZestDB {
@@ -60,9 +72,9 @@ private:
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
-    
+
     std::atomic<bool> initialized;
-    bool isCompacting;
+    std::mutex readMtx;
 
     std::unordered_map<std::string, std::string> users;
 };

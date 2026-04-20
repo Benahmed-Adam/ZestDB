@@ -1,11 +1,13 @@
 #include "IndexManager.hpp"
 #include "Logger.hpp"
+#include <chrono>
 
-IndexManager::IndexManager(const Settings& settings)
+IndexManager::IndexManager(const Settings& set)
+    : settings(set)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = settings.IndexPath;
-    
+
     this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
     if (!this->index.is_open()) {
         this->index.open(this->indexPath, std::ios::out | std::ios::binary);
@@ -14,10 +16,21 @@ IndexManager::IndexManager(const Settings& settings)
     }
 
     this->loadIndexIntoMemory();
+    this->flushThread = std::thread([this]() {
+        while (this->settings.isRunning) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::lock_guard<std::mutex> lock(this->mtx);
+            this->index.flush();
+        }
+    });
 }
 
 IndexManager::~IndexManager()
 {
+    this->settings.isRunning = false;
+    if (this->flushThread.joinable()) {
+        this->flushThread.join();
+    }
     if (this->index.is_open()) {
         this->index.close();
     }
@@ -56,10 +69,10 @@ IndexEntry IndexManager::search(const std::string& key)
     auto it = this->memoryTree.find(key);
     if (it != this->memoryTree.end()) {
         std::streamoff offset = it->second;
-        
+
         this->index.seekg(offset, std::ios::beg);
         IndexEntry entry;
-        
+
         if (this->index.read((char*)&entry, sizeof(entry)) && !entry.isTombstone) {
             ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key);
             return entry;
@@ -102,11 +115,24 @@ void IndexManager::insert(const IndexEntry& entry)
 
     auto it = this->memoryTree.find(keyStr);
     if (it != this->memoryTree.end()) {
-        ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, updating in place");
-        std::streamoff offset = it->second;
-        this->index.seekp(offset, std::ios::beg);
+        ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, marking old entry as tombstone");
+
+        std::streamoff oldOffset = it->second;
+        IndexEntry oldEntry;
+        this->index.seekg(oldOffset, std::ios::beg);
+        if (this->index.read((char*)&oldEntry, sizeof(oldEntry))) {
+            oldEntry.isTombstone = true;
+            this->index.seekp(oldOffset, std::ios::beg);
+            this->index.write((const char*)&oldEntry, sizeof(oldEntry));
+            this->tombstoneOffsets.push_back(oldOffset);
+        }
+
+        this->index.seekp(0, std::ios::end);
+        std::streamoff newOffset = this->index.tellp();
         this->index.write((const char*)&entry, sizeof(entry));
         this->index.flush();
+
+        this->memoryTree[keyStr] = newOffset;
         return;
     }
 
@@ -135,7 +161,7 @@ std::vector<IndexEntry> IndexManager::getAll()
 
     this->index.seekg(0, std::ios::end);
     std::streamoff fsize = this->index.tellg();
-    
+
     std::streamoff position = 0;
     IndexEntry e;
 
@@ -153,9 +179,11 @@ std::vector<IndexEntry> IndexManager::getAll()
     return res;
 }
 
-void IndexManager::compact() {
+std::vector<IndexEntry> IndexManager::compact()
+{
     std::vector<IndexEntry> entries = this->getAll();
-    
+    std::vector<IndexEntry> validEntries = entries;
+
     std::lock_guard<std::mutex> lock(this->mtx);
 
     this->index.close();
@@ -163,20 +191,23 @@ void IndexManager::compact() {
 
     if (!this->index.is_open()) {
         ZestLog(LogLevel::ERROR, "Compact failed: could not reopen index file.");
-        return;
+        return validEntries;
     }
 
     this->memoryTree.clear();
     this->tombstoneOffsets.clear();
+
+    std::vector<IndexEntry> result;
 
     for (const auto& entry : entries) {
         if (entry.isTombstone || entry.segmentId == -1) {
             continue;
         }
         std::streamoff newPos = this->index.tellp();
-        
+
         if (this->index.write((const char*)&entry, sizeof(IndexEntry))) {
             this->memoryTree[std::string(entry.key)] = newPos;
+            result.push_back(entry);
         } else {
             ZestLog(LogLevel::ERROR, "Compact - Failed to write entry for key: " + std::string(entry.key));
         }
@@ -184,4 +215,5 @@ void IndexManager::compact() {
 
     this->index.flush();
     ZestLog(LogLevel::INFO, "Index compaction completed successfully.");
+    return result;
 }

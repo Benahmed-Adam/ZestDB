@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -44,19 +45,25 @@ ZestDB::ZestDB()
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
 
-    this->initialized.store(true);
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 
-    std::promise<void> promise;
-    std::future<void> future = promise.get_future();
+    std::promise<void> cachePromise;
+    std::future<void> cacheFuture = cachePromise.get_future();
 
-    std::thread t([this, promise = std::move(promise)]() mutable {
+    std::thread cacheThread([this, promise = std::move(cachePromise)]() mutable {
         this->fillCache();
         promise.set_value();
     });
 
-    t.detach();
-    future.wait();
+
+    std::thread compactorThread([this]() mutable {
+        this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
+    });
+
+    this->initialized.store(true);
+    cacheFuture.wait();
+    cacheThread.detach();
+    compactorThread.detach();
 
     this->srv.Get("/cmd", [this](const httplib::Request& req, httplib::Response& res) {
         if (!this->handleRequest(req) || !std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
@@ -89,12 +96,6 @@ ZestDB::ZestDB()
             res.set_content("Not Found", "text/plain");
         }
     });
-
-    std::thread compactorThread([this]() {
-        this->compactor->run(*this->indexManager, this->settings.isRunning);
-    });
-
-    compactorThread.detach();
 }
 
 ZestDB::~ZestDB()
@@ -256,6 +257,11 @@ void ZestDB::boot()
         throw std::runtime_error("MaxValueSize >= SegSize");
     }
 
+    if (this->settings.MaxKeySize > IndexEntry::MAX_KEY_SIZE) {
+        ZestLog(LogLevel::WARNING, "MaxKeySize (" + std::to_string(this->settings.MaxKeySize) + ") exceeds internal limit (" + std::to_string(IndexEntry::MAX_KEY_SIZE) + "), clamping...");
+        this->settings.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
+    }
+
     if (this->settings.Port < 0) {
         ZestLog(LogLevel::CRITICAL, "Port cant be lower that zero");
         throw std::runtime_error("Port < 0");
@@ -308,6 +314,7 @@ void ZestDB::fillCache()
     std::vector<IndexEntry> entries = this->indexManager->getAll();
     int numKeysInserted = 0;
 
+    std::unordered_set<std::string> seenKeys;
     unsigned int entriesCount = static_cast<unsigned int>(entries.size());
     unsigned int cacheLimit = (this->settings.CacheSize < entriesCount) ? this->settings.CacheSize : entriesCount;
 
@@ -315,7 +322,13 @@ void ZestDB::fillCache()
         if (entries[i].segmentId == -1 || entries[i].isTombstone) {
             continue;
         }
-        ZestLog(LogLevel::DEBUG, "Inserting the key : " + std::string(entries[i].key) + " in the cache");
+        std::string key(entries[i].key);
+        if (seenKeys.find(key) != seenKeys.end()) {
+            continue;
+        }
+        seenKeys.insert(key);
+
+        ZestLog(LogLevel::DEBUG, "Inserting the key : " + key + " in the cache");
         std::string value = this->storageManager->read(entries[i]);
         this->cache->put(entries[i], value);
         numKeysInserted++;
@@ -340,6 +353,7 @@ ResultType ZestDB::get(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
 
+    std::lock_guard<std::mutex> lock(this->readMtx);
     IndexEntry entry;
     entry = this->indexManager->search(key);
 
@@ -368,6 +382,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
 
+    std::lock_guard<std::mutex> lock(this->readMtx);
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
 
@@ -392,6 +407,7 @@ ResultType ZestDB::del(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
 
+    std::lock_guard<std::mutex> lock(this->readMtx);
     IndexEntry entry;
 
     CacheEntry cacheEntry = this->cache->get(key);
@@ -426,7 +442,7 @@ ResultType ZestDB::getBy(const std::string& patern)
 
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::getBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
     }
 
     std::regex reg;
@@ -434,7 +450,7 @@ ResultType ZestDB::getBy(const std::string& patern)
         reg = std::regex(patern);
     } catch (const std::regex_error& e) {
         ZestLog(LogLevel::ERROR, "ZestDB::getBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
     std::vector<IndexEntry> entries;
@@ -467,7 +483,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
 
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::setBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
     }
 
     if (!this->validateValue(value)) {
@@ -479,7 +495,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         reg = std::regex(patern);
     } catch (const std::regex_error& e) {
         ZestLog(LogLevel::ERROR, "ZestDB::setBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
     std::vector<IndexEntry> entries;
@@ -517,7 +533,7 @@ ResultType ZestDB::delBy(const std::string& patern)
 {
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::delBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, "Pattern cannot be empty" };
+        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
     }
 
     std::regex reg;
@@ -525,7 +541,7 @@ ResultType ZestDB::delBy(const std::string& patern)
         reg = std::regex(patern);
     } catch (const std::regex_error& e) {
         ZestLog(LogLevel::ERROR, "ZestDB::delBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, "Invalid regex pattern" };
+        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
     std::vector<IndexEntry> entries;
@@ -566,8 +582,8 @@ std::string ZestDB::execCmd(const std::string& command)
     if (cmd == "g" || cmd == "get") {
         std::string key;
         if (!(iss >> key)) {
-            oss << "Error: missing key" << std::endl;
-            oss << "Usage: get <key>" << std::endl;
+            oss << Messages::MISSING_KEY << std::endl;
+            oss << Messages::USAGE_GET << std::endl;
         }
         ResultType result = this->get(key);
         if (result.code == ResultType::Code::SUCCESS) {
@@ -578,12 +594,12 @@ std::string ZestDB::execCmd(const std::string& command)
     } else if (cmd == "s" || cmd == "set") {
         std::string key, value;
         if (!(iss >> key)) {
-            oss << "Error: missing key" << std::endl;
-            oss << "Usage: set <key> <value>" << std::endl;
+            oss << Messages::MISSING_KEY << std::endl;
+            oss << Messages::USAGE_SET << std::endl;
         }
         if (!(iss >> value)) {
-            oss << "Error: missing value" << std::endl;
-            oss << "Usage: set <key> <value>" << std::endl;
+            oss << Messages::MISSING_VALUE << std::endl;
+            oss << Messages::USAGE_SET << std::endl;
         }
         std::string rest;
         while (iss >> rest) {
@@ -598,8 +614,8 @@ std::string ZestDB::execCmd(const std::string& command)
     } else if (cmd == "d" || cmd == "del") {
         std::string key;
         if (!(iss >> key)) {
-            oss << "Error: missing key" << std::endl;
-            oss << "Usage: del <key>" << std::endl;
+            oss << Messages::MISSING_KEY << std::endl;
+            oss << Messages::USAGE_GET << std::endl;
         }
         ResultType result = this->del(key);
         if (result.code == ResultType::Code::SUCCESS) {
@@ -610,8 +626,8 @@ std::string ZestDB::execCmd(const std::string& command)
     } else if (cmd == "gb" || cmd == "getby") {
         std::string pattern;
         if (!(iss >> pattern)) {
-            oss << "Error: missing pattern" << std::endl;
-            oss << "Usage: getby <pattern>" << std::endl;
+            oss << Messages::MISSING_PATTERN << std::endl;
+            oss << Messages::USAGE_GETBY << std::endl;
         }
         ResultType result = this->getBy(pattern);
         if (result.code == ResultType::Code::SUCCESS) {
@@ -622,12 +638,12 @@ std::string ZestDB::execCmd(const std::string& command)
     } else if (cmd == "sb" || cmd == "setby") {
         std::string pattern, value;
         if (!(iss >> pattern)) {
-            oss << "Error: missing pattern" << std::endl;
-            oss << "Usage: setby <pattern> <value>" << std::endl;
+            oss << Messages::MISSING_PATTERN << std::endl;
+            oss << Messages::USAGE_SETBY << std::endl;
         }
         if (!(iss >> value)) {
-            oss << "Error: missing value" << std::endl;
-            oss << "Usage: setby <pattern> <value>" << std::endl;
+            oss << Messages::MISSING_VALUE << std::endl;
+            oss << Messages::USAGE_SETBY << std::endl;
         }
         std::string rest;
         while (iss >> rest) {
@@ -642,8 +658,8 @@ std::string ZestDB::execCmd(const std::string& command)
     } else if (cmd == "db" || cmd == "delby") {
         std::string pattern;
         if (!(iss >> pattern)) {
-            oss << "Error: missing pattern" << std::endl;
-            oss << "Usage: delby <pattern>" << std::endl;
+            oss << Messages::MISSING_PATTERN << std::endl;
+            oss << Messages::USAGE_DELBY << std::endl;
         }
         ResultType result = this->delBy(pattern);
         if (result.code == ResultType::Code::SUCCESS) {
@@ -652,8 +668,8 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << "ERROR: " << result.message << std::endl;
         }
     } else {
-        oss << "ERROR: Command not found" << std::endl;
-        oss << "Type h for help" << std::endl;
+        oss << "ERROR: " << Messages::CMD_NOT_FOUND << std::endl;
+        oss << Messages::TYPE_HELP << std::endl;
     }
 
     return oss.str();

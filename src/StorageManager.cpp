@@ -103,3 +103,27 @@ std::string StorageManager::read(const IndexEntry& entry)
     ZestLog(LogLevel::ERROR, "StorageManager::read - segment not found: " + std::to_string(entry.segmentId));
     return "";
 }
+
+void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds)
+{
+    std::lock_guard<std::mutex> lock(this->segmentsMtx);
+
+    for (auto it = this->segments.begin(); it != this->segments.end();) {
+        int id = (*it)->getSegmentId();
+        bool used = std::find(usedSegmentIds.begin(), usedSegmentIds.end(), id) != usedSegmentIds.end();
+
+        if (!used) {
+            std::string segPath = (this->settings.DbPath / "seg" / (std::to_string(id) + ".seg")).string();
+            if (std::remove(segPath.c_str()) != 0) {
+                ZestLog(LogLevel::ERROR, "StorageManager - Failed to remove segment file: " + segPath);
+            } else {
+                ZestLog(LogLevel::DEBUG, "StorageManager - Removed segment file: " + segPath);
+            }
+            it = this->segments.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    ZestLog(LogLevel::INFO, "StorageManager - Removed unused segments, remaining: " + std::to_string(this->segments.size()));
+}

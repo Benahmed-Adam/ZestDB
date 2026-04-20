@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR)
+CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -O3
 LDFLAGS = -lcrypto
 
 SRCDIR = src

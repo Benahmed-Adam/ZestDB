@@ -2,6 +2,7 @@
 
 #include "DataSegment.hpp"
 #include "Logger.hpp"
+#include <chrono>
 
 DataSegment::DataSegment(const Settings& set, int id)
     : segmentId(id)
@@ -11,10 +12,21 @@ DataSegment::DataSegment(const Settings& set, int id)
     ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
     this->openSegment();
     this->refreshFullStatus();
+    this->flushThread = std::thread([this]() {
+        while (this->settings.isRunning) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::lock_guard<std::mutex> lock(this->mtx);
+            this->segment.flush();
+        }
+    });
 }
 
 DataSegment::~DataSegment()
 {
+    this->settings.isRunning = false;
+    if (this->flushThread.joinable()) {
+        this->flushThread.join();
+    }
     if (this->segment.is_open()) {
         this->segment.close();
     }
@@ -72,7 +84,6 @@ unsigned long DataSegment::write(const std::string& value)
     }
 
     this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));
-    this->segment.flush();
 
     if (!this->segment.good()) {
         ZestLog(LogLevel::ERROR, "DataSegment::write - write failed");

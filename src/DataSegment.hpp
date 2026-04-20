@@ -3,6 +3,7 @@
 #include <atomic>
 #include <fstream>
 #include <mutex>
+#include <thread>
 
 #include "Settings.hpp"
 
@@ -24,4 +25,5 @@ private:
     Settings settings;
     std::fstream segment;
     std::mutex mtx;
+    std::thread flushThread;
 };

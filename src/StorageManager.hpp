@@ -15,6 +15,7 @@ public:
     StorageManager(const Settings& settings);
     IndexEntry append(const std::string& value);
     std::string read(const IndexEntry& entry);
+    void removeUnusedSegments(const std::vector<int>& usedSegmentIds);
 
 private:
     void boot();
