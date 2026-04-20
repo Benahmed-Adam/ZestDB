@@ -21,10 +21,12 @@ class IndexManager {
 public:
     IndexManager(const Settings& settings);
     ~IndexManager();
+
     IndexEntry search(const std::string& key);
     void update(const std::string& key, const IndexEntry& entry);
     void insert(const IndexEntry& entry);
     std::vector<IndexEntry> getAll();
+    void compact();
 
     bool isCompacting;
 private:

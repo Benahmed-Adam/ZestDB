@@ -60,10 +60,7 @@ private:
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
-
-    std::mutex mtx;
-    std::mutex cacheMtx;
-    std::mutex indexMtx;
+    
     std::atomic<bool> initialized;
     bool isCompacting;
 

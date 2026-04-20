@@ -152,3 +152,36 @@ std::vector<IndexEntry> IndexManager::getAll()
 
     return res;
 }
+
+void IndexManager::compact() {
+    std::vector<IndexEntry> entries = this->getAll();
+    
+    std::lock_guard<std::mutex> lock(this->mtx);
+
+    this->index.close();
+    this->index.open(this->indexPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
+
+    if (!this->index.is_open()) {
+        ZestLog(LogLevel::ERROR, "Compact failed: could not reopen index file.");
+        return;
+    }
+
+    this->memoryTree.clear();
+    this->tombstoneOffsets.clear();
+
+    for (const auto& entry : entries) {
+        if (entry.isTombstone || entry.segmentId == -1) {
+            continue;
+        }
+        std::streamoff newPos = this->index.tellp();
+        
+        if (this->index.write((const char*)&entry, sizeof(IndexEntry))) {
+            this->memoryTree[std::string(entry.key)] = newPos;
+        } else {
+            ZestLog(LogLevel::ERROR, "Compact - Failed to write entry for key: " + std::string(entry.key));
+        }
+    }
+
+    this->index.flush();
+    ZestLog(LogLevel::INFO, "Index compaction completed successfully.");
+}
