@@ -10,7 +10,7 @@ ValueValidation: ".*" # Regex for values
 Port: 7321
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
-isDebug: true # Degug mode for the logger
+isDebug: false # Degug mode for the logger
 
 users:
   - user: bob

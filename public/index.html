@@ -6,7 +6,37 @@
     <title>ZestDB</title>
 </head>
 <body>
-    <h1>Welcome to ZestDB</h1>
-    <p>The database is running.</p>
+    <h1>Boooo</h1>
+    <p>The username: <input id="username" type="text" name="username" placeholder="The username" required></p>
+    <p>The password: <input id="password" type="password" name="password" placeholder="The password" required></p>
+    <p>The command: <input id="cmd" type="text" name="cmd" placeholder="The command" required><button id="send">send</button></p>
+    <code id="result"></code>
+    <script>
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);                    
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }
+
+        const button = document.getElementById("send");
+        var result = document.getElementById("result");
+
+        button.addEventListener("click", async () => {        
+            const user = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+            const cmd = document.getElementById("cmd").value;
+            
+            const token = await sha256(user + password);
+            const value = await fetch(`/cmd?cmd=${cmd}`, {
+                method: "GET",
+                headers: {
+                    "Authorization": user+"."+token,
+                }
+            });
+            result.innerHTML = await value.text();
+        });
+    </script>
 </body>
 </html>
