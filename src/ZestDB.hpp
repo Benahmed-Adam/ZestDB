@@ -60,7 +60,6 @@ public:
 
     Settings settings;
     httplib::Server srv;
-
 private:
     void boot();
     void fillCache();
