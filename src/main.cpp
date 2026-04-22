@@ -55,7 +55,6 @@ void cmd(ZestDB* db)
 
         if (cmd == "q" || cmd == "quit") {
             std::cout << "Goodbye!" << std::endl;
-            db->srv.stop();
             db->settings.isRunning = false;
             break;
         } else if (cmd == "h" || cmd == "help") {
@@ -70,6 +69,8 @@ int main(int argc, char** argv)
 {
     ZestDB db;
 
+    auto work = asio::make_work_guard(db.ioCtx);
+
     if (argc > 1 && std::string(argv[1]) == "pop") {
         std::thread t(populate, &db);
         t.detach();
@@ -77,8 +78,8 @@ int main(int argc, char** argv)
 
     std::thread t(cmd, &db);
 
-    db.srv.listen("0.0.0.0", db.settings.Port);
-
+    db.ioCtx.run(); 
+    
     t.join();
 
     return 0;

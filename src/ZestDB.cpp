@@ -44,6 +44,7 @@ ZestDB::ZestDB()
     this->storageManager = std::make_unique<StorageManager>(this->settings);
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
+    this->srv = std::make_unique<Server>(this->ioCtx, this->settings.Port, *this);
 
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 
@@ -55,7 +56,6 @@ ZestDB::ZestDB()
         promise.set_value();
     });
 
-
     std::thread compactorThread([this]() mutable {
         this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
     });
@@ -64,38 +64,6 @@ ZestDB::ZestDB()
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
-
-    this->srv.Get("/cmd", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!this->handleRequest(req) || !std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
-            res.status = 401;
-            res.set_content("Unauthorized", "text/plain");
-            return;
-        }
-
-        std::string cmd = req.get_param_value("cmd");
-        if (cmd == "") {
-            res.status = 400;
-            res.set_content("Bad Request: missing 'cmd' parameter. Usage: /?cmd=<command>", "text/plain");
-            return;
-        }
-
-        std::string result = this->execCmd(cmd);
-        res.set_content(result, "text/plain");
-    });
-
-    this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
-        (void)req;
-        fs::path indexPath = fs::current_path() / "public" / "index.html";
-        if (fs::exists(indexPath)) {
-            std::ifstream file(indexPath);
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            res.set_content(buffer.str(), "text/html");
-        } else {
-            res.status = 404;
-            res.set_content("Not Found", "text/plain");
-        }
-    });
 }
 
 ZestDB::~ZestDB()
@@ -144,37 +112,6 @@ bool ZestDB::validateValue(const std::string& value) const
     return true;
 }
 
-bool ZestDB::handleRequest(const httplib::Request& req)
-{
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - start");
-    const std::string authorization = req.get_header_value("Authorization");
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization header: " + authorization);
-
-    if (authorization == "") {
-        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization empty");
-        return false;
-    }
-
-    unsigned int point = authorization.find(".");
-    std::string username = authorization.substr(0, point);
-    std::string token = authorization.substr(point + 1, authorization.size());
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - username: " + username + ", token: " + token);
-
-    if (this->users.find(username) == this->users.end()) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - user not found: " + username);
-        return false;
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - stored token: " + this->users[username]);
-    if (this->users[username] != token) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - token mismatch");
-        return false;
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - success");
-    return true;
-}
-
 void ZestDB::boot()
 {
     const fs::path current_path = fs::current_path().string();
@@ -202,7 +139,7 @@ void ZestDB::boot()
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
         this->settings.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
-        this->settings.Port = node["Port"].get_value_or<int>(7321);
+        this->settings.Port = node["Port"].get_value_or<short>(7321);
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
@@ -579,7 +516,10 @@ std::string ZestDB::execCmd(const std::string& command)
 
     std::ostringstream oss;
 
-    if (cmd == "g" || cmd == "get") {
+    if (cmd == "q" || cmd == "quit") {
+        oss << "OK: shutting down" << std::endl;
+        this->stop();
+    } else if (cmd == "g" || cmd == "get") {
         std::string key;
         if (!(iss >> key)) {
             oss << Messages::MISSING_KEY << std::endl;
@@ -673,4 +613,10 @@ std::string ZestDB::execCmd(const std::string& command)
     }
 
     return oss.str();
+}
+
+void ZestDB::stop()
+{
+    this->settings.isRunning = false;
+    this->ioCtx.stop();
 }

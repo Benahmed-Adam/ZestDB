@@ -8,9 +8,9 @@
 #include "Compactor.hpp"
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
+#include "Server.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
-#include "httplib.hpp"
 
 struct ResultType {
     enum class Code {
@@ -57,20 +57,22 @@ public:
     ResultType delBy(const std::string& patern);
 
     std::string execCmd(const std::string& command);
+    void stop();
 
     Settings settings;
-    httplib::Server srv;
+    asio::io_context ioCtx;
+
 private:
     void boot();
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
-    bool handleRequest(const httplib::Request& req);
 
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
+    std::unique_ptr<Server> srv;
 
     std::atomic<bool> initialized;
     std::mutex readMtx;
