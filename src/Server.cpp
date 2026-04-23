@@ -21,23 +21,63 @@ void Session::do_read()
     this->socket_.async_read_some(asio::buffer(this->data_), [this, self](std::error_code ec, std::size_t length) {
         if (!ec) {
             ZestLog(LogLevel::DEBUG, "Session: received " + std::to_string(length) + " bytes");
-            std::string result = this->db_.execCmd(this->data_);
+            std::string cmd(this->data_);
+            std::string result;
+
+            if (!this->authenticated_) {
+                std::string authCmd = cmd;
+                if (authCmd.find("Authorization: ") == 0) {
+                    authCmd = authCmd.substr(15);
+                }
+
+                unsigned int dotPos = authCmd.find(".");
+                if (dotPos == std::string::npos) {
+                    ZestLog(LogLevel::DEBUG, "Session: authentication required");
+                    result = "ERROR: authentication required";
+                    this->do_write(result, true);
+                    return;
+                } else {
+                    std::string username = authCmd.substr(0, dotPos);
+                    std::string token = authCmd.substr(dotPos + 1);
+
+                    ZestLog(LogLevel::DEBUG, "Session: username: " + username + ", token: " + token);
+
+                    if (this->db_.validateToken(username, token)) {
+                        ZestLog(LogLevel::DEBUG, "Session: authentication success");
+                        this->authenticated_ = true;
+                        result = "OK: authenticated";
+                    } else {
+                        ZestLog(LogLevel::DEBUG, "Session: authentication failed");
+                        result = "ERROR: authentication failed";
+                        this->do_write(result, true);
+                        return;
+                    }
+                }
+            } else {
+                result = this->db_.execCmd(cmd);
+            }
+
             ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
-            this->do_write(result);
+            this->do_write(result, false);
         } else {
             ZestLog(LogLevel::INFO, "Session: client disconnected: " + ec.message());
         }
     });
 }
 
-void Session::do_write(const std::string& message)
+void Session::do_write(const std::string& message, bool closeAfter)
 {
     auto self(this->shared_from_this());
 
-    asio::async_write(this->socket_, asio::buffer(message), [this, self, message](std::error_code ec, std::size_t) {
+    asio::async_write(this->socket_, asio::buffer(message), [this, self, message, closeAfter](std::error_code ec, std::size_t) {
         if (!ec) {
             ZestLog(LogLevel::DEBUG, "Session: sent " + std::to_string(message.size()) + " bytes");
-            this->do_read();
+            if (closeAfter) {
+                ZestLog(LogLevel::INFO, "Session: closing connection");
+                this->socket_.close();
+            } else {
+                this->do_read();
+            }
         } else {
             ZestLog(LogLevel::WARNING, "Session: write error: " + ec.message());
         }

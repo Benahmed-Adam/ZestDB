@@ -65,13 +65,55 @@ ZestDB::ZestDB()
     cacheThread.detach();
     compactorThread.detach();
 
-    this->srv.WebSocket("/ws", [this](const httplib::Request&, httplib::ws::WebSocket& ws) {
+    this->srv.WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
+        (void)req;
         ZestLog(LogLevel::INFO, "Session: client connected");
+
+        bool authenticated = false;
         std::string cmd;
+
         while (ws.read(cmd)) {
-            std::string result = this->execCmd(cmd);
-            ws.send(result);
+            if (!authenticated) {
+                std::string authCmd = cmd;
+                if (authCmd.find("Authorization: ") == 0) {
+                    authCmd = authCmd.substr(15);
+                }
+
+                unsigned int dotPos = authCmd.find(".");
+                if (dotPos != std::string::npos) {
+                    std::string username = authCmd.substr(0, dotPos);
+                    std::string token = authCmd.substr(dotPos + 1);
+
+                    ZestLog(LogLevel::DEBUG, "WS auth - username: " + username + ", token: " + token);
+
+                    if (this->users.find(username) == this->users.end()) {
+                        ZestLog(LogLevel::DEBUG, "WS auth - user not found");
+                        ws.send("ERROR: authentication failed");
+                        ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
+                        break;
+                    }
+
+                    ZestLog(LogLevel::DEBUG, "WS auth - stored token: " + this->users.at(username));
+
+                    if (this->validateToken(username, token)) {
+                        authenticated = true;
+                        ws.send("OK: authenticated");
+                    } else {
+                        ws.send("ERROR: authentication failed");
+                        ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
+                        break;
+                    }
+                } else {
+                    ws.send("ERROR: authentication required");
+                    ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication required");
+                    break;
+                }
+            } else {
+                std::string result = this->execCmd(cmd);
+                ws.send(result);
+            }
         }
+
         ZestLog(LogLevel::INFO, "Session: client disconnected");
     });
 
@@ -91,6 +133,41 @@ ZestDB::ZestDB()
 
 ZestDB::~ZestDB()
 {
+}
+
+bool ZestDB::handleRequest(const httplib::Request& req)
+{
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - start");
+    const std::string authorization = req.get_header_value("Authorization");
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization header: " + authorization);
+
+    if (authorization == "") {
+        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization empty");
+        return false;
+    }
+
+    unsigned int point = authorization.find(".");
+    std::string username = authorization.substr(0, point);
+    std::string token = authorization.substr(point + 1, authorization.size() - point - 1);
+    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - username: " + username + ", token: " + token);
+
+    return this->validateToken(username, token);
+}
+
+bool ZestDB::validateToken(const std::string& username, const std::string& token) const
+{
+    if (this->users.find(username) == this->users.end()) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - user not found: " + username);
+        return false;
+    }
+
+    if (this->users.at(username) != token) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - token mismatch");
+        return false;
+    }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - success");
+    return true;
 }
 
 bool ZestDB::validateKey(const std::string& key) const
@@ -205,7 +282,7 @@ void ZestDB::boot()
                 std::string password = user_node["password"].get_value<std::string>();
 
                 this->users[username] = sha256(username + password);
-                // ZestLog(LogLevel::DEBUG, "User : " + username + " with password : " + this->users[username]);
+                ZestLog(LogLevel::DEBUG, "Loaded user: " + username + " with token: " + this->users[username]);
             }
         }
     } catch (const std::exception& e) {

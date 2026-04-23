@@ -58,16 +58,19 @@ public:
     ResultType delBy(const std::string& patern);
 
     std::string execCmd(const std::string& command);
+    bool validateToken(const std::string& username, const std::string& token) const;
     void stop();
 
     Settings settings;
     asio::io_context ioCtx;
     httplib::Server srv;
+
 private:
     void boot();
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
+    bool handleRequest(const httplib::Request& req);
 
     std::string help() const;
 

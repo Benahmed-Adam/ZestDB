@@ -78,11 +78,11 @@
         var ws=null,hist=[],hi=-1;
         var us=function(s){E('sd').className='st '+s;E('st').textContent={on:'Connected',busy:'Connecting...',off:'Disconnected'}[s]};
         var doConnect=function(){
-            var u=E('u').value,p=E('p').value,url=E('url').value;
+            var u=E('u').value.trim(),p=E('p').value.trim(),url=E('url').value;
             if(!u||!p){E('result').textContent='enter credentials';return;}
             us('busy');
             ws=new WebSocket(url);
-            ws.onopen=function(){us('on');h(u+p).then(function(token){ws.send(u+'.'+token)})};
+            ws.onopen=function(){us('on');h(u+p).then(function(token){ws.send('Authorization: '+u+'.'+token)})};
             ws.onclose=function(){us('off')};
             ws.onerror=function(){us('off');E('result').textContent='connection failed'};
             ws.onmessage=function(e){E('result').innerHTML=sh(f(e.data))};
@@ -91,11 +91,12 @@
         E('send').onclick=function(){
             if(!ws||ws.readyState===3){doConnect()}
             if(ws&&ws.readyState===1&&E('cmd').value.trim()){
-                hist.unshift(E('cmd').value);
+                var cmd=E('cmd').value.trim();
+                hist.unshift(cmd);
                 if(hist.length>50)hist.pop();
                 hi=-1;
                 E('historyList').innerHTML=hist.map(function(c){return '<li onclick="setCmd(\''+c.replace(/'/g,"\\'")+'\')">'+c+'</li>'}).join('');
-                ws.send(E('cmd').value);
+                ws.send(cmd);
             }
         };
         var setCmd=function(v){E('cmd').value=v};

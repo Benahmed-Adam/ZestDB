@@ -12,7 +12,7 @@ WebPort: 1237
 
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
-isDebug: false # Degug mode for the logger
+isDebug: true # Degug mode for the logger
 
 users:
   - user: bob
