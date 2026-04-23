@@ -11,6 +11,7 @@
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
+#include "httplib.hpp"
 
 struct ResultType {
     enum class Code {
@@ -61,23 +62,25 @@ public:
 
     Settings settings;
     asio::io_context ioCtx;
-
+    httplib::Server srv;
 private:
     void boot();
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
 
+    std::string help() const;
+
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
-    std::unique_ptr<Server> srv;
+    std::unique_ptr<Server> socket;
 
     std::atomic<bool> initialized;
     std::mutex readMtx;
 
-    std::unordered_map<std::string, std::string> users;
+    std::unordered_map<std::string, std::string> users;    
 };
 
 std::string sha256(const std::string& str);

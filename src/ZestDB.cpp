@@ -44,7 +44,7 @@ ZestDB::ZestDB()
     this->storageManager = std::make_unique<StorageManager>(this->settings);
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
-    this->srv = std::make_unique<Server>(this->ioCtx, this->settings.Port, *this);
+    this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 
@@ -64,6 +64,20 @@ ZestDB::ZestDB()
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
+
+     this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
+        (void)req;
+        fs::path indexPath = fs::current_path() / "public" / "index.html";
+        if (fs::exists(indexPath)) {
+            std::ifstream file(indexPath);
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            res.set_content(buffer.str(), "text/html");
+        } else {
+            res.status = 404;
+            res.set_content("Not Found", "text/plain");
+        }
+    });
 }
 
 ZestDB::~ZestDB()
@@ -139,7 +153,8 @@ void ZestDB::boot()
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
         this->settings.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
-        this->settings.Port = node["Port"].get_value_or<short>(7321);
+        this->settings.DBPort = node["DBPort"].get_value_or<short>(7321);
+        this->settings.WebPort = node["WebPort"].get_value_or<short>(1237);
 
         this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
@@ -199,9 +214,14 @@ void ZestDB::boot()
         this->settings.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
     }
 
-    if (this->settings.Port < 0) {
-        ZestLog(LogLevel::CRITICAL, "Port cant be lower that zero");
+    if (this->settings.DBPort < 0 || this->settings.WebPort < 0) {
+        ZestLog(LogLevel::CRITICAL, "Ports cant be lower that zero");
         throw std::runtime_error("Port < 0");
+    }
+
+    if (this->settings.DBPort == this->settings.WebPort) {
+        ZestLog(LogLevel::CRITICAL, "DBPort and WebPort cannot be the same");
+        throw std::runtime_error("DBPort == WebPort");
     }
 
     ZestLog(LogLevel::DEBUG, "Database path : " + this->settings.DbPath.string());
@@ -211,7 +231,8 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
     ZestLog(LogLevel::DEBUG, "CompactingInterval : " + std::to_string(this->settings.CompactingInterval));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
-    ZestLog(LogLevel::DEBUG, "Port : " + std::to_string(this->settings.Port));
+    ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
+    ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
 
     if (!fs::exists(this->settings.DbPath / "INDEX")) {
         fs::path indexPath = this->settings.DbPath / "INDEX";
@@ -516,10 +537,7 @@ std::string ZestDB::execCmd(const std::string& command)
 
     std::ostringstream oss;
 
-    if (cmd == "q" || cmd == "quit") {
-        oss << "OK: shutting down" << std::endl;
-        this->stop();
-    } else if (cmd == "g" || cmd == "get") {
+    if (cmd == "g" || cmd == "get") {
         std::string key;
         if (!(iss >> key)) {
             oss << Messages::MISSING_KEY << std::endl;
@@ -607,6 +625,8 @@ std::string ZestDB::execCmd(const std::string& command)
         } else {
             oss << "ERROR: " << result.message << std::endl;
         }
+    } else if (cmd == "h" || cmd == "help") {
+        oss << this->help();
     } else {
         oss << "ERROR: " << Messages::CMD_NOT_FOUND << std::endl;
         oss << Messages::TYPE_HELP << std::endl;
@@ -619,4 +639,22 @@ void ZestDB::stop()
 {
     this->settings.isRunning = false;
     this->ioCtx.stop();
+    this->srv.stop();
+}
+
+std::string ZestDB::help() const
+{
+    std::ostringstream oss;
+    oss << "ZestDB Commands:" << std::endl;
+    oss << "---------------" << std::endl;
+    oss << "get <key>             - Get value by key" << std::endl;
+    oss << "set <key> <value>     - Set key-value pair" << std::endl;
+    oss << "del <key>             - Delete key" << std::endl;
+    oss << "getby <pattern>       - Get keys matching regex pattern" << std::endl;
+    oss << "setby <pattern> <val> - Set value for keys matching pattern" << std::endl;
+    oss << "delby <pattern>       - Delete keys matching pattern" << std::endl;
+    oss << "help                  - Show this help" << std::endl;
+    oss << std::endl;
+    oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, h=help" << std::endl;
+    return oss.str();
 }

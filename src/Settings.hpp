@@ -12,7 +12,8 @@ struct Settings {
     unsigned int MaxValueSize;
     unsigned int CacheSize;
     unsigned int CompactingInterval;
-    short Port;
+    short DBPort;
+    short WebPort;
 
     std::regex KeyValidation;
     std::regex ValueValidation;

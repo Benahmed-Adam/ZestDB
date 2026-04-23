@@ -7,7 +7,9 @@ CompactingInterval: 100 # The ammount of time in seconds between each compaction
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
 
-Port: 7321
+DBPort: 7321
+WebPort: 1237
+
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger

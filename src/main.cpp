@@ -36,7 +36,7 @@ void populate(ZestDB* db)
     db->set("unicode", "émojis: 🎉 € 中文");
 }
 
-void cmd(ZestDB* db)
+void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard)
 {
     std::string line;
     while (true) {
@@ -55,10 +55,9 @@ void cmd(ZestDB* db)
 
         if (cmd == "q" || cmd == "quit") {
             std::cout << "Goodbye!" << std::endl;
-            db->settings.isRunning = false;
+            workGuard->reset();
+            db->stop();
             break;
-        } else if (cmd == "h" || cmd == "help") {
-            std::cout << "HELP !!" << std::endl;
         } else {
             std::cout << db->execCmd(line);
         }
@@ -76,11 +75,16 @@ int main(int argc, char** argv)
         t.detach();
     }
 
-    std::thread t(cmd, &db);
+    std::thread t(cmd, &db, &work);
 
-    db.ioCtx.run(); 
+    std::thread ioThread([&db]() {
+        db.ioCtx.run();
+    });
     
+    db.srv.listen("0.0.0.0", db.settings.WebPort);
+
     t.join();
+    ioThread.join();
 
     return 0;
 }

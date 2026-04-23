@@ -4,38 +4,103 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZestDB</title>
+    <style>
+        body { font-family: monospace; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .container { margin-bottom: 15px; }
+        input, button { padding: 8px; margin: 5px 0; }
+        input[type="text"] { width: 300px; }
+        #result { white-space: pre-wrap; background: #f0f0f0; padding: 10px; min-height: 100px; max-height: 400px; overflow-y: auto; }
+        #history { margin-top: 20px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #f0f0f0; }
+    </style>
 </head>
 <body>
-    <h1>Boooo</h1>
-    <p>The username: <input id="username" type="text" name="username" placeholder="The username" required></p>
-    <p>The password: <input id="password" type="password" name="password" placeholder="The password" required></p>
-    <p>The command: <input id="cmd" type="text" name="cmd" placeholder="The command" required><button id="send">send</button></p>
-    <code id="result"></code>
+    <h1>ZestDB</h1>
+    <div class="container">
+        <p>Username: <input id="username" type="text" placeholder="username"></p>
+        <p>Password: <input id="password" type="password" placeholder="password"></p>
+    </div>
+    <div class="container">
+        <p>Command: <input id="cmd" type="text" placeholder="e.g., get key1" size="50">
+        <button id="send">Send</button></p>
+    </div>
+    <div>
+        <button id="clearHistory">Clear History</button>
+    </div>
+    <div id="result"></div>
+    <div id="history">
+        <h3>Command History</h3>
+        <table id="historyTable">
+            <thead>
+                <tr><th>Command</th><th>Result</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
     <script>
         async function sha256(message) {
-            const msgBuffer = new TextEncoder().encode(message);                    
+            const msgBuffer = new TextEncoder().encode(message);
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
             return hashHex;
         }
 
-        const button = document.getElementById("send");
-        var result = document.getElementById("result");
-
-        button.addEventListener("click", async () => {        
-            const user = document.getElementById("username").value;
-            const password = document.getElementById("password").value;
-            const cmd = document.getElementById("cmd").value;
+        async function sendCommand(cmd) {
+            const user = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!user || !password) {
+                document.getElementById('result').textContent = 'Please enter username and password';
+                return;
+            }
             
             const token = await sha256(user + password);
-            const value = await fetch(`/cmd?cmd=${cmd}`, {
-                method: "GET",
-                headers: {
-                    "Authorization": user+"."+token,
-                }
-            });
-            result.innerHTML = await value.text();
+            
+            try {
+                const response = await fetch(`/cmd?cmd=${encodeURIComponent(cmd)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': user + '.' + token,
+                    }
+                });
+                const text = await response.text();
+                document.getElementById('result').textContent = text;
+                addToHistory(cmd, text);
+            } catch (error) {
+                document.getElementById('result').textContent = 'Error: ' + error.message;
+            }
+        }
+
+        function addToHistory(cmd, result) {
+            const tbody = document.querySelector('#historyTable tbody');
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${escapeHtml(cmd)}</td><td>${escapeHtml(result)}</td>`;
+            tbody.insertBefore(row, tbody.firstChild);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        document.getElementById('send').addEventListener('click', () => {
+            const cmd = document.getElementById('cmd').value;
+            if (cmd) sendCommand(cmd);
+        });
+
+        document.getElementById('cmd').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = document.getElementById('cmd').value;
+                if (cmd) sendCommand(cmd);
+            }
+        });
+
+        document.getElementById('clearHistory').addEventListener('click', () => {
+            document.querySelector('#historyTable tbody').innerHTML = '';
         });
     </script>
 </body>
