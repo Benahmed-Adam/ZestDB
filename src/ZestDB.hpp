@@ -80,7 +80,7 @@ private:
     std::atomic<bool> initialized;
     std::mutex readMtx;
 
-    std::unordered_map<std::string, std::string> users;    
+    std::unordered_map<std::string, std::string> users;
 };
 
 std::string sha256(const std::string& str);

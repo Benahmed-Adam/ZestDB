@@ -65,8 +65,15 @@ ZestDB::ZestDB()
     cacheThread.detach();
     compactorThread.detach();
 
-     this->srv.Get("/", [this](const httplib::Request& req, httplib::Response& res) {
-        (void)req;
+    this->srv.WebSocket("/ws", [this](const httplib::Request&, httplib::ws::WebSocket& ws) {
+        std::string cmd;
+        while (ws.read(cmd)) {
+            std::string result = this->execCmd(cmd);
+            ws.send(result);
+        }
+    });
+
+    this->srv.Get("/", [this](const httplib::Request&, httplib::Response& res) {
         fs::path indexPath = fs::current_path() / "public" / "index.html";
         if (fs::exists(indexPath)) {
             std::ifstream file(indexPath);

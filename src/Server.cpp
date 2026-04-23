@@ -19,7 +19,6 @@ void Session::do_read()
     auto self(this->shared_from_this());
 
     this->socket_.async_read_some(asio::buffer(this->data_), [this, self](std::error_code ec, std::size_t length) {
-        (void)length;
         if (!ec) {
             ZestLog(LogLevel::DEBUG, "Session: received " + std::to_string(length) + " bytes");
             std::string result = this->db_.execCmd(this->data_);
@@ -35,8 +34,7 @@ void Session::do_write(const std::string& message)
 {
     auto self(this->shared_from_this());
 
-    asio::async_write(this->socket_, asio::buffer(message), [this, self, message](std::error_code ec, std::size_t length) {
-        (void)length;
+    asio::async_write(this->socket_, asio::buffer(message), [this, self, message](std::error_code ec, std::size_t) {
         if (!ec) {
             ZestLog(LogLevel::DEBUG, "Session: sent " + std::to_string(message.size()) + " bytes");
             this->do_read();
