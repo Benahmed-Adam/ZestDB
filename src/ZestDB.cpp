@@ -66,11 +66,13 @@ ZestDB::ZestDB()
     compactorThread.detach();
 
     this->srv.WebSocket("/ws", [this](const httplib::Request&, httplib::ws::WebSocket& ws) {
+        ZestLog(LogLevel::INFO, "Session: client connected");
         std::string cmd;
         while (ws.read(cmd)) {
             std::string result = this->execCmd(cmd);
             ws.send(result);
         }
+        ZestLog(LogLevel::INFO, "Session: client disconnected");
     });
 
     this->srv.Get("/", [this](const httplib::Request&, httplib::Response& res) {

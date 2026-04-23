@@ -25,7 +25,7 @@ void Session::do_read()
             ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
             this->do_write(result);
         } else {
-            ZestLog(LogLevel::WARNING, "Session: read error: " + ec.message());
+            ZestLog(LogLevel::INFO, "Session: client disconnected: " + ec.message());
         }
     });
 }
