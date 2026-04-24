@@ -14,7 +14,7 @@ public:
     std::vector<std::string> getCmds();
 private:
     std::fstream wal;
-    std::filesystem::path walPath;
+    std::filesystem::path WalPath;
     std::mutex mtx;
     bool canClear;
 };

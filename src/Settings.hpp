@@ -7,7 +7,9 @@
 struct Settings {
     std::filesystem::path DbPath;
     std::filesystem::path IndexPath;
-    std::filesystem::path walPath;
+    std::filesystem::path WalPath;
+    std::filesystem::path ShutdownFilePath;
+
     unsigned long SegSize;
     unsigned int MaxKeySize;
     unsigned int MaxValueSize;
@@ -26,4 +28,6 @@ struct Settings {
 
     bool isDebug;
     bool isRunning = true;
+
+    bool hasCrashedLastTime;
 };

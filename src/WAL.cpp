@@ -6,13 +6,13 @@ WAL::WAL(const Settings& set)
     : canClear(true)
 {
     ZestLog(LogLevel::INFO, "Opening WAL file...");
-    this->walPath = set.walPath;
+    this->WalPath = set.WalPath;
 
-    this->wal.open(this->walPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+    this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     if (!this->wal.is_open()) {
-        this->wal.open(this->walPath, std::ios::out | std::ios::binary);
+        this->wal.open(this->WalPath, std::ios::out | std::ios::binary);
         this->wal.close();
-        this->wal.open(this->walPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+        this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     }
 }
 
@@ -22,9 +22,9 @@ void WAL::clear()
     if (this->canClear) {
         ZestLog(LogLevel::DEBUG, "WAL::clean - Cleaning the WAL...");
         this->wal.close();
-        this->wal.open(this->walPath, std::ios::out | std::ios::binary | std::ios::trunc);
+        this->wal.open(this->WalPath, std::ios::out | std::ios::binary | std::ios::trunc);
         this->wal.close();
-        this->wal.open(this->walPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
+        this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
         this->canClear = false;
     }
 }

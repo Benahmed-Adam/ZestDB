@@ -168,6 +168,7 @@ std::vector<IndexEntry> IndexManager::getAll()
 
 std::vector<IndexEntry> IndexManager::compact()
 {
+    // TODO! FAIRE EN SORTE QU'il Y AIT UNE COPIE QUI SOIT FAITE. EXEMPLE : INDEX.tmp
     std::vector<IndexEntry> entries = this->getAll();
     std::vector<IndexEntry> validEntries = entries;
 
