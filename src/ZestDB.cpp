@@ -36,6 +36,7 @@ std::string sha256(const std::string& str)
 
 ZestDB::ZestDB()
     : initialized(false)
+    , replaying(false)
 {
     ZestLog(LogLevel::INFO, "Initializing ZestDB...");
     this->boot();
@@ -46,6 +47,8 @@ ZestDB::ZestDB()
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
     this->wal = std::make_unique<WAL>(this->settings);
     this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
+
+    this->replayWAL();
 
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
 
@@ -61,24 +64,20 @@ ZestDB::ZestDB()
         this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
     });
 
-    std::thread flushThread = std::thread([this]() {
-        while (this->settings.isRunning) {
-            std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
-            ZestLog(LogLevel::DEBUG, "Flushing the content of the INDEX and the data segments into the disk...");
-            this->indexManager->flush();
-            this->storageManager->flush();
-            this->wal->clear();
-        }
-    });
-
     this->initialized.store(true);
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
+
+    std::thread flushThread = std::thread([this]() {
+        while (this->settings.isRunning) {
+            std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
+            this->flush();
+        }
+    });
     flushThread.detach();
 
     this->srv.WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
-
         if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
             ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
             return;
@@ -150,6 +149,8 @@ ZestDB::ZestDB()
 
 ZestDB::~ZestDB()
 {
+    if (this->settings.isRunning)
+        this->stop();
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -367,7 +368,7 @@ void ZestDB::boot()
 
 void ZestDB::fillCache()
 {
-    if (!this->initialized.load()) {
+    while (!this->initialized.load()) {
         ZestLog(LogLevel::WARNING, "ZestDB::fillCache - not initialized yet, waiting...");
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -733,27 +734,32 @@ std::string ZestDB::execCmd(const std::string& command)
         }
     } else if (cmd == "h" || cmd == "help") {
         oss << this->help();
+    } else if (cmd == "f" || cmd == "flush") {
+        this->flush();
+        oss << Messages::FLUSH_SUCCESSFUL << std::endl;
     } else {
         oss << "ERROR: " << Messages::CMD_NOT_FOUND << std::endl;
         oss << Messages::TYPE_HELP << std::endl;
     }
 
-    if (result.code == ResultType::Code::SUCCESS && cmd != "h" && cmd != "help" && cmd != "g" && cmd != "get" && cmd != "gb" && cmd != "getby") {
-        this->wal->append(command);
+    if (!this->replaying.load()) {
+        if (result.code == ResultType::Code::SUCCESS && cmd != "h" && cmd != "help" && cmd != "g" && cmd != "get" && cmd != "gb" && cmd != "getby" && cmd != "f" && cmd != "flush") {
+            this->wal->append(command);
+        }
     }
 
     return oss.str();
 }
 
-void ZestDB::stop()
+void ZestDB::stop(int)
 {
+    ZestLog(LogLevel::INFO, "Exiting ZestDB...");
+
     this->settings.isRunning = false;
     this->ioCtx.stop();
     this->srv.stop();
 
-    this->indexManager->flush();
-    this->storageManager->flush();
-    this->wal->clear();
+    this->flush();
 }
 
 std::string ZestDB::help() const
@@ -767,17 +773,34 @@ std::string ZestDB::help() const
     oss << "getby <pattern>       - Get keys matching regex pattern" << std::endl;
     oss << "setby <pattern> <val> - Set value for keys matching pattern" << std::endl;
     oss << "delby <pattern>       - Delete keys matching pattern" << std::endl;
+    oss << "flush                 - Flush all data in memory to the disk" << std::endl;
     oss << "help                  - Show this help" << std::endl;
     oss << std::endl;
-    oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, h=help" << std::endl;
+    oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, h=help" << std::endl;
     return oss.str();
+}
+
+void ZestDB::flush()
+{
+    ZestLog(LogLevel::DEBUG, "Flushing the content of the INDEX and the data segments into the disk...");
+    this->indexManager->flush();
+    this->storageManager->flush();
+    this->wal->clear();
 }
 
 void ZestDB::replayWAL()
 {
+    ZestLog(LogLevel::INFO, "Replaying WAL...");
+    this->replaying.store(true);
     std::vector<std::string> cmds = this->wal->getCmds();
 
     for (const std::string& cmd : cmds) {
-        this->execCmd(cmd);
+        ZestLog(LogLevel::INFO, "WAL replay: " + cmd);
+        std::string result = this->execCmd(cmd);
+        ZestLog(LogLevel::INFO, "WAL replay result: " + result);
     }
+
+    this->flush();
+    this->replaying.store(false);
+    ZestLog(LogLevel::INFO, "WAL replay complete, processed " + std::to_string(cmds.size()) + " commands");
 }

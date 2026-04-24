@@ -2,8 +2,8 @@
 
 #include <atomic>
 #include <memory>
-#include <unordered_map>
 #include <shared_mutex>
+#include <unordered_map>
 
 #include "Compactor.hpp"
 #include "IndexManager.hpp"
@@ -11,8 +11,8 @@
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
-#include "httplib.hpp"
 #include "WAL.hpp"
+#include "httplib.hpp"
 
 struct ResultType {
     enum class Code {
@@ -43,6 +43,7 @@ struct Messages {
     static constexpr const char* USAGE_DELBY = "Usage: delby <pattern>";
     static constexpr const char* CMD_NOT_FOUND = "Command not found";
     static constexpr const char* TYPE_HELP = "Type h for help";
+    static constexpr const char* FLUSH_SUCCESSFUL = "Flush successful !";
 };
 
 class ZestDB {
@@ -60,7 +61,7 @@ public:
 
     std::string execCmd(const std::string& command);
     bool validateToken(const std::string& username, const std::string& token) const;
-    void stop();
+    void stop(int = 0);
 
     Settings settings;
     asio::io_context ioCtx;
@@ -71,8 +72,9 @@ private:
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
+    void flush();
     void replayWAL();
-    
+
     std::string help() const;
 
     std::unique_ptr<IndexManager> indexManager;
@@ -83,6 +85,7 @@ private:
     std::unique_ptr<WAL> wal;
 
     std::atomic<bool> initialized;
+    std::atomic<bool> replaying;
     std::shared_mutex readMtx;
 
     std::unordered_map<std::string, std::string> users;

@@ -2,6 +2,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <csignal>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -67,6 +68,8 @@ void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>*
 int main(int argc, char** argv)
 {
     ZestDB db;
+
+    //std::signal(SIGINT, db.stop);
 
     auto work = asio::make_work_guard(db.ioCtx);
 
