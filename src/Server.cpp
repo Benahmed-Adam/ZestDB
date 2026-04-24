@@ -10,7 +10,7 @@ Session::Session(tcp::socket socket, ZestDB& db)
 
 void Session::start()
 {
-    ZestLog(LogLevel::INFO, "Session: client connected");
+    ZestLog(LogLevel::DEBUG, "Session: client connected");
     if (!std::regex_match(this->socket_.remote_endpoint().address().to_string(), this->db_.settings.NetworkValidation)) {
         this->do_write("unauthorized", true);
     } else {
@@ -64,7 +64,7 @@ void Session::do_read()
             ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
             this->do_write(result, false);
         } else {
-            ZestLog(LogLevel::INFO, "Session: client disconnected: " + ec.message());
+            ZestLog(LogLevel::DEBUG, "Session: client disconnected: " + ec.message());
         }
     });
 }
@@ -77,7 +77,7 @@ void Session::do_write(const std::string& message, bool closeAfter)
         if (!ec) {
             ZestLog(LogLevel::DEBUG, "Session: sent " + std::to_string(message.size()) + " bytes");
             if (closeAfter) {
-                ZestLog(LogLevel::INFO, "Session: closing connection");
+                ZestLog(LogLevel::DEBUG, "Session: closing connection");
                 this->socket_.close();
             } else {
                 this->do_read();
@@ -100,7 +100,7 @@ void Server::do_accept()
 {
     acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
         if (!ec) {
-            ZestLog(LogLevel::INFO, "Server: new connection accepted");
+            ZestLog(LogLevel::DEBUG, "Server: new connection accepted");
             std::make_shared<Session>(std::move(socket), this->db_)->start();
         } else {
             ZestLog(LogLevel::ERROR, "Server: accept error: " + ec.message());

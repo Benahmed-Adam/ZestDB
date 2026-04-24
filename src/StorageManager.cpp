@@ -26,7 +26,7 @@ void StorageManager::boot()
     }
 
     if (nb == 0) {
-        ZestLog(LogLevel::INFO, "StorageManager::boot - no segments found, creating segment 1");
+        ZestLog(LogLevel::DEBUG, "StorageManager::boot - no segments found, creating segment 1");
         this->segments.push_back(std::make_unique<DataSegment>(this->settings, 1));
         this->latestSegmentId = 1;
     } else {

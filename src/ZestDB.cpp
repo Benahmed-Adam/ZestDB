@@ -37,7 +37,7 @@ std::string sha256(const std::string& str)
 ZestDB::ZestDB()
     : initialized(false)
 {
-    ZestLog(LogLevel::DEBUG, "Initializing ZestDB...");
+    ZestLog(LogLevel::INFO, "Initializing ZestDB...");
     this->boot();
 
     this->indexManager = std::make_unique<IndexManager>(this->settings);
@@ -458,7 +458,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     this->cache->put(entry, value);
 
-    ZestLog(LogLevel::INFO, "ZestDB::set - successfully set key: " + key);
+    ZestLog(LogLevel::DEBUG, "ZestDB::set - successfully set key: " + key);
     return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
 }
 
@@ -491,7 +491,7 @@ ResultType ZestDB::del(const std::string& key)
 
         this->cache->remove(key);
 
-        ZestLog(LogLevel::INFO, "ZestDB::del - successfully deleted key: " + key);
+        ZestLog(LogLevel::DEBUG, "ZestDB::del - successfully deleted key: " + key);
         return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_DEL) + key };
     } else {
         ZestLog(LogLevel::WARNING, "ZestDB::del - key not found: " + key);
@@ -587,7 +587,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         }
     }
 
-    ZestLog(LogLevel::INFO, "ZestDB::setBy - successfully updated " + std::to_string(matchCount) + " entries");
+    ZestLog(LogLevel::DEBUG, "ZestDB::setBy - successfully updated " + std::to_string(matchCount) + " entries");
 
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
 }
@@ -738,7 +738,7 @@ std::string ZestDB::execCmd(const std::string& command)
         oss << Messages::TYPE_HELP << std::endl;
     }
 
-    if (result.code == ResultType::Code::SUCCESS && cmd != "h" && cmd != "help" && cmd != "") {
+    if (result.code == ResultType::Code::SUCCESS && cmd != "h" && cmd != "help" && cmd != "g" && cmd != "get" && cmd != "gb" && cmd != "getby") {
         this->wal->append(command);
     }
 
@@ -750,6 +750,10 @@ void ZestDB::stop()
     this->settings.isRunning = false;
     this->ioCtx.stop();
     this->srv.stop();
+
+    this->indexManager->flush();
+    this->storageManager->flush();
+    this->wal->clear();
 }
 
 std::string ZestDB::help() const
