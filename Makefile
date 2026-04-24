@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -O0
-LDFLAGS = -lcrypto -lpthread
+CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -O3 -Wno-deprecated-declarations
+LDFLAGS = -lcrypto -lpthread -lssl
 
 SRCDIR = src
 OBJDIR = obj

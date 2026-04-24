@@ -2,110 +2,137 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
-Session::Session(tcp::socket socket, ZestDB& db)
-    : socket_(std::move(socket))
-    , db_(db)
-{
-}
+Session::Session(ZestStream stream, ZestDB& db)
+    : stream_(std::move(stream)), db_(db) {}
 
-void Session::start()
-{
-    ZestLog(LogLevel::DEBUG, "Session: client connected");
-    if (!std::regex_match(this->socket_.remote_endpoint().address().to_string(), this->db_.settings.NetworkValidation)) {
+void Session::start() {
+    std::string remote_ip = std::visit([](auto& s) {
+        return s.lowest_layer().remote_endpoint().address().to_string();
+    }, stream_);
+
+    if (!std::regex_match(remote_ip, this->db_.settings.NetworkValidation)) {
+        ZestLog(LogLevel::WARNING, "Session: Unauthorized IP: " + remote_ip);
         this->do_write("unauthorized", true);
+        return;
+    }
+    
+    if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
+        auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
+        ssl_stream.async_handshake(asio::ssl::stream_base::server, 
+            [self = shared_from_this()](std::error_code ec) {
+                if (!ec) self->do_read();
+            });
     } else {
         this->do_read();
     }
 }
 
-void Session::do_read()
-{
+void Session::do_read() {
     auto self(this->shared_from_this());
 
-    this->socket_.async_read_some(asio::buffer(this->data_), [this, self](std::error_code ec, std::size_t length) {
-        if (!ec) {
-            ZestLog(LogLevel::DEBUG, "Session: received " + std::to_string(length) + " bytes");
-            std::string cmd(this->data_);
-            std::string result;
+    auto handle_read = [this, self](auto& stream) {
+        stream.async_read_some(asio::buffer(this->data_), 
+            [this, self](std::error_code ec, std::size_t length) {
+                if (!ec) { 
+                   ZestLog(LogLevel::DEBUG, "Session: received " + std::to_string(length) + " bytes");
+                    std::string cmd(this->data_);
+                    std::string result;
 
-            if (!this->authenticated_) {
-                std::string authCmd = cmd;
-                if (authCmd.find("Authorization: ") == 0) {
-                    authCmd = authCmd.substr(15);
-                }
+                    if (!this->authenticated_) {
+                        std::string authCmd = cmd;
+                        if (authCmd.find("Authorization: ") == 0) {
+                            authCmd = authCmd.substr(15);
+                        }
 
-                unsigned int dotPos = authCmd.find(".");
-                if (dotPos == std::string::npos) {
-                    ZestLog(LogLevel::DEBUG, "Session: authentication required");
-                    result = "ERROR: authentication required";
-                    this->do_write(result, true);
-                    return;
-                } else {
-                    std::string username = authCmd.substr(0, dotPos);
-                    std::string token = authCmd.substr(dotPos + 1);
+                        unsigned int dotPos = authCmd.find(".");
+                        if (dotPos == std::string::npos) {
+                            ZestLog(LogLevel::DEBUG, "Session: authentication required");
+                            result = "ERROR: authentication required";
+                            this->do_write(result, true);
+                            return;
+                        } else {
+                            std::string username = authCmd.substr(0, dotPos);
+                            std::string token = authCmd.substr(dotPos + 1);
 
-                    ZestLog(LogLevel::DEBUG, "Session: username: " + username + ", token: " + token);
+                            ZestLog(LogLevel::DEBUG, "Session: username: " + username + ", token: " + token);
 
-                    if (this->db_.validateToken(username, token)) {
-                        ZestLog(LogLevel::DEBUG, "Session: authentication success");
-                        this->authenticated_ = true;
-                        result = "OK: authenticated";
+                            if (this->db_.validateToken(username, token)) {
+                                ZestLog(LogLevel::DEBUG, "Session: authentication success");
+                                this->authenticated_ = true;
+                                result = "OK: authenticated";
+                            } else {
+                                ZestLog(LogLevel::DEBUG, "Session: authentication failed");
+                                result = "ERROR: authentication failed";
+                                this->do_write(result, true);
+                                return;
+                            }
+                        }
                     } else {
-                        ZestLog(LogLevel::DEBUG, "Session: authentication failed");
-                        result = "ERROR: authentication failed";
-                        this->do_write(result, true);
-                        return;
+                        result = this->db_.execCmd(cmd);
                     }
-                }
-            } else {
-                result = this->db_.execCmd(cmd);
-            }
 
-            ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
-            this->do_write(result, false);
-        } else {
-            ZestLog(LogLevel::DEBUG, "Session: client disconnected: " + ec.message());
-        }
-    });
+                    ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
+                    this->do_write(result, false);
+                }
+            });
+    };
+
+    std::visit(handle_read, stream_);
 }
 
 void Session::do_write(const std::string& message, bool closeAfter)
 {
     auto self(this->shared_from_this());
 
-    asio::async_write(this->socket_, asio::buffer(message), [this, self, message, closeAfter](std::error_code ec, std::size_t) {
-        if (!ec) {
-            ZestLog(LogLevel::DEBUG, "Session: sent " + std::to_string(message.size()) + " bytes");
-            if (closeAfter) {
-                ZestLog(LogLevel::DEBUG, "Session: closing connection");
-                this->socket_.close();
-            } else {
-                this->do_read();
-            }
-        } else {
-            ZestLog(LogLevel::WARNING, "Session: write error: " + ec.message());
-        }
-    });
+    std::visit([this, self, message, closeAfter](auto& stream) {
+        asio::async_write(stream, asio::buffer(message), 
+            [this, self, message, closeAfter](std::error_code ec, std::size_t) {
+                if (!ec) {
+                    ZestLog(LogLevel::DEBUG, "Session: sent " + std::to_string(message.size()) + " bytes");
+                    if (closeAfter) {
+                        this->close_stream();
+                    } else {
+                        this->do_read();
+                    }
+                } else {
+                    ZestLog(LogLevel::WARNING, "Session: write error: " + ec.message());
+                }
+            });
+    }, stream_);
+}
+
+void Session::close_stream() {
+    ZestLog(LogLevel::DEBUG, "Session: closing connection");
+    
+    std::visit([](auto& s) {
+        std::error_code ec;
+        s.lowest_layer().close(ec);
+    }, stream_);
 }
 
 Server::Server(asio::io_context& io_context, short port, ZestDB& db)
-    : acceptor_(io_context, tcp::endpoint(asio::ip::make_address("0.0.0.0"), static_cast<asio::ip::port_type>(port)))
+    :  ssl_context_(asio::ssl::context::sslv23), acceptor_(io_context, tcp::endpoint(tcp::v4(), static_cast<asio::ip::port_type>(port)))
     , db_(db)
 {
     ZestLog(LogLevel::INFO, "Server: listening on port " + std::to_string(port));
+    if (db.settings.useSSL) {
+        ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
+        ssl_context_.use_certificate_chain_file("cert.pem");
+        ssl_context_.use_private_key_file("key.pem", asio::ssl::context::pem);
+    }
     this->do_accept();
 }
 
-void Server::do_accept()
-{
+void Server::do_accept() {
     acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
         if (!ec) {
-            ZestLog(LogLevel::DEBUG, "Server: new connection accepted");
-            std::make_shared<Session>(std::move(socket), this->db_)->start();
-        } else {
-            ZestLog(LogLevel::ERROR, "Server: accept error: " + ec.message());
+            if (this->db_.settings.useSSL) {
+                asio::ssl::stream<tcp::socket> ssl_sock(std::move(socket), this->ssl_context_);
+                std::make_shared<Session>(std::move(ssl_sock), this->db_)->start();
+            } else {
+                std::make_shared<Session>(std::move(socket), this->db_)->start();
+            }
         }
-
         this->do_accept();
     });
 }

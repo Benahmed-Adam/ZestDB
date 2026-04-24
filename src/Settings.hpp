@@ -26,6 +26,7 @@ struct Settings {
     std::string NetworkValidationStr;
 
     bool isDebug;
+    bool useSSL;
     bool isRunning = true;
 
     bool hasCrashedLastTime;

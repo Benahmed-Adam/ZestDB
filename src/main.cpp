@@ -93,7 +93,7 @@ int main(int argc, char** argv)
         db.ioCtx.run();
     });
     
-    db.srv.listen("0.0.0.0", db.settings.WebPort);
+    db.srv->listen("0.0.0.0", db.settings.WebPort);
 
     t.join();
     ioThread.join();

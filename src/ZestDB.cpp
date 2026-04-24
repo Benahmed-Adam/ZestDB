@@ -77,7 +77,15 @@ ZestDB::ZestDB()
     });
     flushThread.detach();
 
-    this->srv.WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
+    if (this->settings.useSSL) {
+        this->srv = std::make_unique<httplib::SSLServer>("./cert.pem", "./key.pem");
+        ZestLog(LogLevel::INFO, "Server mode: Encrypted");
+    } else {
+        this->srv = std::make_unique<httplib::Server>();
+        ZestLog(LogLevel::INFO, "Server mode: Plain");
+    }
+
+    this->srv->WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
         if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
             ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
             return;
@@ -133,7 +141,7 @@ ZestDB::ZestDB()
         ZestLog(LogLevel::INFO, "Session: client disconnected");
     });
 
-    this->srv.Get("/", [this](const httplib::Request&, httplib::Response& res) {
+    this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
         fs::path indexPath = fs::current_path() / "public" / "index.html";
         if (fs::exists(indexPath)) {
             std::ifstream file(indexPath);
@@ -246,6 +254,10 @@ void ZestDB::boot()
         this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
         this->settings.NetworkValidationStr = node["NetworkValidation"].get_value_or<std::string>("");
 
+        this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
+        setLoggerDebugMode(this->settings.isDebug);
+        this->settings.useSSL = node["useSSL"].get_value_or<bool>(false);
+
         if (!this->settings.KeyValidationStr.empty()) {
             try {
                 this->settings.KeyValidation = std::regex(this->settings.KeyValidationStr);
@@ -272,9 +284,6 @@ void ZestDB::boot()
                 throw std::runtime_error("Invalid NetworkValidation regex");
             }
         }
-
-        this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
-        setLoggerDebugMode(this->settings.isDebug);
 
         if (node.contains("users") && node["users"].is_sequence()) {
             for (auto& user_node : node["users"]) {
@@ -782,7 +791,7 @@ void ZestDB::stop()
 
     this->settings.isRunning = false;
     this->ioCtx.stop();
-    this->srv.stop();
+    this->srv->stop();
 
     this->flush();
 }

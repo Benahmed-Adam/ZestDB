@@ -1,4 +1,5 @@
 #pragma once
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 
 #include <atomic>
 #include <memory>
@@ -65,8 +66,7 @@ public:
 
     Settings settings;
     asio::io_context ioCtx;
-    httplib::Server srv;
-
+    std::unique_ptr<httplib::Server> srv;
 private:
     void boot();
     void fillCache();
