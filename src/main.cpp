@@ -40,7 +40,7 @@ void populate(ZestDB* db)
 void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard)
 {
     std::string line;
-    while (true) {
+    while (db->settings.isRunning) {
         std::cout << "zestdb> ";
         if (!std::getline(std::cin, line)) {
             break;
@@ -69,9 +69,18 @@ int main(int argc, char** argv)
 {
     ZestDB db;
 
-    //std::signal(SIGINT, db.stop);
-
     auto work = asio::make_work_guard(db.ioCtx);
+
+    asio::signal_set signals(db.ioCtx, SIGINT, SIGTERM);
+
+    signals.async_wait([&](const asio::error_code& error, int) {
+        if (!error) {
+            ZestLog(LogLevel::WARNING, "Interrupt signal detected, exiting...");
+            work.reset();
+            db.stop();
+            ZestLog(LogLevel::WARNING, "Press Enter to quit");
+        }
+    });
 
     if (argc > 1 && std::string(argv[1]) == "pop") {
         std::thread t(populate, &db);

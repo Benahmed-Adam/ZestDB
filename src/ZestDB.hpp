@@ -61,7 +61,7 @@ public:
 
     std::string execCmd(const std::string& command);
     bool validateToken(const std::string& username, const std::string& token) const;
-    void stop(int = 0);
+    void stop();
 
     Settings settings;
     asio::io_context ioCtx;

@@ -751,7 +751,7 @@ std::string ZestDB::execCmd(const std::string& command)
     return oss.str();
 }
 
-void ZestDB::stop(int)
+void ZestDB::stop()
 {
     ZestLog(LogLevel::INFO, "Exiting ZestDB...");
 
