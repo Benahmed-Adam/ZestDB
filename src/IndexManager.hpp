@@ -2,9 +2,9 @@
 
 #include <filesystem>
 #include <fstream>
-#include <unordered_map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Settings.hpp"
@@ -30,6 +30,7 @@ public:
     std::vector<IndexEntry> getAll();
     std::vector<IndexEntry> compact();
     void flush();
+
 private:
     std::filesystem::path indexPath;
     std::fstream index;

@@ -7,7 +7,8 @@
 DataSegment::DataSegment(const Settings& set, int id)
     : segmentId(id)
     , currentOffset(0)
-    , settings(set), canFlush(false)
+    , settings(set)
+    , canFlush(false)
 {
     ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
     this->openSegment();
@@ -75,7 +76,7 @@ unsigned long DataSegment::write(const std::string& value)
 
     this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));
     this->canFlush = true;
-    
+
     if (!this->segment.good()) {
         ZestLog(LogLevel::ERROR, "DataSegment::write - write failed");
         return this->settings.SegSize + 1;
@@ -129,10 +130,11 @@ int DataSegment::getSegmentId() const
     return this->segmentId;
 }
 
-void DataSegment::flush() {
+void DataSegment::flush()
+{
     std::lock_guard<std::mutex> lock(this->mtx);
     ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing to disk...");
-    
+
     if (this->canFlush) {
         this->segment.flush();
         this->canFlush = false;

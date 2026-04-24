@@ -1,8 +1,8 @@
+#include <csignal>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <csignal>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -92,7 +92,7 @@ int main(int argc, char** argv)
     std::thread ioThread([&db]() {
         db.ioCtx.run();
     });
-    
+
     db.srv->listen("0.0.0.0", db.settings.WebPort);
 
     t.join();

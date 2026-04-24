@@ -128,7 +128,8 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
     ZestLog(LogLevel::DEBUG, "StorageManager::removeUnusedSegments - Removed unused segments, remaining: " + std::to_string(this->segments.size()));
 }
 
-void StorageManager::flush() {
+void StorageManager::flush()
+{
     ZestLog(LogLevel::DEBUG, "StorageManager::flush - Flushing each DataSegment");
     for (auto& seg : this->segments) {
         seg->flush();

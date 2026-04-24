@@ -67,6 +67,7 @@ public:
     Settings settings;
     asio::io_context ioCtx;
     std::unique_ptr<httplib::Server> srv;
+
 private:
     void boot();
     void fillCache();

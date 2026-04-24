@@ -18,6 +18,7 @@ public:
     unsigned long getWritePosition() const;
     void refreshFullStatus();
     void flush();
+
 private:
     void openSegment();
     int segmentId;
