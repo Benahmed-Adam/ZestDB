@@ -168,7 +168,8 @@ std::vector<IndexEntry> IndexManager::getAll()
 
 std::vector<IndexEntry> IndexManager::compact()
 {
-    // TODO! FAIRE EN SORTE QU'il Y AIT UNE COPIE QUI SOIT FAITE. EXEMPLE : INDEX.tmp
+    std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp");
+
     std::vector<IndexEntry> entries = this->getAll();
     std::vector<IndexEntry> validEntries = entries;
 
