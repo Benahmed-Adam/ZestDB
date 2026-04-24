@@ -7,11 +7,13 @@
 struct Settings {
     std::filesystem::path DbPath;
     std::filesystem::path IndexPath;
+    std::filesystem::path walPath;
     unsigned long SegSize;
     unsigned int MaxKeySize;
     unsigned int MaxValueSize;
     unsigned int CacheSize;
     unsigned int CompactingInterval;
+    unsigned int FlushInterval;
     short DBPort;
     short WebPort;
 

@@ -44,6 +44,7 @@ ZestDB::ZestDB()
     this->storageManager = std::make_unique<StorageManager>(this->settings);
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
+    this->wal = std::make_unique<WAL>(this->settings);
     this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
     ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
@@ -60,13 +61,29 @@ ZestDB::ZestDB()
         this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
     });
 
+    std::thread flushThread = std::thread([this]() {
+        while (this->settings.isRunning) {
+            std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
+            ZestLog(LogLevel::DEBUG, "Flushing the content of the INDEX and the data segments into the disk...");
+            this->indexManager->flush();
+            this->storageManager->flush();
+            this->wal->clear();
+        }
+    });
+
     this->initialized.store(true);
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
+    flushThread.detach();
 
     this->srv.WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
-        (void)req;
+
+        if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
+            ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
+            return;
+        }
+
         ZestLog(LogLevel::INFO, "Session: client connected");
 
         bool authenticated = false;
@@ -133,25 +150,6 @@ ZestDB::ZestDB()
 
 ZestDB::~ZestDB()
 {
-}
-
-bool ZestDB::handleRequest(const httplib::Request& req)
-{
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - start");
-    const std::string authorization = req.get_header_value("Authorization");
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization header: " + authorization);
-
-    if (authorization == "") {
-        ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - Authorization empty");
-        return false;
-    }
-
-    unsigned int point = authorization.find(".");
-    std::string username = authorization.substr(0, point);
-    std::string token = authorization.substr(point + 1, authorization.size() - point - 1);
-    ZestLog(LogLevel::DEBUG, "ZestDB::handleRequest - username: " + username + ", token: " + token);
-
-    return this->validateToken(username, token);
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -239,6 +237,7 @@ void ZestDB::boot()
         this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
         this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
         this->settings.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
+        this->settings.FlushInterval = node["FlushInterval"].get_value_or<unsigned int>(120);
         this->settings.DBPort = node["DBPort"].get_value_or<short>(7321);
         this->settings.WebPort = node["WebPort"].get_value_or<short>(1237);
 
@@ -316,6 +315,7 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
     ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
     ZestLog(LogLevel::DEBUG, "CompactingInterval : " + std::to_string(this->settings.CompactingInterval));
+    ZestLog(LogLevel::DEBUG, "FlushInterval : " + std::to_string(this->settings.FlushInterval));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
     ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
     ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
@@ -338,7 +338,26 @@ void ZestDB::boot()
         this->settings.IndexPath = this->settings.DbPath / "INDEX";
     }
 
+    if (!fs::exists(this->settings.DbPath / "WAL")) {
+        fs::path walPath = this->settings.DbPath / "WAL";
+        ZestLog(LogLevel::INFO, "Creating the WAL at " + walPath.string());
+
+        if (auto parent = walPath.parent_path(); !fs::exists(parent)) {
+            fs::create_directories(parent);
+        }
+
+        std::ofstream index(walPath);
+        if (!index) {
+            ZestLog(LogLevel::ERROR, "Failed to create WAL at " + walPath.string());
+            throw std::runtime_error("Failed to create WAL");
+        }
+        this->settings.walPath = walPath;
+    } else {
+        this->settings.walPath = this->settings.DbPath / "WAL";
+    }
+
     ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
+    ZestLog(LogLevel::DEBUG, "WAL path : " + this->settings.walPath.string());
 
     if (!fs::exists(this->settings.DbPath / "seg")) {
         ZestLog(LogLevel::WARNING, "Creating seg folder at " + (this->settings.DbPath / "seg").string());
@@ -397,7 +416,7 @@ ResultType ZestDB::get(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
 
-    std::lock_guard<std::mutex> lock(this->readMtx);
+    std::shared_lock<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry;
     entry = this->indexManager->search(key);
 
@@ -426,7 +445,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
 
-    std::lock_guard<std::mutex> lock(this->readMtx);
+    std::lock_guard<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
 
@@ -451,7 +470,7 @@ ResultType ZestDB::del(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
 
-    std::lock_guard<std::mutex> lock(this->readMtx);
+    std::lock_guard<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry;
 
     CacheEntry cacheEntry = this->cache->get(key);
@@ -622,6 +641,7 @@ std::string ZestDB::execCmd(const std::string& command)
     iss >> cmd;
 
     std::ostringstream oss;
+    ResultType result = { ResultType::Code::ERROR, "" };
 
     if (cmd == "g" || cmd == "get") {
         std::string key;
@@ -629,7 +649,7 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_KEY << std::endl;
             oss << Messages::USAGE_GET << std::endl;
         }
-        ResultType result = this->get(key);
+        result = this->get(key);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << result.message << std::endl;
         } else {
@@ -649,7 +669,7 @@ std::string ZestDB::execCmd(const std::string& command)
         while (iss >> rest) {
             value += " " + rest;
         }
-        ResultType result = this->set(key, value);
+        result = this->set(key, value);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -661,7 +681,7 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_KEY << std::endl;
             oss << Messages::USAGE_GET << std::endl;
         }
-        ResultType result = this->del(key);
+        result = this->del(key);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -673,7 +693,7 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_PATTERN << std::endl;
             oss << Messages::USAGE_GETBY << std::endl;
         }
-        ResultType result = this->getBy(pattern);
+        result = this->getBy(pattern);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << result.message << std::endl;
         } else {
@@ -693,7 +713,7 @@ std::string ZestDB::execCmd(const std::string& command)
         while (iss >> rest) {
             value += " " + rest;
         }
-        ResultType result = this->setBy(pattern, value);
+        result = this->setBy(pattern, value);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -705,7 +725,7 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_PATTERN << std::endl;
             oss << Messages::USAGE_DELBY << std::endl;
         }
-        ResultType result = this->delBy(pattern);
+        result = this->delBy(pattern);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -716,6 +736,10 @@ std::string ZestDB::execCmd(const std::string& command)
     } else {
         oss << "ERROR: " << Messages::CMD_NOT_FOUND << std::endl;
         oss << Messages::TYPE_HELP << std::endl;
+    }
+
+    if (result.code == ResultType::Code::SUCCESS && cmd != "h" && cmd != "help" && cmd != "") {
+        this->wal->append(command);
     }
 
     return oss.str();
@@ -743,4 +767,13 @@ std::string ZestDB::help() const
     oss << std::endl;
     oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, h=help" << std::endl;
     return oss.str();
+}
+
+void ZestDB::replayWAL()
+{
+    std::vector<std::string> cmds = this->wal->getCmds();
+
+    for (const std::string& cmd : cmds) {
+        this->execCmd(cmd);
+    }
 }

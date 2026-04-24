@@ -12,11 +12,11 @@
 
 class StorageManager {
 public:
-    StorageManager(const Settings& settings);
+    StorageManager(const Settings& set);
     IndexEntry append(const std::string& value);
     std::string read(const IndexEntry& entry);
     void removeUnusedSegments(const std::vector<int>& usedSegmentIds);
-
+    void flush();
 private:
     void boot();
     IndexEntry appendToSegment(DataSegment* seg, const std::string& value);

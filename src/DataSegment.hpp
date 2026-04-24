@@ -9,7 +9,7 @@
 
 class DataSegment {
 public:
-    DataSegment(const Settings& settings, int segmentId);
+    DataSegment(const Settings& set, int segmentId);
     ~DataSegment();
     unsigned long write(const std::string& value);
     std::string read(unsigned long offset, unsigned int size);
@@ -17,7 +17,7 @@ public:
     int getSegmentId() const;
     unsigned long getWritePosition() const;
     void refreshFullStatus();
-
+    void flush();
 private:
     void openSegment();
     int segmentId;
@@ -25,5 +25,6 @@ private:
     Settings settings;
     std::fstream segment;
     std::mutex mtx;
-    std::thread flushThread;
+
+    bool canFlush;
 };

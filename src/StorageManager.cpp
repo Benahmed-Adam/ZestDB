@@ -4,10 +4,10 @@
 #include "Logger.hpp"
 #include "StorageManager.hpp"
 
-StorageManager::StorageManager(const Settings& s)
+StorageManager::StorageManager(const Settings& set)
 {
     ZestLog(LogLevel::DEBUG, "Initializing StorageManager...");
-    this->settings = s;
+    this->settings = set;
     this->latestSegmentId = 0;
     this->boot();
     ZestLog(LogLevel::DEBUG, "StorageManager initialized");
@@ -115,9 +115,9 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
         if (!used) {
             std::string segPath = (this->settings.DbPath / "seg" / (std::to_string(id) + ".seg")).string();
             if (std::remove(segPath.c_str()) != 0) {
-                ZestLog(LogLevel::ERROR, "StorageManager - Failed to remove segment file: " + segPath);
+                ZestLog(LogLevel::ERROR, "StorageManager::removeUnusedSegments - Failed to remove segment file: " + segPath);
             } else {
-                ZestLog(LogLevel::DEBUG, "StorageManager - Removed segment file: " + segPath);
+                ZestLog(LogLevel::DEBUG, "StorageManager::removeUnusedSegments - Removed segment file: " + segPath);
             }
             it = this->segments.erase(it);
         } else {
@@ -125,5 +125,13 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
         }
     }
 
-    ZestLog(LogLevel::INFO, "StorageManager - Removed unused segments, remaining: " + std::to_string(this->segments.size()));
+    ZestLog(LogLevel::DEBUG, "StorageManager::removeUnusedSegments - Removed unused segments, remaining: " + std::to_string(this->segments.size()));
+}
+
+void StorageManager::flush() {
+    ZestLog(LogLevel::DEBUG, "StorageManager::flush - Flushing each DataSegment");
+    for (auto& seg : this->segments) {
+        seg->flush();
+    }
+    ZestLog(LogLevel::DEBUG, "Storagemanager::flush - DataSegments successfully flushed");
 }

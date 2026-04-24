@@ -7,26 +7,16 @@
 DataSegment::DataSegment(const Settings& set, int id)
     : segmentId(id)
     , currentOffset(0)
-    , settings(set)
+    , settings(set), canFlush(false)
 {
     ZestLog(LogLevel::DEBUG, "DataSegment::DataSegment - creating segment: " + std::to_string(id));
     this->openSegment();
     this->refreshFullStatus();
-    this->flushThread = std::thread([this]() {
-        while (this->settings.isRunning) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            std::lock_guard<std::mutex> lock(this->mtx);
-            this->segment.flush();
-        }
-    });
 }
 
 DataSegment::~DataSegment()
 {
     this->settings.isRunning = false;
-    if (this->flushThread.joinable()) {
-        this->flushThread.join();
-    }
     if (this->segment.is_open()) {
         this->segment.close();
     }
@@ -84,7 +74,8 @@ unsigned long DataSegment::write(const std::string& value)
     }
 
     this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));
-
+    this->canFlush = true;
+    
     if (!this->segment.good()) {
         ZestLog(LogLevel::ERROR, "DataSegment::write - write failed");
         return this->settings.SegSize + 1;
@@ -136,4 +127,18 @@ bool DataSegment::isFull() const
 int DataSegment::getSegmentId() const
 {
     return this->segmentId;
+}
+
+void DataSegment::flush() {
+    std::lock_guard<std::mutex> lock(this->mtx);
+    ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing to disk...");
+    
+    if (this->canFlush) {
+        this->segment.flush();
+        this->canFlush = false;
+        ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing successful");
+        return;
+    }
+
+    ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing skipped, the segment is not ready to be flushed");
 }

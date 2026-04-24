@@ -3,7 +3,7 @@
 #include <chrono>
 
 IndexManager::IndexManager(const Settings& set)
-    : settings(set)
+    : settings(set), canFlush(false)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = settings.IndexPath;
@@ -16,21 +16,11 @@ IndexManager::IndexManager(const Settings& set)
     }
 
     this->loadIndexIntoMemory();
-    this->flushThread = std::thread([this]() {
-        while (this->settings.isRunning) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            std::lock_guard<std::mutex> lock(this->mtx);
-            this->index.flush();
-        }
-    });
 }
 
 IndexManager::~IndexManager()
 {
     this->settings.isRunning = false;
-    if (this->flushThread.joinable()) {
-        this->flushThread.join();
-    }
     if (this->index.is_open()) {
         this->index.close();
     }
@@ -94,8 +84,7 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
         this->index.seekp(offset, std::ios::beg);
         this->index.write((const char*)&entry, sizeof(entry));
-        this->index.flush();
-
+        this->canFlush = true;
         if (entry.isTombstone) {
             this->memoryTree.erase(it);
             this->tombstoneOffsets.push_back(offset);
@@ -130,8 +119,7 @@ void IndexManager::insert(const IndexEntry& entry)
         this->index.seekp(0, std::ios::end);
         std::streamoff newOffset = this->index.tellp();
         this->index.write((const char*)&entry, sizeof(entry));
-        this->index.flush();
-
+        this->canFlush = true;
         this->memoryTree[keyStr] = newOffset;
         return;
     }
@@ -149,8 +137,7 @@ void IndexManager::insert(const IndexEntry& entry)
 
     this->index.seekp(insertPosition, std::ios::beg);
     this->index.write((const char*)&entry, sizeof(entry));
-    this->index.flush();
-
+    this->canFlush = true;
     this->memoryTree[keyStr] = insertPosition;
 }
 
@@ -213,7 +200,21 @@ std::vector<IndexEntry> IndexManager::compact()
         }
     }
 
-    this->index.flush();
-    ZestLog(LogLevel::INFO, "Index compaction completed successfully.");
+    this->canFlush = true;
+    ZestLog(LogLevel::DEBUG, "Index compaction completed successfully.");
     return result;
+}
+
+void IndexManager::flush() {
+    std::lock_guard<std::mutex> lock(this->mtx);
+    ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing to disk...");
+    
+    if (this->canFlush) {
+        this->index.flush();
+        this->canFlush = false;
+        ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing successful");
+        return;
+    }
+
+    ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing skipped, the index is not ready to be flushed");
 }

@@ -2,8 +2,8 @@
 
 #include <atomic>
 #include <memory>
-#include <mutex>
 #include <unordered_map>
+#include <shared_mutex>
 
 #include "Compactor.hpp"
 #include "IndexManager.hpp"
@@ -12,6 +12,7 @@
 #include "Settings.hpp"
 #include "StorageManager.hpp"
 #include "httplib.hpp"
+#include "WAL.hpp"
 
 struct ResultType {
     enum class Code {
@@ -70,8 +71,8 @@ private:
     void fillCache();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
-    bool handleRequest(const httplib::Request& req);
-
+    void replayWAL();
+    
     std::string help() const;
 
     std::unique_ptr<IndexManager> indexManager;
@@ -79,9 +80,10 @@ private:
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
     std::unique_ptr<Server> socket;
+    std::unique_ptr<WAL> wal;
 
     std::atomic<bool> initialized;
-    std::mutex readMtx;
+    std::shared_mutex readMtx;
 
     std::unordered_map<std::string, std::string> users;
 };

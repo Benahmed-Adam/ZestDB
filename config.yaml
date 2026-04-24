@@ -4,6 +4,7 @@ MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
 CacheSize: 10000 # Max number of values in the cache
 CompactingInterval: 100 # The ammount of time in seconds between each compaction of the INDEX file
+FlushInterval: 10 # The ammount of time in seconds between each sync on the disk
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
 
@@ -12,7 +13,7 @@ WebPort: 1237
 
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
-isDebug: true # Degug mode for the logger
+isDebug: false # Degug mode for the logger
 
 users:
   - user: bob

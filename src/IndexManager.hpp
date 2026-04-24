@@ -2,10 +2,9 @@
 
 #include <filesystem>
 #include <fstream>
-#include <map>
+#include <unordered_map>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "Settings.hpp"
@@ -30,16 +29,17 @@ public:
     void markAsTombstone(const std::string& key);
     std::vector<IndexEntry> getAll();
     std::vector<IndexEntry> compact();
-
+    void flush();
 private:
     std::filesystem::path indexPath;
     std::fstream index;
     std::mutex mtx;
     Settings settings;
-    std::thread flushThread;
 
-    std::map<std::string, std::streamoff> memoryTree;
+    std::unordered_map<std::string, std::streamoff> memoryTree;
     std::vector<std::streamoff> tombstoneOffsets;
+
+    bool canFlush;
 
     void loadIndexIntoMemory();
 };

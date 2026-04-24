@@ -11,7 +11,11 @@ Session::Session(tcp::socket socket, ZestDB& db)
 void Session::start()
 {
     ZestLog(LogLevel::INFO, "Session: client connected");
-    this->do_read();
+    if (!std::regex_match(this->socket_.remote_endpoint().address().to_string(), this->db_.settings.NetworkValidation)) {
+        this->do_write("unauthorized", true);
+    } else {
+        this->do_read();
+    }
 }
 
 void Session::do_read()
