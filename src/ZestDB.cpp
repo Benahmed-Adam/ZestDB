@@ -368,7 +368,6 @@ void ZestDB::boot()
     }
 
     this->settings.ShutdownFilePath = this->settings.DbPath / "SF";
-
     this->settings.hasCrashedLastTime = !this->isShutdownFilePresent();
 }
 
