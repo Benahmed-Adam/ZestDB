@@ -77,10 +77,6 @@ private:
 
     std::string help() const;
 
-    inline bool isShutdownFilePresent() const;
-    void createShutdownFile() const;
-    void deleteShutdownFile() const;
-
     std::unique_ptr<IndexManager> indexManager;
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;

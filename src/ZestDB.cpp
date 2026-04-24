@@ -77,8 +77,6 @@ ZestDB::ZestDB()
     });
     flushThread.detach();
 
-    this->deleteShutdownFile();
-
     this->srv.WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
         if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
             ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
@@ -341,6 +339,31 @@ void ZestDB::boot()
         this->settings.IndexPath = this->settings.DbPath / "INDEX";
     }
 
+    fs::path indexTmpPath = this->settings.DbPath / "INDEX.tmp";
+    if (fs::exists(indexTmpPath)) {
+        std::ifstream tmpFile(indexTmpPath, std::ios::ate | std::ios::binary);
+        std::streampos tmpSize = 0;
+        if (tmpFile.is_open()) {
+            tmpSize = tmpFile.tellg();
+            tmpFile.close();
+        }
+
+        std::ifstream indexFile(this->settings.IndexPath, std::ios::ate | std::ios::binary);
+        std::streampos indexSize = 0;
+        if (indexFile.is_open()) {
+            indexSize = indexFile.tellg();
+            indexFile.close();
+        }
+
+        if (tmpSize > 0 && indexSize == 0) {
+            ZestLog(LogLevel::INFO, "Recovering INDEX from INDEX.tmp after crash...");
+            fs::remove(this->settings.IndexPath);
+            fs::copy_file(indexTmpPath, this->settings.IndexPath, std::filesystem::copy_options::overwrite_existing);
+            fs::remove(indexTmpPath);
+            ZestLog(LogLevel::INFO, "INDEX recovered successfully from INDEX.tmp");
+        }
+    }
+
     if (!fs::exists(this->settings.DbPath / "WAL")) {
         fs::path WalPath = this->settings.DbPath / "WAL";
         ZestLog(LogLevel::INFO, "Creating the WAL at " + WalPath.string());
@@ -366,9 +389,6 @@ void ZestDB::boot()
         ZestLog(LogLevel::WARNING, "Creating seg folder at " + (this->settings.DbPath / "seg").string());
         fs::create_directory(this->settings.DbPath / "seg");
     }
-
-    this->settings.ShutdownFilePath = this->settings.DbPath / "SF";
-    this->settings.hasCrashedLastTime = !this->isShutdownFilePresent();
 }
 
 void ZestDB::fillCache()
@@ -765,8 +785,6 @@ void ZestDB::stop()
     this->srv.stop();
 
     this->flush();
-
-    this->createShutdownFile();
 }
 
 std::string ZestDB::help() const
@@ -810,20 +828,4 @@ void ZestDB::replayWAL()
     this->flush();
     this->replaying.store(false);
     ZestLog(LogLevel::INFO, "WAL replay complete, processed " + std::to_string(cmds.size()) + " commands");
-}
-
-inline bool ZestDB::isShutdownFilePresent() const {
-    return fs::exists(this->settings.ShutdownFilePath);
-}
-
-void ZestDB::createShutdownFile() const {
-    std::ofstream file;
-    file.open(this->settings.ShutdownFilePath, std::ios::trunc);
-    file.close();
-}
-
-void ZestDB::deleteShutdownFile() const {
-    if (this->isShutdownFilePresent()) {
-        fs::remove(this->settings.ShutdownFilePath);
-    }
 }

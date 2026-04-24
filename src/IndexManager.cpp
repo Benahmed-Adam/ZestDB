@@ -3,7 +3,8 @@
 #include <chrono>
 
 IndexManager::IndexManager(const Settings& set)
-    : settings(set), canFlush(false)
+    : settings(set)
+    , canFlush(false)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = settings.IndexPath;
@@ -168,7 +169,7 @@ std::vector<IndexEntry> IndexManager::getAll()
 
 std::vector<IndexEntry> IndexManager::compact()
 {
-    std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp");
+    std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
 
     std::vector<IndexEntry> entries = this->getAll();
     std::vector<IndexEntry> validEntries = entries;
@@ -202,15 +203,18 @@ std::vector<IndexEntry> IndexManager::compact()
         }
     }
 
-    this->canFlush = true;
+    this->index.flush();
     ZestLog(LogLevel::DEBUG, "Index compaction completed successfully.");
+
+    std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
     return result;
 }
 
-void IndexManager::flush() {
+void IndexManager::flush()
+{
     std::lock_guard<std::mutex> lock(this->mtx);
     ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing to disk...");
-    
+
     if (this->canFlush) {
         this->index.flush();
         this->canFlush = false;
