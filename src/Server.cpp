@@ -50,8 +50,8 @@ void Session::do_read()
                 if (!ec) {
                     std::istream is(&this->buffer_);
                     std::string cmd;
-                    std::getline(is, cmd); 
-                    
+                    std::getline(is, cmd);
+
                     if (!cmd.empty() && cmd.back() == '\r') {
                         cmd.pop_back();
                     }
@@ -63,7 +63,7 @@ void Session::do_read()
                         std::string authPrefix = "Authorization: ";
                         if (cmd.compare(0, authPrefix.length(), authPrefix) == 0) {
                             std::string authContent = cmd.substr(authPrefix.length());
-                            
+
                             size_t dotPos = authContent.find(".");
                             if (dotPos != std::string::npos) {
                                 std::string username = authContent.substr(0, dotPos);
