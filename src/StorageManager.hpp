@@ -24,5 +24,4 @@ private:
     std::vector<std::unique_ptr<DataSegment>> segments;
     std::atomic<int> latestSegmentId;
     Settings settings;
-    std::mutex segmentsMtx;
 };

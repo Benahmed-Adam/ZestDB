@@ -59,21 +59,17 @@ IndexEntry StorageManager::append(const std::string& value)
     while (true) {
         int currentId = this->latestSegmentId.load();
 
-        {
-            std::lock_guard<std::mutex> lock(this->segmentsMtx);
-            for (auto& segPtr : this->segments) {
-                if (segPtr->getSegmentId() == currentId && !segPtr->isFull()) {
-                    IndexEntry entry = this->appendToSegment(segPtr.get(), value);
-                    if (entry.segmentId != -1) {
-                        return entry;
-                    }
+        for (auto& segPtr : this->segments) {
+            if (segPtr->getSegmentId() == currentId && !segPtr->isFull()) {
+                IndexEntry entry = this->appendToSegment(segPtr.get(), value);
+                if (entry.segmentId != -1) {
+                    return entry;
                 }
             }
         }
 
         int nextId = currentId + 1;
         if (this->latestSegmentId.compare_exchange_weak(currentId, nextId)) {
-            std::lock_guard<std::mutex> lock(this->segmentsMtx);
             ZestLog(LogLevel::DEBUG, "StorageManager::append - creating new segment: " + std::to_string(nextId));
             this->segments.push_back(std::make_unique<DataSegment>(this->settings, nextId));
 
@@ -92,8 +88,6 @@ std::string StorageManager::read(const IndexEntry& entry)
 {
     ZestLog(LogLevel::DEBUG, "StorageManager::read - segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset) + ", size: " + std::to_string(entry.size));
 
-    std::lock_guard<std::mutex> lock(this->segmentsMtx);
-
     for (auto& segPtr : this->segments) {
         if (segPtr->getSegmentId() == entry.segmentId) {
             return segPtr->read(entry.offset, entry.size);
@@ -106,7 +100,6 @@ std::string StorageManager::read(const IndexEntry& entry)
 
 void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds)
 {
-    std::lock_guard<std::mutex> lock(this->segmentsMtx);
 
     for (auto it = this->segments.begin(); it != this->segments.end();) {
         int id = (*it)->getSegmentId();

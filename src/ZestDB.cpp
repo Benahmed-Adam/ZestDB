@@ -489,7 +489,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
 
-    std::lock_guard<std::shared_mutex> lock(this->readMtx);
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
 
@@ -514,7 +514,7 @@ ResultType ZestDB::del(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
 
-    std::lock_guard<std::shared_mutex> lock(this->readMtx);
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry;
 
     CacheEntry cacheEntry = this->cache->get(key);
@@ -560,6 +560,7 @@ ResultType ZestDB::getBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
+    std::shared_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
 
@@ -605,6 +606,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
 
@@ -651,6 +653,7 @@ ResultType ZestDB::delBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
 

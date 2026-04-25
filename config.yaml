@@ -15,7 +15,7 @@ NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger
 
-useSSL: true # Use SSL ?
+useSSL: false # Use SSL ?
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute
 SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 
