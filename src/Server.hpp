@@ -25,7 +25,7 @@ private:
     void close_stream();
 
     ZestStream stream_;
-    char data_[4096];
+    asio::streambuf buffer_;
     ZestDB& db_;
     bool authenticated_ = false;
 };

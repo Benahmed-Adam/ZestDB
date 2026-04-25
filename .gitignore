@@ -6,3 +6,5 @@ obj/
 DB/
 test.py
 TODO.md
+cert.pem
+key.pem

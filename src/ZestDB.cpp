@@ -78,7 +78,7 @@ ZestDB::ZestDB()
     flushThread.detach();
 
     if (this->settings.useSSL) {
-        this->srv = std::make_unique<httplib::SSLServer>("./cert.pem", "./key.pem");
+        this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(), this->settings.SSLKeyPath.string().c_str());
         ZestLog(LogLevel::INFO, "Server mode: Encrypted");
     } else {
         this->srv = std::make_unique<httplib::Server>();
@@ -87,11 +87,12 @@ ZestDB::ZestDB()
 
     this->srv->WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
         if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
+            ZestLog(LogLevel::WARNING, "Session: Unauthorized IP: " + req.remote_addr);
             ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
             return;
         }
 
-        ZestLog(LogLevel::INFO, "Session: client connected");
+        ZestLog(LogLevel::INFO, "Session: client connected from " + req.remote_addr + ":" + std::to_string(req.remote_port));
 
         bool authenticated = false;
         std::string cmd;
@@ -256,7 +257,15 @@ void ZestDB::boot()
 
         this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
         setLoggerDebugMode(this->settings.isDebug);
+
         this->settings.useSSL = node["useSSL"].get_value_or<bool>(false);
+        this->settings.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
+        this->settings.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
+
+        if (this->settings.useSSL && (this->settings.SSLCertPath == "" || this->settings.SSLKeyPath == "")) {
+            ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
+            throw std::runtime_error("SSL with no cert or key");
+        }
 
         if (!this->settings.KeyValidationStr.empty()) {
             try {

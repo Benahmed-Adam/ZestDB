@@ -8,6 +8,8 @@ struct Settings {
     std::filesystem::path DbPath;
     std::filesystem::path IndexPath;
     std::filesystem::path WalPath;
+    std::filesystem::path SSLCertPath;
+    std::filesystem::path SSLKeyPath;
 
     unsigned long SegSize;
     unsigned int MaxKeySize;

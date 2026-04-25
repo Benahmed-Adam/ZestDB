@@ -15,11 +15,18 @@ void Session::start()
     },
         stream_);
 
+    unsigned short int remote_port = std::visit([](auto& s) {
+        return s.lowest_layer().remote_endpoint().port();
+    },
+        stream_);
+
     if (!std::regex_match(remote_ip, this->db_.settings.NetworkValidation)) {
         ZestLog(LogLevel::WARNING, "Session: Unauthorized IP: " + remote_ip);
         this->do_write("unauthorized", true);
         return;
     }
+
+    ZestLog(LogLevel::INFO, "Session: client connected from " + remote_ip + ":" + std::to_string(remote_port));
 
     if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
         auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
@@ -38,48 +45,56 @@ void Session::do_read()
     auto self(this->shared_from_this());
 
     auto handle_read = [this, self](auto& stream) {
-        stream.async_read_some(asio::buffer(this->data_),
-            [this, self](std::error_code ec, std::size_t length) {
+        asio::async_read_until(stream, this->buffer_, "\n",
+            [this, self](std::error_code ec, std::size_t) {
                 if (!ec) {
-                    ZestLog(LogLevel::DEBUG, "Session: received " + std::to_string(length) + " bytes");
-                    std::string cmd(this->data_);
+                    std::istream is(&this->buffer_);
+                    std::string cmd;
+                    std::getline(is, cmd); 
+                    
+                    if (!cmd.empty() && cmd.back() == '\r') {
+                        cmd.pop_back();
+                    }
+
+                    ZestLog(LogLevel::DEBUG, "Session: command received: " + cmd);
                     std::string result;
 
                     if (!this->authenticated_) {
-                        std::string authCmd = cmd;
-                        if (authCmd.find("Authorization: ") == 0) {
-                            authCmd = authCmd.substr(15);
-                        }
+                        std::string authPrefix = "Authorization: ";
+                        if (cmd.compare(0, authPrefix.length(), authPrefix) == 0) {
+                            std::string authContent = cmd.substr(authPrefix.length());
+                            
+                            size_t dotPos = authContent.find(".");
+                            if (dotPos != std::string::npos) {
+                                std::string username = authContent.substr(0, dotPos);
+                                std::string token = authContent.substr(dotPos + 1);
 
-                        unsigned int dotPos = authCmd.find(".");
-                        if (dotPos == std::string::npos) {
-                            ZestLog(LogLevel::DEBUG, "Session: authentication required");
-                            result = "ERROR: authentication required";
-                            this->do_write(result, true);
-                            return;
-                        } else {
-                            std::string username = authCmd.substr(0, dotPos);
-                            std::string token = authCmd.substr(dotPos + 1);
-
-                            ZestLog(LogLevel::DEBUG, "Session: username: " + username + ", token: " + token);
-
-                            if (this->db_.validateToken(username, token)) {
-                                ZestLog(LogLevel::DEBUG, "Session: authentication success");
-                                this->authenticated_ = true;
-                                result = "OK: authenticated";
+                                if (this->db_.validateToken(username, token)) {
+                                    ZestLog(LogLevel::DEBUG, "Session: auth success for " + username);
+                                    this->authenticated_ = true;
+                                    result = "OK: authenticated";
+                                } else {
+                                    result = "ERROR: authentication failed";
+                                    this->do_write(result + "\n", true);
+                                    return;
+                                }
                             } else {
-                                ZestLog(LogLevel::DEBUG, "Session: authentication failed");
-                                result = "ERROR: authentication failed";
-                                this->do_write(result, true);
+                                result = "ERROR: invalid auth format";
+                                this->do_write(result + "\n", true);
                                 return;
                             }
+                        } else {
+                            result = "ERROR: authentication required";
+                            this->do_write(result + "\n", true);
+                            return;
                         }
                     } else {
                         result = this->db_.execCmd(cmd);
                     }
 
-                    ZestLog(LogLevel::DEBUG, "Session: command result = " + result);
-                    this->do_write(result, false);
+                    this->do_write(result + "\n", false);
+                } else if (ec != asio::error::operation_aborted) {
+                    ZestLog(LogLevel::INFO, "Client disconnected");
                 }
             });
     };
@@ -128,8 +143,8 @@ Server::Server(asio::io_context& io_context, short port, ZestDB& db)
     ZestLog(LogLevel::INFO, "Server: listening on port " + std::to_string(port));
     if (db.settings.useSSL) {
         ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
-        ssl_context_.use_certificate_chain_file("cert.pem");
-        ssl_context_.use_private_key_file("key.pem", asio::ssl::context::pem);
+        ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath);
+        ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath, asio::ssl::context::pem);
     }
     this->do_accept();
 }

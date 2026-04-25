@@ -1,4 +1,4 @@
-DbPath: /mnt/c/Users/Adam/Documents/C++_Projects/ZestDB/DB # Path to the folder containing db files
+DbPath: ./DB # Path to the folder containing db files, can be relative or absolute
 SegSize: 128000 # Max data segment size
 MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
@@ -14,7 +14,10 @@ WebPort: 1237
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger
-useSSL: true
+
+useSSL: true # Use SSL ?
+SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute
+SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 
 users:
   - user: bob
