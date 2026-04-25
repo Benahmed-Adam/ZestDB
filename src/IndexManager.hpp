@@ -26,7 +26,6 @@ public:
     IndexEntry search(const std::string& key);
     void update(const std::string& key, const IndexEntry& entry);
     void insert(const IndexEntry& entry);
-    void markAsTombstone(const std::string& key);
     std::vector<IndexEntry> getAll();
     std::vector<IndexEntry> compact();
     void flush();
