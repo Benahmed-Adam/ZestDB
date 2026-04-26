@@ -395,7 +395,7 @@ ResultType ZestDB::getBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->getBy(patern);
+    return this->shardManager->getBy(reg);
 }
 
 ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
@@ -417,7 +417,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->setBy(patern, value);
+    return this->shardManager->setBy(reg, value);
 }
 
 ResultType ZestDB::delBy(const std::string& patern)
@@ -435,7 +435,7 @@ ResultType ZestDB::delBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->delBy(patern);
+    return this->shardManager->delBy(reg);
 }
 
 std::string ZestDB::execCmd(const std::string& command)

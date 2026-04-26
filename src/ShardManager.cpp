@@ -41,16 +41,8 @@ ResultType ShardManager::del(const std::string& key)
     return this->shards[static_cast<size_t>(shardId)]->del(key);
 }
 
-ResultType ShardManager::getBy(const std::string& pattern)
+ResultType ShardManager::getBy(const std::regex& reg)
 {
-    std::regex reg;
-
-    try {
-        reg = std::regex(pattern);
-    } catch (const std::regex_error& e) {
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
@@ -69,16 +61,8 @@ ResultType ShardManager::getBy(const std::string& pattern)
     return { ResultType::Code::SUCCESS, results };
 }
 
-ResultType ShardManager::setBy(const std::string& pattern, const std::string& value)
+ResultType ShardManager::setBy(const std::regex& reg, const std::string& value)
 {
-    std::regex reg;
-
-    try {
-        reg = std::regex(pattern);
-    } catch (const std::regex_error& e) {
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
@@ -105,16 +89,8 @@ ResultType ShardManager::setBy(const std::string& pattern, const std::string& va
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries" };
 }
 
-ResultType ShardManager::delBy(const std::string& pattern)
+ResultType ShardManager::delBy(const std::regex& reg)
 {
-    std::regex reg;
-
-    try {
-        reg = std::regex(pattern);
-    } catch (const std::regex_error& e) {
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
