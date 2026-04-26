@@ -21,7 +21,6 @@ public:
     ResultType delBy(const std::string& pattern);
 
     void flush();
-    void replayAllWAL();
     void stop();
 
 private:

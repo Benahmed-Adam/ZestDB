@@ -99,7 +99,7 @@ void Session::do_read()
             });
     };
 
-    std::visit(handle_read, stream_);
+    std::visit(handle_read, this->stream_);
 }
 
 void Session::do_write(const std::string& message, bool closeAfter)
@@ -121,7 +121,7 @@ void Session::do_write(const std::string& message, bool closeAfter)
                 }
             });
     },
-        stream_);
+        this->stream_);
 }
 
 void Session::close_stream()
@@ -132,7 +132,7 @@ void Session::close_stream()
         std::error_code ec;
         s.lowest_layer().close(ec);
     },
-        stream_);
+        this->stream_);
 }
 
 Server::Server(asio::io_context& io_context, short port, ZestDB& db)
@@ -151,7 +151,7 @@ Server::Server(asio::io_context& io_context, short port, ZestDB& db)
 
 void Server::do_accept()
 {
-    acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
+    this->acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
         if (!ec) {
             if (this->db_.settings.useSSL) {
                 asio::ssl::stream<tcp::socket> ssl_sock(std::move(socket), this->ssl_context_);

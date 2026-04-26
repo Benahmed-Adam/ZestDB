@@ -207,23 +207,8 @@ ResultType Shard::del(const std::string& key)
     }
 }
 
-ResultType Shard::getBy(const std::string& patern)
+ResultType Shard::getBy(const std::regex& reg)
 {
-    ZestLog(LogLevel::DEBUG, "Shard::getBy - shard " + std::to_string(shardId) + " searching with pattern: " + patern);
-
-    if (patern.empty()) {
-        ZestLog(LogLevel::ERROR, "Shard::getBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
-    }
-
-    std::regex reg;
-    try {
-        reg = std::regex(patern);
-    } catch (const std::regex_error& e) {
-        ZestLog(LogLevel::ERROR, "Shard::getBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
@@ -249,23 +234,8 @@ ResultType Shard::getBy(const std::string& patern)
     return { ResultType::Code::SUCCESS, oss.str() };
 }
 
-ResultType Shard::setBy(const std::string& patern, const std::string& value)
+ResultType Shard::setBy(const std::regex& reg, const std::string& value)
 {
-    ZestLog(LogLevel::DEBUG, "Shard::setBy - shard " + std::to_string(shardId) + " searching with pattern: " + patern);
-
-    if (patern.empty()) {
-        ZestLog(LogLevel::ERROR, "Shard::setBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
-    }
-
-    std::regex reg;
-    try {
-        reg = std::regex(patern);
-    } catch (const std::regex_error& e) {
-        ZestLog(LogLevel::ERROR, "Shard::setBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
@@ -298,21 +268,8 @@ ResultType Shard::setBy(const std::string& patern, const std::string& value)
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
 }
 
-ResultType Shard::delBy(const std::string& patern)
+ResultType Shard::delBy(const std::regex& reg)
 {
-    if (patern.empty()) {
-        ZestLog(LogLevel::ERROR, "Shard::delBy - pattern cannot be empty");
-        return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
-    }
-
-    std::regex reg;
-    try {
-        reg = std::regex(patern);
-    } catch (const std::regex_error& e) {
-        ZestLog(LogLevel::ERROR, "Shard::delBy - invalid regex pattern: " + std::string(e.what()));
-        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-    }
-
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();

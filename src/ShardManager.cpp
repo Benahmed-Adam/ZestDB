@@ -7,8 +7,8 @@ ShardManager::ShardManager(const Settings& baseSettings, int numShardsCount)
     : settings(baseSettings)
     , numShards(numShardsCount)
 {
-    for (int i = 0; i < numShards; ++i) {
-        shards.push_back(std::make_unique<Shard>(baseSettings, i));
+    for (int i = 0; i < this->numShards; ++i) {
+        this->shards.push_back(std::make_unique<Shard>(baseSettings, i));
     }
 }
 
@@ -19,35 +19,43 @@ ShardManager::~ShardManager()
 
 int ShardManager::getShardId(const std::string& key) const
 {
-    auto hash = hashFunction(key);
-    return static_cast<int>(hash % static_cast<unsigned int>(numShards));
+    auto hash = this->hashFunction(key);
+    return static_cast<int>(hash % static_cast<unsigned int>(this->numShards));
 }
 
 ResultType ShardManager::get(const std::string& key)
 {
-    auto shardId = getShardId(key);
-    return shards[static_cast<size_t>(shardId)]->get(key);
+    auto shardId = this->getShardId(key);
+    return this->shards[static_cast<size_t>(shardId)]->get(key);
 }
 
 ResultType ShardManager::set(const std::string& key, const std::string& value)
 {
-    auto shardId = getShardId(key);
-    return shards[static_cast<size_t>(shardId)]->set(key, value);
+    auto shardId = this->getShardId(key);
+    return this->shards[static_cast<size_t>(shardId)]->set(key, value);
 }
 
 ResultType ShardManager::del(const std::string& key)
 {
-    auto shardId = getShardId(key);
-    return shards[static_cast<size_t>(shardId)]->del(key);
+    auto shardId = this->getShardId(key);
+    return this->shards[static_cast<size_t>(shardId)]->del(key);
 }
 
 ResultType ShardManager::getBy(const std::string& pattern)
 {
+    std::regex reg;
+
+    try {
+        reg = std::regex(pattern);
+    } catch (const std::regex_error& e) {
+        return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
+    }
+
     std::vector<std::future<ResultType>> futures;
 
-    for (auto& shard : shards) {
+    for (auto& shard : this->shards) {
         futures.push_back(std::async(std::launch::async, [&]() {
-            return shard->getBy(pattern);
+            return shard->getBy(reg);
         }));
     }
 
@@ -63,17 +71,19 @@ ResultType ShardManager::getBy(const std::string& pattern)
 
 ResultType ShardManager::setBy(const std::string& pattern, const std::string& value)
 {
+    std::regex reg;
+
     try {
-        std::regex re(pattern);
+        reg = std::regex(pattern);
     } catch (const std::regex_error& e) {
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
     std::vector<std::future<ResultType>> futures;
 
-    for (auto& shard : shards) {
+    for (auto& shard : this->shards) {
         futures.push_back(std::async(std::launch::async, [&]() {
-            return shard->setBy(pattern, value);
+            return shard->setBy(reg, value);
         }));
     }
 
@@ -97,17 +107,19 @@ ResultType ShardManager::setBy(const std::string& pattern, const std::string& va
 
 ResultType ShardManager::delBy(const std::string& pattern)
 {
+    std::regex reg;
+
     try {
-        std::regex re(pattern);
+        reg = std::regex(pattern);
     } catch (const std::regex_error& e) {
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
     std::vector<std::future<ResultType>> futures;
 
-    for (auto& shard : shards) {
+    for (auto& shard : this->shards) {
         futures.push_back(std::async(std::launch::async, [&]() {
-            return shard->delBy(pattern);
+            return shard->delBy(reg);
         }));
     }
 
@@ -131,14 +143,14 @@ ResultType ShardManager::delBy(const std::string& pattern)
 
 void ShardManager::flush()
 {
-    for (auto& shard : shards) {
+    for (auto& shard : this->shards) {
         shard->flush();
     }
 }
 
 void ShardManager::stop()
 {
-    for (auto& shard : shards) {
+    for (auto& shard : this->shards) {
         shard->stop();
     }
 }

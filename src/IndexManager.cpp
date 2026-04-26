@@ -7,7 +7,7 @@ IndexManager::IndexManager(const Settings& set)
     , canFlush(false)
 {
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
-    this->indexPath = settings.IndexPath;
+    this->indexPath = set.IndexPath;
 
     this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
     if (!this->index.is_open()) {
