@@ -9,8 +9,8 @@
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "ShardManager.hpp"
-#include "httplib.hpp"
 #include "WAL.hpp"
+#include "httplib.hpp"
 
 #define NUM_SHARDS 32
 
