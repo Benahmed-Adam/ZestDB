@@ -52,13 +52,15 @@ ResultType ShardManager::getBy(const std::regex& reg)
     }
 
     std::string results;
+    long long totalMatches = 0;
     for (auto& f : futures) {
         ResultType r = f.get();
         if (r.code == ResultType::Code::SUCCESS) {
             results += r.message;
+            totalMatches += r.affectedRows;
         }
     }
-    return { ResultType::Code::SUCCESS, results };
+    return { ResultType::Code::SUCCESS, results, totalMatches };
 }
 
 ResultType ShardManager::setBy(const std::regex& reg, const std::string& value)
@@ -71,22 +73,14 @@ ResultType ShardManager::setBy(const std::regex& reg, const std::string& value)
         }));
     }
 
-    int totalUpdated = 0;
+    long long totalUpdated = 0;
     for (auto& f : futures) {
         ResultType r = f.get();
         if (r.code == ResultType::Code::SUCCESS) {
-            try {
-                std::string msg = r.message;
-                size_t pos = msg.find("modified for ");
-                if (pos != std::string::npos) {
-                    std::string numStr = msg.substr(pos + 12);
-                    totalUpdated += std::stoi(numStr);
-                }
-            } catch (...) {
-            }
+            totalUpdated += r.affectedRows;
         }
     }
-    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries" };
+    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries", totalUpdated };
 }
 
 ResultType ShardManager::delBy(const std::regex& reg)
@@ -99,22 +93,14 @@ ResultType ShardManager::delBy(const std::regex& reg)
         }));
     }
 
-    int totalDeleted = 0;
+    long long totalDeleted = 0;
     for (auto& f : futures) {
         ResultType r = f.get();
         if (r.code == ResultType::Code::SUCCESS) {
-            try {
-                std::string msg = r.message;
-                size_t pos = msg.find("Successfully deleted ");
-                if (pos != std::string::npos) {
-                    std::string numStr = msg.substr(16);
-                    totalDeleted += std::stoi(numStr);
-                }
-            } catch (...) {
-            }
+            totalDeleted += r.affectedRows;
         }
     }
-    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(totalDeleted) + " entries" };
+    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(totalDeleted) + " entries", totalDeleted };
 }
 
 void ShardManager::flush()

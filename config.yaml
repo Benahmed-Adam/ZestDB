@@ -3,7 +3,7 @@ SegSize: 128000 # Max data segment size
 MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
 CacheSize: 10000 # Max number of values in the cache
-CompactingInterval: 100 # The ammount of time in seconds between each compaction of the INDEX file
+CompactingInterval: 100 # The ammount of time in seconds between each compaction of the INDEX and the data segments
 FlushInterval: 100 # The ammount of time in seconds between each sync on the disk
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
@@ -15,7 +15,7 @@ NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger
 
-useSSL: false # Use SSL ?
+useSSL: true # Use SSL ?
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute
 SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 

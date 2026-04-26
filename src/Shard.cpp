@@ -131,7 +131,7 @@ ResultType Shard::get(const std::string& key)
 
     if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
         ZestLog(LogLevel::DEBUG, "Shard::get - found in cache for shard " + std::to_string(shardId));
-        return { ResultType::Code::SUCCESS, cacheEntry.value };
+        return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, "Shard::get - key not in cache, searching index in shard " + std::to_string(shardId));
@@ -146,11 +146,11 @@ ResultType Shard::get(const std::string& key)
 
         this->cache->put(entry, value);
 
-        return { ResultType::Code::SUCCESS, value };
+        return { ResultType::Code::SUCCESS, value, 1 };
     }
 
-    ZestLog(LogLevel::WARNING, "Shard::get - key not found: " + key + " in shard " + std::to_string(shardId));
-    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND };
+    ZestLog(LogLevel::DEBUG, "Shard::get - key not found: " + key + " in shard " + std::to_string(shardId));
+    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
@@ -171,7 +171,11 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     this->cache->put(entry, value);
 
     ZestLog(LogLevel::DEBUG, "Shard::set - successfully set key: " + key + " in shard " + std::to_string(shardId));
-    return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
+    ResultType result;
+    result.code = ResultType::Code::SUCCESS;
+    result.message = std::string(Messages::SUCCESS_SET) + key;
+    result.affectedRows = 1;
+    return result;
 }
 
 ResultType Shard::del(const std::string& key)
@@ -200,10 +204,18 @@ ResultType Shard::del(const std::string& key)
         this->cache->remove(key);
 
         ZestLog(LogLevel::DEBUG, "Shard::del - successfully deleted key: " + key + " in shard " + std::to_string(shardId));
-        return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_DEL) + key };
+        ResultType result;
+        result.code = ResultType::Code::SUCCESS;
+        result.message = std::string(Messages::SUCCESS_DEL) + key;
+        result.affectedRows = 1;
+        return result;
     } else {
         ZestLog(LogLevel::WARNING, "Shard::del - key not found: " + key + " in shard " + std::to_string(shardId));
-        return { ResultType::Code::ERROR, std::string(Messages::KEY_NOT_FOUND) + ": " + key };
+        ResultType result;
+        result.code = ResultType::Code::ERROR;
+        result.message = std::string(Messages::KEY_NOT_FOUND) + ": " + key;
+        result.affectedRows = 0;
+        return result;
     }
 }
 
@@ -229,9 +241,11 @@ ResultType Shard::getBy(const std::regex& reg)
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::getBy - shard " + std::to_string(shardId) + " total matches: " + std::to_string(matchCount));
-
-    return { ResultType::Code::SUCCESS, oss.str() };
+    ResultType result;
+    result.code = ResultType::Code::SUCCESS;
+    result.message = oss.str();
+    result.affectedRows = matchCount;
+    return result;
 }
 
 ResultType Shard::setBy(const std::regex& reg, const std::string& value)
@@ -263,9 +277,11 @@ ResultType Shard::setBy(const std::regex& reg, const std::string& value)
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::setBy - shard " + std::to_string(shardId) + " successfully updated " + std::to_string(matchCount) + " entries");
-
-    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
+    ResultType result;
+    result.code = ResultType::Code::SUCCESS;
+    result.message = "Value successfully modified for " + std::to_string(matchCount) + " entries";
+    result.affectedRows = matchCount;
+    return result;
 }
 
 ResultType Shard::delBy(const std::regex& reg)
@@ -293,9 +309,11 @@ ResultType Shard::delBy(const std::regex& reg)
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::delBy - shard " + std::to_string(shardId) + " total matches: " + std::to_string(matchCount));
-
-    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(matchCount) + " entries" };
+    ResultType result;
+    result.code = ResultType::Code::SUCCESS;
+    result.message = "Successfully deleted " + std::to_string(matchCount) + " entries";
+    result.affectedRows = matchCount;
+    return result;
 }
 
 void Shard::flush()
