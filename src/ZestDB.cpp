@@ -41,33 +41,15 @@ ZestDB::ZestDB()
     ZestLog(LogLevel::INFO, "Initializing ZestDB...");
     this->boot();
 
-    this->indexManager = std::make_unique<IndexManager>(this->settings);
-    this->storageManager = std::make_unique<StorageManager>(this->settings);
-    this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
-    this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
+    this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
     this->wal = std::make_unique<WAL>(this->settings);
     this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
     this->replayWAL();
 
-    ZestLog(LogLevel::INFO, "ZestDB initialized successfully");
-
-    std::promise<void> cachePromise;
-    std::future<void> cacheFuture = cachePromise.get_future();
-
-    std::thread cacheThread([this, promise = std::move(cachePromise)]() mutable {
-        this->fillCache();
-        promise.set_value();
-    });
-
-    std::thread compactorThread([this]() mutable {
-        this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
-    });
+    ZestLog(LogLevel::INFO, "ZestDB initialized with " + std::to_string(NUM_SHARDS) + " shards");
 
     this->initialized.store(true);
-    cacheFuture.wait();
-    cacheThread.detach();
-    compactorThread.detach();
 
     std::thread flushThread = std::thread([this]() {
         while (this->settings.isRunning) {
@@ -339,48 +321,11 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
     ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
 
-    if (!fs::exists(this->settings.DbPath / "INDEX")) {
-        fs::path indexPath = this->settings.DbPath / "INDEX";
-        ZestLog(LogLevel::INFO, "Creating the INDEX at " + indexPath.string());
-
-        if (auto parent = indexPath.parent_path(); !fs::exists(parent)) {
-            fs::create_directories(parent);
-        }
-
-        std::ofstream index(indexPath);
-        if (!index) {
-            ZestLog(LogLevel::ERROR, "Failed to create INDEX at " + indexPath.string());
-            throw std::runtime_error("Failed to create INDEX");
-        }
-        this->settings.IndexPath = indexPath;
-    } else {
-        this->settings.IndexPath = this->settings.DbPath / "INDEX";
+    if (!fs::exists(this->settings.DbPath)) {
+        fs::create_directories(this->settings.DbPath);
     }
 
-    fs::path indexTmpPath = this->settings.DbPath / "INDEX.tmp";
-    if (fs::exists(indexTmpPath)) {
-        std::ifstream tmpFile(indexTmpPath, std::ios::ate | std::ios::binary);
-        std::streampos tmpSize = 0;
-        if (tmpFile.is_open()) {
-            tmpSize = tmpFile.tellg();
-            tmpFile.close();
-        }
-
-        std::ifstream indexFile(this->settings.IndexPath, std::ios::ate | std::ios::binary);
-        std::streampos indexSize = 0;
-        if (indexFile.is_open()) {
-            indexSize = indexFile.tellg();
-            indexFile.close();
-        }
-
-        if (tmpSize > 0 && indexSize == 0) {
-            ZestLog(LogLevel::INFO, "Recovering INDEX from INDEX.tmp after crash...");
-            fs::remove(this->settings.IndexPath);
-            fs::copy_file(indexTmpPath, this->settings.IndexPath, std::filesystem::copy_options::overwrite_existing);
-            fs::remove(indexTmpPath);
-            ZestLog(LogLevel::INFO, "INDEX recovered successfully from INDEX.tmp");
-        }
-    }
+    this->settings.WalPath = this->settings.DbPath / "WAL";
 
     if (!fs::exists(this->settings.DbPath / "WAL")) {
         fs::path WalPath = this->settings.DbPath / "WAL";
@@ -399,48 +344,6 @@ void ZestDB::boot()
     } else {
         this->settings.WalPath = this->settings.DbPath / "WAL";
     }
-
-    ZestLog(LogLevel::DEBUG, "INDEX path : " + this->settings.IndexPath.string());
-    ZestLog(LogLevel::DEBUG, "WAL path : " + this->settings.WalPath.string());
-
-    if (!fs::exists(this->settings.DbPath / "seg")) {
-        ZestLog(LogLevel::WARNING, "Creating seg folder at " + (this->settings.DbPath / "seg").string());
-        fs::create_directory(this->settings.DbPath / "seg");
-    }
-}
-
-void ZestDB::fillCache()
-{
-    while (!this->initialized.load()) {
-        ZestLog(LogLevel::WARNING, "ZestDB::fillCache - not initialized yet, waiting...");
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    ZestLog(LogLevel::INFO, "Filling up the cache...");
-
-    std::vector<IndexEntry> entries = this->indexManager->getAll();
-    int numKeysInserted = 0;
-
-    std::unordered_set<std::string> seenKeys;
-    unsigned int entriesCount = static_cast<unsigned int>(entries.size());
-    unsigned int cacheLimit = (this->settings.CacheSize < entriesCount) ? this->settings.CacheSize : entriesCount;
-
-    for (unsigned int i = 0; i < cacheLimit; i++) {
-        if (entries[i].segmentId == -1 || entries[i].isTombstone) {
-            continue;
-        }
-        std::string key(entries[i].key);
-        if (seenKeys.find(key) != seenKeys.end()) {
-            continue;
-        }
-        seenKeys.insert(key);
-
-        ZestLog(LogLevel::DEBUG, "Inserting the key : " + key + " in the cache");
-        std::string value = this->storageManager->read(entries[i]);
-        this->cache->put(entries[i], value);
-        numKeysInserted++;
-    }
-    ZestLog(LogLevel::INFO, "Cache filled successfully with " + std::to_string(numKeysInserted) + " keys");
 }
 
 ResultType ZestDB::get(const std::string& key)
@@ -450,31 +353,7 @@ ResultType ZestDB::get(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
-
-    CacheEntry cacheEntry = this->cache->get(key);
-
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::get - found in cache");
-        return { ResultType::Code::SUCCESS, cacheEntry.value };
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::get - key not in cache, searching index");
-
-    std::shared_lock<std::shared_mutex> lock(this->readMtx);
-    IndexEntry entry;
-    entry = this->indexManager->search(key);
-
-    if (entry.segmentId != -1 && !entry.isTombstone) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::get - found in segment: " + std::to_string(entry.segmentId));
-        std::string value = this->storageManager->read(entry);
-
-        this->cache->put(entry, value);
-
-        return { ResultType::Code::SUCCESS, value };
-    }
-
-    ZestLog(LogLevel::WARNING, "ZestDB::get - key not found: " + key);
-    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND };
+    return this->shardManager->get(key);
 }
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
@@ -488,22 +367,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
-
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    IndexEntry entry = this->storageManager->append(value);
-    ZestLog(LogLevel::DEBUG, "ZestDB::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
-
-    memset(entry.key, 0, sizeof(entry.key));
-    size_t copySize = (key.size() < sizeof(entry.key) - 1) ? key.size() : sizeof(entry.key) - 1;
-    memcpy(entry.key, key.c_str(), copySize);
-    entry.key[copySize] = '\0';
-
-    this->indexManager->insert(entry);
-
-    this->cache->put(entry, value);
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::set - successfully set key: " + key);
-    return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_SET) + key };
+    return this->shardManager->set(key, value);
 }
 
 ResultType ZestDB::del(const std::string& key)
@@ -513,40 +377,11 @@ ResultType ZestDB::del(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
-
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    IndexEntry entry;
-
-    CacheEntry cacheEntry = this->cache->get(key);
-
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        entry = cacheEntry.index;
-    }
-
-    if (entry.segmentId == -1) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::del - key not in cache, searching index");
-        entry = this->indexManager->search(key);
-    }
-
-    if (entry.segmentId != -1 && !entry.isTombstone) {
-        entry.isTombstone = true;
-
-        this->indexManager->update(key, entry);
-
-        this->cache->remove(key);
-
-        ZestLog(LogLevel::DEBUG, "ZestDB::del - successfully deleted key: " + key);
-        return { ResultType::Code::SUCCESS, std::string(Messages::SUCCESS_DEL) + key };
-    } else {
-        ZestLog(LogLevel::WARNING, "ZestDB::del - key not found: " + key);
-        return { ResultType::Code::ERROR, std::string(Messages::KEY_NOT_FOUND) + ": " + key };
-    }
+    return this->shardManager->del(key);
 }
 
 ResultType ZestDB::getBy(const std::string& patern)
 {
-    ZestLog(LogLevel::DEBUG, "ZestDB::getBy - searching with pattern: " + patern);
-
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::getBy - pattern cannot be empty");
         return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
@@ -560,35 +395,11 @@ ResultType ZestDB::getBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    std::shared_lock<std::shared_mutex> lock(this->readMtx);
-    std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
-
-    std::ostringstream oss;
-    int matchCount = 0;
-
-    for (const IndexEntry& entry : entries) {
-        if (entry.isTombstone || entry.segmentId == -1) {
-            continue;
-        }
-        std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
-            ZestLog(LogLevel::DEBUG, "ZestDB::getBy - match found: " + key);
-            std::string value = this->storageManager->read(entry);
-            oss << key << ":" << value << ";";
-            matchCount++;
-        }
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::getBy - total matches: " + std::to_string(matchCount));
-
-    return { ResultType::Code::SUCCESS, oss.str() };
+    return this->shardManager->getBy(patern);
 }
 
 ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
 {
-    ZestLog(LogLevel::DEBUG, "ZestDB::setBy - searching with pattern: " + patern);
-
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::setBy - pattern cannot be empty");
         return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
@@ -606,36 +417,7 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
-
-    int matchCount = 0;
-
-    for (const IndexEntry& entry : entries) {
-        if (entry.isTombstone || entry.segmentId == -1) {
-            continue;
-        }
-        std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
-            ZestLog(LogLevel::DEBUG, "ZestDB::setBy - match found: " + key);
-            IndexEntry newEntry = this->storageManager->append(value);
-            memset(newEntry.key, 0, sizeof(newEntry.key));
-            size_t copySize = (key.size() < sizeof(newEntry.key) - 1) ? key.size() : sizeof(newEntry.key) - 1;
-            memcpy(newEntry.key, key.c_str(), copySize);
-            newEntry.key[copySize] = '\0';
-
-            this->indexManager->insert(newEntry);
-
-            this->cache->put(newEntry, value);
-
-            matchCount++;
-        }
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::setBy - successfully updated " + std::to_string(matchCount) + " entries");
-
-    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(matchCount) + " entries" };
+    return this->shardManager->setBy(patern, value);
 }
 
 ResultType ZestDB::delBy(const std::string& patern)
@@ -653,32 +435,7 @@ ResultType ZestDB::delBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
-
-    int matchCount = 0;
-
-    for (const IndexEntry& entry : entries) {
-        if (entry.isTombstone || entry.segmentId == -1) {
-            continue;
-        }
-        std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
-            ZestLog(LogLevel::DEBUG, "ZestDB::delBy - match found: " + key);
-            IndexEntry tombstoneEntry = entry;
-            tombstoneEntry.isTombstone = true;
-
-            this->indexManager->update(key, tombstoneEntry);
-            this->cache->remove(key);
-
-            matchCount++;
-        }
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::delBy - total matches: " + std::to_string(matchCount));
-
-    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(matchCount) + " entries" };
+    return this->shardManager->delBy(patern);
 }
 
 std::string ZestDB::execCmd(const std::string& command)
@@ -805,6 +562,7 @@ void ZestDB::stop()
     this->ioCtx.stop();
     this->srv->stop();
 
+    this->shardManager->stop();
     this->flush();
 }
 
@@ -828,9 +586,8 @@ std::string ZestDB::help() const
 
 void ZestDB::flush()
 {
-    ZestLog(LogLevel::DEBUG, "Flushing the content of the INDEX and the data segments into the disk...");
-    this->indexManager->flush();
-    this->storageManager->flush();
+    ZestLog(LogLevel::DEBUG, "Flushing all shards...");
+    this->shardManager->flush();
     this->wal->clear();
 }
 
@@ -846,7 +603,8 @@ void ZestDB::replayWAL()
         ZestLog(LogLevel::INFO, "WAL replay result: " + result);
     }
 
-    this->flush();
+    this->shardManager->flush();
+    this->wal->clear();
     this->replaying.store(false);
     ZestLog(LogLevel::INFO, "WAL replay complete, processed " + std::to_string(cmds.size()) + " commands");
 }
