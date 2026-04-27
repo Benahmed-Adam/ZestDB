@@ -17,7 +17,6 @@ DataSegment::DataSegment(const Settings& set, int id)
 
 DataSegment::~DataSegment()
 {
-    this->settings.isRunning = false;
     if (this->segment.is_open()) {
         this->segment.close();
     }
@@ -95,9 +94,8 @@ unsigned long DataSegment::write(const std::string& value)
 
 std::string DataSegment::read(unsigned long offset, unsigned int size)
 {
-    ZestLog(LogLevel::DEBUG, "DataSegment::read - reading " + std::to_string(size) + " bytes from offset: " + std::to_string(offset));
-
     std::lock_guard<std::mutex> lock(this->mtx);
+    ZestLog(LogLevel::DEBUG, "DataSegment::read - reading " + std::to_string(size) + " bytes from offset: " + std::to_string(offset));
 
     this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 

@@ -6,6 +6,7 @@
 
 #include "Settings.hpp"
 #include "Shard.hpp"
+#include "ThreadPool.hpp"
 
 class ShardManager {
 public:
@@ -29,6 +30,7 @@ private:
     Settings settings;
     int numShards;
     std::vector<std::unique_ptr<Shard>> shards;
+    std::unique_ptr<ThreadPool> threadPool;
 
     static constexpr auto hashFunction = std::hash<std::string> {};
 };

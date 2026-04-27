@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "DataSegment.hpp"
@@ -21,7 +22,8 @@ public:
 private:
     void boot();
     IndexEntry appendToSegment(DataSegment* seg, const std::string& value);
-    std::vector<std::unique_ptr<DataSegment>> segments;
+    std::unordered_map<int, std::unique_ptr<DataSegment>> segments;
     std::atomic<int> latestSegmentId;
+    std::mutex mtx;
     Settings settings;
 };

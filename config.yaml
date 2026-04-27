@@ -1,10 +1,10 @@
 DbPath: ./DB # Path to the folder containing db files, can be relative or absolute
-SegSize: 128000 # Max data segment size
+SegSize: 67108864 # Max data segment size
 MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
-CacheSize: 10000 # Max number of values in the cache
-CompactingInterval: 100 # The ammount of time in seconds between each compaction of the INDEX and the data segments
-FlushInterval: 100 # The ammount of time in seconds between each sync on the disk
+CacheSize: 50000 # Max number of values in the cache
+CompactingInterval: 5 # The ammount of time in seconds between each compaction of the INDEX and the data segments
+FlushInterval: 300 # The ammount of time in seconds between each sync on the disk
 KeyValidation: ".*" # Regex for keys
 ValueValidation: ".*" # Regex for values
 

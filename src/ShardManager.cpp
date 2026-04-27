@@ -2,10 +2,12 @@
 #include <algorithm>
 #include <future>
 #include <regex>
+#include <thread>
 
 ShardManager::ShardManager(const Settings& baseSettings, int numShardsCount)
     : settings(baseSettings)
     , numShards(numShardsCount)
+    , threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency()))
 {
     for (int i = 0; i < this->numShards; ++i) {
         this->shards.push_back(std::make_unique<Shard>(baseSettings, i));
@@ -14,7 +16,9 @@ ShardManager::ShardManager(const Settings& baseSettings, int numShardsCount)
 
 ShardManager::~ShardManager()
 {
-    stop();
+    if (this->settings.isRunning) {
+        this->stop();
+    }
 }
 
 int ShardManager::getShardId(const std::string& key) const
@@ -46,7 +50,7 @@ ResultType ShardManager::getBy(const std::regex& reg)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(std::async(std::launch::async, [&]() {
+        futures.push_back(threadPool->enqueue([&]() {
             return shard->getBy(reg);
         }));
     }
@@ -60,6 +64,7 @@ ResultType ShardManager::getBy(const std::regex& reg)
             totalMatches += r.affectedRows;
         }
     }
+    threadPool->waitAll();
     return { ResultType::Code::SUCCESS, results, totalMatches };
 }
 
@@ -68,7 +73,7 @@ ResultType ShardManager::setBy(const std::regex& reg, const std::string& value)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(std::async(std::launch::async, [&]() {
+        futures.push_back(threadPool->enqueue([&]() {
             return shard->setBy(reg, value);
         }));
     }
@@ -80,6 +85,7 @@ ResultType ShardManager::setBy(const std::regex& reg, const std::string& value)
             totalUpdated += r.affectedRows;
         }
     }
+    threadPool->waitAll();
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries", totalUpdated };
 }
 
@@ -88,7 +94,7 @@ ResultType ShardManager::delBy(const std::regex& reg)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(std::async(std::launch::async, [&]() {
+        futures.push_back(threadPool->enqueue([&]() {
             return shard->delBy(reg);
         }));
     }
@@ -100,6 +106,7 @@ ResultType ShardManager::delBy(const std::regex& reg)
             totalDeleted += r.affectedRows;
         }
     }
+    threadPool->waitAll();
     return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(totalDeleted) + " entries", totalDeleted };
 }
 

@@ -44,14 +44,6 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
-
-    std::thread flushThread = std::thread([this]() {
-        while (this->settings.isRunning) {
-            std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
-            this->flush();
-        }
-    });
-    flushThread.detach();
 }
 
 Shard::~Shard()
@@ -125,6 +117,7 @@ void Shard::fillCache()
 
 ResultType Shard::get(const std::string& key)
 {
+    std::shared_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, "Shard::get - shard " + std::to_string(shardId) + " looking for key: " + key);
 
     CacheEntry cacheEntry = this->cache->get(key);
@@ -136,7 +129,6 @@ ResultType Shard::get(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, "Shard::get - key not in cache, searching index in shard " + std::to_string(shardId));
 
-    std::shared_lock<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry;
     entry = this->indexManager->search(key);
 
@@ -155,9 +147,9 @@ ResultType Shard::get(const std::string& key)
 
 ResultType Shard::set(const std::string& key, const std::string& value)
 {
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, "Shard::set - shard " + std::to_string(shardId) + " key: " + key + ", value size: " + std::to_string(value.size()));
 
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, "Shard::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
 
@@ -180,27 +172,16 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 
 ResultType Shard::del(const std::string& key)
 {
+    std::unique_lock<std::shared_mutex> lock(this->readMtx); 
     ZestLog(LogLevel::DEBUG, "Shard::del - shard " + std::to_string(shardId) + " deleting key: " + key);
 
-    std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    IndexEntry entry;
-
-    CacheEntry cacheEntry = this->cache->get(key);
-
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        entry = cacheEntry.index;
-    }
-
-    if (entry.segmentId == -1) {
-        ZestLog(LogLevel::DEBUG, "Shard::del - key not in cache, searching index");
-        entry = this->indexManager->search(key);
-    }
+    this->cache->remove(key);
+    IndexEntry entry = this->indexManager->search(key);
 
     if (entry.segmentId != -1 && !entry.isTombstone) {
         entry.isTombstone = true;
 
         this->indexManager->update(key, entry);
-
         this->cache->remove(key);
 
         ZestLog(LogLevel::DEBUG, "Shard::del - successfully deleted key: " + key + " in shard " + std::to_string(shardId));
@@ -209,14 +190,14 @@ ResultType Shard::del(const std::string& key)
         result.message = std::string(Messages::SUCCESS_DEL) + key;
         result.affectedRows = 1;
         return result;
-    } else {
-        ZestLog(LogLevel::WARNING, "Shard::del - key not found: " + key + " in shard " + std::to_string(shardId));
-        ResultType result;
-        result.code = ResultType::Code::ERROR;
-        result.message = std::string(Messages::KEY_NOT_FOUND) + ": " + key;
-        result.affectedRows = 0;
-        return result;
-    }
+    } 
+    
+    ZestLog(LogLevel::DEBUG, "Shard::del - key not found or already deleted: " + key + " in shard " + std::to_string(shardId));
+    ResultType result;
+    result.code = ResultType::Code::ERROR;
+    result.message = std::string(Messages::KEY_NOT_FOUND) + ": " + key;
+    result.affectedRows = 0;
+    return result;
 }
 
 ResultType Shard::getBy(const std::regex& reg)
