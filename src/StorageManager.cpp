@@ -61,31 +61,29 @@ IndexEntry StorageManager::append(const std::string& value)
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    while (true) {
-        int currentId = this->latestSegmentId.load();
+    int currentId = this->latestSegmentId.load();
 
-        auto it = this->segments.find(currentId);
-        if (it != this->segments.end() && !it->second->isFull()) {
-            IndexEntry entry = this->appendToSegment(it->second.get(), value);
-            if (entry.segmentId != -1) {
-                return entry;
-            }
+    auto it = this->segments.find(currentId);
+    if (it != this->segments.end() && !it->second->isFull()) {
+        IndexEntry entry = this->appendToSegment(it->second.get(), value);
+        if (entry.segmentId != -1) {
+            return entry;
         }
-
-        int nextId = currentId + 1;
-        if (this->latestSegmentId.compare_exchange_weak(currentId, nextId)) {
-            ZestLog(LogLevel::DEBUG, "StorageManager::append - creating new segment: " + std::to_string(nextId));
-            this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
-
-            DataSegment* newSeg = this->segments[nextId].get();
-            IndexEntry entry = this->appendToSegment(newSeg, value);
-            if (entry.segmentId != -1) {
-                return entry;
-            }
-        }
-
-        currentId = this->latestSegmentId.load();
     }
+
+    int nextId = currentId + 1;
+    if (this->latestSegmentId.compare_exchange_weak(currentId, nextId)) {
+        ZestLog(LogLevel::DEBUG, "StorageManager::append - creating new segment: " + std::to_string(nextId));
+        this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
+
+        DataSegment* newSeg = this->segments[nextId].get();
+        IndexEntry entry = this->appendToSegment(newSeg, value);
+        if (entry.segmentId != -1) {
+            return entry;
+        }
+    }
+
+    currentId = this->latestSegmentId.load();
 }
 
 std::string StorageManager::read(const IndexEntry& entry)
