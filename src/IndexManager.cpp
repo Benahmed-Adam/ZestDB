@@ -93,7 +93,7 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
 
         ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated at offset: " + std::to_string(offset));
     } else {
-        ZestLog(LogLevel::WARNING, "IndexManager::update - key not found for update: " + key);
+        ZestLog(LogLevel::DEBUG, "IndexManager::update - key not found for update: " + key);
     }
 }
 
