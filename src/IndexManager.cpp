@@ -21,7 +21,6 @@ IndexManager::IndexManager(const Settings& set)
 
 IndexManager::~IndexManager()
 {
-    this->settings.isRunning = false;
     if (this->index.is_open()) {
         this->index.close();
     }
@@ -147,21 +146,18 @@ std::vector<IndexEntry> IndexManager::getAll()
     std::vector<IndexEntry> res;
     std::lock_guard<std::mutex> lock(this->mtx);
 
-    this->index.seekg(0, std::ios::end);
-    std::streamoff fsize = this->index.tellg();
+    res.reserve(this->memoryTree.size());
 
-    std::streamoff position = 0;
     IndexEntry e;
-
-    while (position < fsize) {
-        this->index.seekg(position, std::ios::beg);
-        if (!this->index.read((char*)&e, sizeof(e)))
-            break;
-
-        if (!e.isTombstone && e.segmentId != -1) {
+    for (auto const& [key, offset] : this->memoryTree) {
+        this->index.seekg(offset, std::ios::beg);
+        
+        if (this->index.read((char*)&e, sizeof(IndexEntry))) {
             res.push_back(e);
+        } else {
+            ZestLog(LogLevel::ERROR, "IndexManager::getAll - Failed to read entry at offset: " + std::to_string(offset));
+            this->index.clear(); 
         }
-        position += static_cast<std::streamoff>(sizeof(IndexEntry));
     }
 
     return res;
@@ -212,7 +208,12 @@ std::vector<IndexEntry> IndexManager::compact()
 
 void IndexManager::flush()
 {
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        ZestLog(LogLevel::DEBUG, "IndexManager::flush - could not acquire lock, skipping");
+        return;
+    }
+
     ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing to disk...");
 
     if (this->canFlush) {

@@ -130,7 +130,12 @@ int DataSegment::getSegmentId() const
 
 void DataSegment::flush()
 {
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        ZestLog(LogLevel::DEBUG, "DataSegment::flush - could not acquire lock, skipping");
+        return;
+    }
+
     ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing to disk...");
 
     if (this->canFlush) {

@@ -41,6 +41,7 @@ void WAL::append(const std::string& cmd)
     this->wal.write(cmd.c_str(), static_cast<long int>(size));
     this->wal.put('\n');
     this->wal.flush();
+    // fsync ?
     if (!this->wal.good()) {
         ZestLog(LogLevel::ERROR, "WAL::append - Write failed");
     }

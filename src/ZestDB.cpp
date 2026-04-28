@@ -166,18 +166,6 @@ bool ZestDB::validateKey(const std::string& key) const
         ZestLog(LogLevel::ERROR, "ZestDB::validateKey - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
         return false;
     }
-
-    if (!this->settings.KeyValidationStr.empty()) {
-        try {
-            if (!std::regex_match(key, this->settings.KeyValidation)) {
-                ZestLog(LogLevel::ERROR, "ZestDB::validateKey - " + std::string(Messages::KEY_VALIDATION_FAILED));
-                return false;
-            }
-        } catch (const std::regex_error& e) {
-            ZestLog(LogLevel::ERROR, "ZestDB::validateKey - invalid key regex: " + std::string(e.what()));
-            return false;
-        }
-    }
     return true;
 }
 
@@ -186,18 +174,6 @@ bool ZestDB::validateValue(const std::string& value) const
     if (value.size() > this->settings.MaxValueSize) {
         ZestLog(LogLevel::ERROR, "ZestDB::validateValue - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
         return false;
-    }
-
-    if (!this->settings.ValueValidationStr.empty()) {
-        try {
-            if (!std::regex_match(value, this->settings.ValueValidation)) {
-                ZestLog(LogLevel::ERROR, "ZestDB::validateValue - " + std::string(Messages::VALUE_VALIDATION_FAILED));
-                return false;
-            }
-        } catch (const std::regex_error& e) {
-            ZestLog(LogLevel::ERROR, "ZestDB::validateValue - invalid value regex: " + std::string(e.what()));
-            return false;
-        }
     }
     return true;
 }
@@ -233,8 +209,6 @@ void ZestDB::boot()
         this->settings.DBPort = node["DBPort"].get_value_or<short>(7321);
         this->settings.WebPort = node["WebPort"].get_value_or<short>(1237);
 
-        this->settings.KeyValidationStr = node["KeyValidation"].get_value_or<std::string>("");
-        this->settings.ValueValidationStr = node["ValueValidation"].get_value_or<std::string>("");
         this->settings.NetworkValidationStr = node["NetworkValidation"].get_value_or<std::string>("");
 
         this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
@@ -247,24 +221,6 @@ void ZestDB::boot()
         if (this->settings.useSSL && (this->settings.SSLCertPath == "" || this->settings.SSLKeyPath == "")) {
             ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
             throw std::runtime_error("SSL with no cert or key");
-        }
-
-        if (!this->settings.KeyValidationStr.empty()) {
-            try {
-                this->settings.KeyValidation = std::regex(this->settings.KeyValidationStr);
-            } catch (const std::regex_error& e) {
-                ZestLog(LogLevel::CRITICAL, "Invalid KeyValidation regex: " + std::string(e.what()));
-                throw std::runtime_error("Invalid KeyValidation regex");
-            }
-        }
-
-        if (!this->settings.ValueValidationStr.empty()) {
-            try {
-                this->settings.ValueValidation = std::regex(this->settings.ValueValidationStr);
-            } catch (const std::regex_error& e) {
-                ZestLog(LogLevel::CRITICAL, "Invalid ValueValidation regex: " + std::string(e.what()));
-                throw std::runtime_error("Invalid ValueValidation regex");
-            }
         }
 
         if (!this->settings.NetworkValidationStr.empty()) {

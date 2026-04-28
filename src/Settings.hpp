@@ -16,10 +16,8 @@ struct ResultType {
 
 struct Messages {
     static constexpr const char* KEY_TOO_LONG = "The key is too long !";
-    static constexpr const char* KEY_VALIDATION_FAILED = "The key does not respect the KeyValidation regex !";
     static constexpr const char* KEY_NOT_FOUND = "Key not found";
     static constexpr const char* VALUE_TOO_LONG = "The value is too long !";
-    static constexpr const char* VALUE_VALIDATION_FAILED = "The value does not respect the ValueValidation regex !";
     static constexpr const char* SUCCESS_SET = "Successfully set key: ";
     static constexpr const char* SUCCESS_DEL = "Successfully deleted key: ";
     static constexpr const char* PATTERN_EMPTY = "Pattern cannot be empty";
@@ -53,11 +51,7 @@ struct Settings {
     short DBPort;
     short WebPort;
 
-    std::regex KeyValidation;
-    std::regex ValueValidation;
     std::regex NetworkValidation;
-    std::string KeyValidationStr;
-    std::string ValueValidationStr;
     std::string NetworkValidationStr;
 
     bool isDebug;

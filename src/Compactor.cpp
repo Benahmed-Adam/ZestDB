@@ -13,12 +13,13 @@ Compactor::Compactor(unsigned int compInter)
 void Compactor::run(IndexManager& indexManager, StorageManager& storageManager, bool& isRunning)
 {
     ZestLog(LogLevel::INFO, "Starting the compactor...");
+
     while (isRunning) {
+        std::this_thread::sleep_for(std::chrono::seconds(this->compactingInterval));
         std::vector<IndexEntry> entries = indexManager.compact();
 
         if (entries.empty()) {
             ZestLog(LogLevel::DEBUG, "Compactor - index is empty, skipping segment cleanup");
-            std::this_thread::sleep_for(std::chrono::seconds(this->compactingInterval));
             continue;
         }
 
@@ -35,7 +36,7 @@ void Compactor::run(IndexManager& indexManager, StorageManager& storageManager, 
             storageManager.removeUnusedSegments(usedSegmentIds);
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(this->compactingInterval));
+        ZestLog(LogLevel::DEBUG, "Compactor - compaction done, waiting...");
     }
-    ZestLog(LogLevel::INFO, "Stopping the compator...");
+    ZestLog(LogLevel::INFO, "Stopping the compactor...");
 }

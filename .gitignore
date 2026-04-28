@@ -4,8 +4,9 @@ obj/
 *.o
 .vscode/
 DB/
-test*.py
+test.py
 TODO.md
 TEST.md
 cert.pem
 key.pem
+__pycache__/

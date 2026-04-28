@@ -214,7 +214,7 @@ ResultType Shard::getBy(const std::regex& reg)
             continue;
         }
         std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
+        if (std::regex_search(key, reg)) {
             ZestLog(LogLevel::DEBUG, "Shard::getBy - match found: " + key);
             std::string value = this->storageManager->read(entry);
             oss << key << ":" << value << ";";
@@ -242,7 +242,7 @@ ResultType Shard::setBy(const std::regex& reg, const std::string& value)
             continue;
         }
         std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
+        if (std::regex_search(key, reg)) {
             ZestLog(LogLevel::DEBUG, "Shard::setBy - match found: " + key);
             IndexEntry newEntry = this->storageManager->append(value);
             memset(newEntry.key, 0, sizeof(newEntry.key));
@@ -278,7 +278,7 @@ ResultType Shard::delBy(const std::regex& reg)
             continue;
         }
         std::string key(entry.key);
-        if (std::regex_match(key, reg)) {
+        if (std::regex_search(key, reg)) {
             ZestLog(LogLevel::DEBUG, "Shard::delBy - match found: " + key);
             IndexEntry tombstoneEntry = entry;
             tombstoneEntry.isTombstone = true;
@@ -307,6 +307,5 @@ void Shard::flush()
 void Shard::stop()
 {
     ZestLog(LogLevel::INFO, "Exiting shard " + std::to_string(shardId) + "...");
-    this->settings.isRunning = false;
     this->flush();
 }

@@ -57,33 +57,25 @@ IndexEntry StorageManager::appendToSegment(DataSegment* seg, const std::string& 
 
 IndexEntry StorageManager::append(const std::string& value)
 {
-    ZestLog(LogLevel::DEBUG, "StorageManager::append - writing value of size: " + std::to_string(value.size()));
-
     std::lock_guard<std::mutex> lock(this->mtx);
 
     int currentId = this->latestSegmentId.load();
+    DataSegment* seg = nullptr;
 
     auto it = this->segments.find(currentId);
     if (it != this->segments.end() && !it->second->isFull()) {
-        IndexEntry entry = this->appendToSegment(it->second.get(), value);
-        if (entry.segmentId != -1) {
-            return entry;
-        }
-    }
-
-    int nextId = currentId + 1;
-    if (this->latestSegmentId.compare_exchange_weak(currentId, nextId)) {
-        ZestLog(LogLevel::DEBUG, "StorageManager::append - creating new segment: " + std::to_string(nextId));
+        seg = it->second.get();
+    } 
+    else {
+        int nextId = currentId + 1;
+        ZestLog(LogLevel::DEBUG, "Creating new segment: " + std::to_string(nextId));
+        
         this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
-
-        DataSegment* newSeg = this->segments[nextId].get();
-        IndexEntry entry = this->appendToSegment(newSeg, value);
-        if (entry.segmentId != -1) {
-            return entry;
-        }
+        this->latestSegmentId.store(nextId);
+        seg = this->segments[nextId].get();
     }
 
-    currentId = this->latestSegmentId.load();
+    return this->appendToSegment(seg, value);
 }
 
 std::string StorageManager::read(const IndexEntry& entry)
