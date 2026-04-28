@@ -5,7 +5,7 @@ BASE_CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -We
 ifeq ($(DEBUG), 1)
     CXXFLAGS = $(BASE_CXXFLAGS) -g -O0
 else
-    CXXFLAGS = $(BASE_CXXFLAGS) -O2
+    CXXFLAGS = $(BASE_CXXFLAGS) -O3
 endif
 
 LDFLAGS = -lcrypto -lpthread -lssl
