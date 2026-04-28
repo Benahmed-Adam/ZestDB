@@ -1,5 +1,13 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -O0 -Wno-deprecated-declarations
+
+BASE_CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -Wno-deprecated-declarations
+
+ifeq ($(DEBUG), 1)
+    CXXFLAGS = $(BASE_CXXFLAGS) -g -O0
+else
+    CXXFLAGS = $(BASE_CXXFLAGS) -O2
+endif
+
 LDFLAGS = -lcrypto -lpthread -lssl
 
 SRCDIR = src
@@ -12,7 +20,8 @@ OUTPUT = $(BINDIR)/$(TARGET)
 SRC_CXX = $(shell find $(SRCDIR) -name "*.cpp")
 OBJ_CXX = $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(SRC_CXX))
 
-all: $(OUTPUT)
+all: 
+	@$(MAKE) $(OUTPUT)
 
 $(OUTPUT): $(OBJ_CXX)
 	@mkdir -p $(BINDIR)
@@ -28,7 +37,7 @@ clean:
 format:
 	find src -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i --verbose {} +
 
-run: $(OUTPUT)
+run: all
 	./$(OUTPUT)
 
 .PHONY: all clean run
