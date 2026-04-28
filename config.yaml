@@ -4,7 +4,7 @@ MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
 CacheSize: 50000 # Max number of values in the cache
 CompactingInterval: 300 # The ammount of time in seconds between each compaction of the INDEX and the data segments
-FlushInterval: 50 # The ammount of time in seconds between each sync on the disk
+FlushInterval: 5 # The ammount of time in seconds between each sync on the disk
 
 DBPort: 7321
 WebPort: 1237
@@ -12,6 +12,7 @@ WebPort: 1237
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger
+jsonOnly: true
 
 useSSL: false # Use SSL ?
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute

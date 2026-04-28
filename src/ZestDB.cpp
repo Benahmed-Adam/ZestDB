@@ -11,6 +11,7 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 #include "node.hpp"
+#include "json.hpp"
 
 namespace fs = std::filesystem;
 
@@ -144,40 +145,6 @@ ZestDB::~ZestDB()
         this->stop();
 }
 
-bool ZestDB::validateToken(const std::string& username, const std::string& token) const
-{
-    if (this->users.find(username) == this->users.end()) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - user not found: " + username);
-        return false;
-    }
-
-    if (this->users.at(username) != token) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - token mismatch");
-        return false;
-    }
-
-    ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - success");
-    return true;
-}
-
-bool ZestDB::validateKey(const std::string& key) const
-{
-    if (key.size() > this->settings.MaxKeySize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::validateKey - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
-        return false;
-    }
-    return true;
-}
-
-bool ZestDB::validateValue(const std::string& value) const
-{
-    if (value.size() > this->settings.MaxValueSize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::validateValue - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
-        return false;
-    }
-    return true;
-}
-
 void ZestDB::boot()
 {
     const fs::path current_path = fs::current_path().string();
@@ -213,6 +180,7 @@ void ZestDB::boot()
 
         this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
         setLoggerDebugMode(this->settings.isDebug);
+        this->settings.jsonOnly = node["jsonOnly"].get_value_or<bool>(false);
 
         this->settings.useSSL = node["useSSL"].get_value_or<bool>(false);
         this->settings.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
@@ -274,6 +242,7 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "CompactingInterval : " + std::to_string(this->settings.CompactingInterval));
     ZestLog(LogLevel::DEBUG, "FlushInterval : " + std::to_string(this->settings.FlushInterval));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
+    ZestLog(LogLevel::DEBUG, "isJson : " + std::to_string(this->settings.jsonOnly));
     ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
     ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
 
@@ -302,6 +271,44 @@ void ZestDB::boot()
     }
 }
 
+bool ZestDB::validateToken(const std::string& username, const std::string& token) const
+{
+    if (this->users.find(username) == this->users.end()) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - user not found: " + username);
+        return false;
+    }
+
+    if (this->users.at(username) != token) {
+        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - token mismatch");
+        return false;
+    }
+
+    ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - success");
+    return true;
+}
+
+bool ZestDB::validateKey(const std::string& key) const
+{
+    if (key.size() > this->settings.MaxKeySize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::validateKey - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        return false;
+    }
+    return true;
+}
+
+bool ZestDB::validateValue(const std::string& value) const
+{
+    if (value.size() > this->settings.MaxValueSize) {
+        ZestLog(LogLevel::ERROR, "ZestDB::validateValue - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+        return false;
+    }
+    return true;
+}
+
+bool ZestDB::isJsonValid(const std::string& value) const {
+    return nlohmann::json::accept(value);
+}
+
 ResultType ZestDB::get(const std::string& key)
 {
     if (!this->validateKey(key)) {
@@ -320,6 +327,12 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     if (!this->validateValue(value)) {
         return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
+    }
+
+    if (this->settings.jsonOnly) {
+        if (!this->isJsonValid(value)) {
+            return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
+        }
     }
 
     ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
@@ -363,6 +376,12 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
 
     if (!this->validateValue(value)) {
         return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
+    }
+
+    if (this->settings.jsonOnly) {
+        if (!this->isJsonValid(value)) {
+            return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
+        }
     }
 
     std::regex reg;

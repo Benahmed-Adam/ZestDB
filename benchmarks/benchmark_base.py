@@ -4,6 +4,7 @@ import time
 import statistics
 import random
 import psutil
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from threading import Thread
@@ -72,7 +73,7 @@ def run_client(user_id: int):
             
             rand = random.random()
             if rand < 0.4:
-                cmd = f"set {key} value_{i}"
+                cmd = f"set {key} {json.dumps({'id': i, 'data': random.random()})}"
             elif rand < 0.8:
                 cmd = f"get {key}"
             else:

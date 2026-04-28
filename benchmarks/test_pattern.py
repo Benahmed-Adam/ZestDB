@@ -3,6 +3,7 @@ import hashlib
 import time
 import random
 import re
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
@@ -85,7 +86,7 @@ def test_setby_pattern(user_id: int):
         ]
         
         for pattern in patterns:
-            value = f"value_for_{pattern}"
+            value = json.dumps({"pattern": pattern, "data": "test"})
             cmd = f"setby {pattern} {value}"
             sock.sendall(f"{cmd}\n".encode('utf-8'))
             

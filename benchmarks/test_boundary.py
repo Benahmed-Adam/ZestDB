@@ -3,6 +3,7 @@ import hashlib
 import time
 import random
 import string
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import List, Dict
@@ -25,7 +26,7 @@ def random_key(length: int = 8) -> str:
 
 def random_value(max_size: int = 1000) -> str:
     size = random.randint(1, max_size)
-    return ''.join(random.choices(string.ascii_letters + string.digits + '   ', k=size))
+    return json.dumps({"data": ''.join(random.choices(string.ascii_letters + string.digits + '   ', k=size)), "size": size})
 
 def test_large_values(user_id: int):
     global error_count
@@ -145,7 +146,7 @@ def test_special_characters(user_id: int):
         ]
         
         for key in test_cases:
-            value = f"value_for_{key}"
+            value = json.dumps({"key": key, "type": "special"})
             cmd = f"set {key} {value}"
             sock.sendall(f"{cmd}\n".encode('utf-8'))
             

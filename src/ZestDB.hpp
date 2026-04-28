@@ -39,6 +39,7 @@ private:
     void boot();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;
+    bool isJsonValid(const std::string& value) const;
     void flush();
     void replayWAL();
 

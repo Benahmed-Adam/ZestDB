@@ -4,6 +4,7 @@ import time
 import statistics
 import random
 import psutil
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Barrier, Thread
 from typing import List, Dict
@@ -83,7 +84,7 @@ def burst_worker(worker_id: int, barrier: Barrier):
         
         for i in range(100):
             key = f"burst_{worker_id}_{i}"
-            cmd = f"set {key} value_{i}"
+            cmd = f"set {key} {json.dumps({'id': i, 'worker': worker_id, 'ts': time.time()})}"
             
             try:
                 lat = measure(sock, cmd)
@@ -172,7 +173,7 @@ def long_running_worker(worker_id: int, duration_sec: int):
             rand = random.random()
             
             if rand < 0.5:
-                cmd = f"set {key} value_{random.randint(0, 1000)}"
+                cmd = f"set {key} {json.dumps({'id': random.randint(0, 1000), 'rand': random.random()})}"
             elif rand < 0.8:
                 cmd = f"get {key}"
             else:

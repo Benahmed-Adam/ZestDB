@@ -5,6 +5,7 @@ import random
 import signal
 import sys
 import os
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
 from typing import List, Dict
@@ -35,7 +36,7 @@ def populate_and_verify():
     sock.recv(1024)
     
     test_keys = [f"persist_{i}" for i in range(1000)]
-    test_data = {k: f"value_{k}_{random.randint(0, 1000000)}" for k in test_keys}
+    test_data = {k: json.dumps({"key": k, "value": random.randint(0, 1000000)}) for k in test_keys}
     
     for key, value in test_data.items():
         cmd = f"set {key} {value}"
@@ -129,7 +130,7 @@ def test_flush_durability():
     sock.recv(1024)
     
     test_keys = [f"flush_{i}" for i in range(500)]
-    test_data = {k: f"flush_value_{k}" for k in test_keys}
+    test_data = {k: json.dumps({"key": k, "type": "flush"}) for k in test_keys}
     
     for key, value in test_data.items():
         cmd = f"set {key} {value}"
@@ -190,7 +191,7 @@ def test_tombstone_persistence():
     
     test_keys = [f"tombstone_{i}" for i in range(100)]
     for key in test_keys:
-        cmd = f"set {key} tombstone_value"
+        cmd = f"set {key} {json.dumps({'key': key, 'deleted': False})}"
         sock.sendall(f"{cmd}\n".encode('utf-8'))
         sock.recv(1024)
     

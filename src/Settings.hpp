@@ -33,6 +33,7 @@ struct Messages {
     static constexpr const char* CMD_NOT_FOUND = "Command not found";
     static constexpr const char* TYPE_HELP = "Type h for help";
     static constexpr const char* FLUSH_SUCCESSFUL = "Flush successful !";
+    static constexpr const char* JSON_ONLY_ERROR = "Invalid format, only json data allowed !";
 };
 
 struct Settings {
@@ -57,6 +58,7 @@ struct Settings {
     bool isDebug;
     bool useSSL;
     bool isRunning = true;
+    bool jsonOnly;
 
     bool hasCrashedLastTime;
 };
