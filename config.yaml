@@ -12,8 +12,8 @@ WebPort: 1237
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
 isDebug: false # Degug mode for the logger
-jsonOnly: true
-readOnly: true
+jsonOnly: false
+readOnly: false
 
 useSSL: false # Use SSL ?
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute

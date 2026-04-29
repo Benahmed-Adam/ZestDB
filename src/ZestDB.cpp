@@ -10,8 +10,8 @@
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
-#include "node.hpp"
 #include "json.hpp"
+#include "node.hpp"
 
 namespace fs = std::filesystem;
 
@@ -307,7 +307,8 @@ bool ZestDB::validateValue(const std::string& value) const
     return true;
 }
 
-bool ZestDB::isJsonValid(const std::string& value) const {
+bool ZestDB::isJsonValid(const std::string& value) const
+{
     return nlohmann::json::accept(value);
 }
 
@@ -359,7 +360,7 @@ ResultType ZestDB::del(const std::string& key)
     return this->shardManager->del(key);
 }
 
-ResultType ZestDB::getBy(const std::string& patern)
+ResultType ZestDB::getBy(const std::string& patern, unsigned int limit)
 {
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::getBy - pattern cannot be empty");
@@ -374,10 +375,10 @@ ResultType ZestDB::getBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->getBy(reg);
+    return this->shardManager->getBy(reg, limit);
 }
 
-ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
+ResultType ZestDB::setBy(const std::string& patern, const std::string& value, unsigned int limit)
 {
     if (this->settings.readOnly) {
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -406,15 +407,15 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->setBy(reg, value);
+    return this->shardManager->setBy(reg, value, limit);
 }
 
-ResultType ZestDB::delBy(const std::string& patern)
+ResultType ZestDB::delBy(const std::string& patern, unsigned int limit)
 {
     if (this->settings.readOnly) {
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
     }
-    
+
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::delBy - pattern cannot be empty");
         return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
@@ -428,7 +429,7 @@ ResultType ZestDB::delBy(const std::string& patern)
         return { ResultType::Code::ERROR, Messages::INVALID_REGEX };
     }
 
-    return this->shardManager->delBy(reg);
+    return this->shardManager->delBy(reg, limit);
 }
 
 std::string ZestDB::execCmd(const std::string& command)
@@ -490,7 +491,16 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_PATTERN << std::endl;
             oss << Messages::USAGE_GETBY << std::endl;
         }
-        result = this->getBy(pattern);
+        unsigned int limit = 0;
+        std::string word;
+        if (iss >> word) {
+            if (word == "limit" || word == "lim") {
+                iss >> limit;
+            } else {
+                oss << "ERROR: unexpected token '" << word << "'" << std::endl;
+            }
+        }
+        result = this->getBy(pattern, limit);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << result.message << std::endl;
         } else {
@@ -506,11 +516,22 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_VALUE << std::endl;
             oss << Messages::USAGE_SETBY << std::endl;
         }
-        std::string rest;
-        while (iss >> rest) {
-            value += " " + rest;
+        unsigned int limit = 0;
+        std::vector<std::string> words;
+        std::string word;
+        while (iss >> word) {
+            words.push_back(word);
         }
-        result = this->setBy(pattern, value);
+        for (size_t i = 0; i < words.size(); i++) {
+            if ((words[i] == "limit" || words[i] == "lim") && i + 1 < words.size()) {
+                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
+                break;
+            }
+            if (i == 0 || (i > 0 && words[i - 1] != "limit")) {
+                value += (value.empty() ? "" : " ") + words[i];
+            }
+        }
+        result = this->setBy(pattern, value, limit);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -522,7 +543,16 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_PATTERN << std::endl;
             oss << Messages::USAGE_DELBY << std::endl;
         }
-        result = this->delBy(pattern);
+        unsigned int limit = 0;
+        std::string word;
+        if (iss >> word) {
+            if (word == "limit" || word == "lim") {
+                iss >> limit;
+            } else {
+                oss << "ERROR: unexpected token '" << word << "'" << std::endl;
+            }
+        }
+        result = this->delBy(pattern, limit);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << result.message << std::endl;
         } else {
@@ -564,14 +594,14 @@ std::string ZestDB::help() const
     std::ostringstream oss;
     oss << "ZestDB Commands:" << std::endl;
     oss << "---------------" << std::endl;
-    oss << "get <key>             - Get value by key" << std::endl;
-    oss << "set <key> <value>     - Set key-value pair" << std::endl;
-    oss << "del <key>             - Delete key" << std::endl;
-    oss << "getby <pattern>       - Get keys matching regex pattern" << std::endl;
-    oss << "setby <pattern> <val> - Set value for keys matching pattern" << std::endl;
-    oss << "delby <pattern>       - Delete keys matching pattern" << std::endl;
-    oss << "flush                 - Flush all data in memory to the disk" << std::endl;
-    oss << "help                  - Show this help" << std::endl;
+    oss << "get <key>                     - Get value by key" << std::endl;
+    oss << "set <key> <value>             - Set key-value pair" << std::endl;
+    oss << "del <key>                     - Delete key" << std::endl;
+    oss << "getby <pattern> [limit <n>]   - Get keys matching regex pattern" << std::endl;
+    oss << "setby <pattern> <val> [limit <n>] - Set value for keys matching pattern" << std::endl;
+    oss << "delby <pattern> [limit <n>]  - Delete keys matching pattern" << std::endl;
+    oss << "flush                         - Flush all data in memory to the disk" << std::endl;
+    oss << "help                          - Show this help" << std::endl;
     oss << std::endl;
     oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, h=help" << std::endl;
     return oss.str();

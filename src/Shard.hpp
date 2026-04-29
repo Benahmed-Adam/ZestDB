@@ -18,9 +18,9 @@ public:
     ResultType set(const std::string& key, const std::string& value);
     ResultType del(const std::string& key);
 
-    ResultType getBy(const std::regex& reg);
-    ResultType setBy(const std::regex& reg, const std::string& value);
-    ResultType delBy(const std::regex& reg);
+    ResultType getBy(const std::regex& reg, unsigned int limit);
+    ResultType setBy(const std::regex& reg, const std::string& value, unsigned int limit);
+    ResultType delBy(const std::regex& reg, unsigned int limit);
 
     void flush();
     void stop();

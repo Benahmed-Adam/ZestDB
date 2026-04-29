@@ -172,7 +172,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 
 ResultType Shard::del(const std::string& key)
 {
-    std::unique_lock<std::shared_mutex> lock(this->readMtx); 
+    std::unique_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, "Shard::del - shard " + std::to_string(shardId) + " deleting key: " + key);
 
     this->cache->remove(key);
@@ -190,8 +190,8 @@ ResultType Shard::del(const std::string& key)
         result.message = std::string(Messages::SUCCESS_DEL) + key;
         result.affectedRows = 1;
         return result;
-    } 
-    
+    }
+
     ZestLog(LogLevel::DEBUG, "Shard::del - key not found or already deleted: " + key + " in shard " + std::to_string(shardId));
     ResultType result;
     result.code = ResultType::Code::ERROR;
@@ -200,7 +200,7 @@ ResultType Shard::del(const std::string& key)
     return result;
 }
 
-ResultType Shard::getBy(const std::regex& reg)
+ResultType Shard::getBy(const std::regex& reg, unsigned int limit)
 {
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
@@ -208,8 +208,12 @@ ResultType Shard::getBy(const std::regex& reg)
 
     std::ostringstream oss;
     int matchCount = 0;
+    unsigned int count = 0;
 
     for (const IndexEntry& entry : entries) {
+        if (limit != 0 && count >= limit)
+            break;
+
         if (entry.isTombstone || entry.segmentId == -1) {
             continue;
         }
@@ -219,6 +223,7 @@ ResultType Shard::getBy(const std::regex& reg)
             std::string value = this->storageManager->read(entry);
             oss << key << ":" << value << ";";
             matchCount++;
+            count++;
         }
     }
 
@@ -229,15 +234,19 @@ ResultType Shard::getBy(const std::regex& reg)
     return result;
 }
 
-ResultType Shard::setBy(const std::regex& reg, const std::string& value)
+ResultType Shard::setBy(const std::regex& reg, const std::string& value, unsigned int limit)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
 
     int matchCount = 0;
+    unsigned int count = 0;
 
     for (const IndexEntry& entry : entries) {
+        if (count++ < limit && limit > 1)
+            break;
+
         if (entry.isTombstone || entry.segmentId == -1) {
             continue;
         }
@@ -255,6 +264,7 @@ ResultType Shard::setBy(const std::regex& reg, const std::string& value)
             this->cache->put(newEntry, value);
 
             matchCount++;
+            count++;
         }
     }
 
@@ -265,15 +275,19 @@ ResultType Shard::setBy(const std::regex& reg, const std::string& value)
     return result;
 }
 
-ResultType Shard::delBy(const std::regex& reg)
+ResultType Shard::delBy(const std::regex& reg, unsigned int limit)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll();
 
     int matchCount = 0;
+    unsigned int count = 0;
 
     for (const IndexEntry& entry : entries) {
+        if (limit != 0 && count >= limit)
+            break;
+
         if (entry.isTombstone || entry.segmentId == -1) {
             continue;
         }
@@ -287,6 +301,7 @@ ResultType Shard::delBy(const std::regex& reg)
             this->cache->remove(key);
 
             matchCount++;
+            count++;
         }
     }
 
