@@ -34,6 +34,7 @@ struct Messages {
     static constexpr const char* TYPE_HELP = "Type h for help";
     static constexpr const char* FLUSH_SUCCESSFUL = "Flush successful !";
     static constexpr const char* JSON_ONLY_ERROR = "Invalid format, only json data allowed !";
+    static constexpr const char* READ_ONLY_ERROR = "Modification not allowed ! The database is in read-only mode !";
 };
 
 struct Settings {
@@ -59,6 +60,7 @@ struct Settings {
     bool useSSL;
     bool isRunning = true;
     bool jsonOnly;
+    bool readOnly;
 
     bool hasCrashedLastTime;
 };

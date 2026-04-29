@@ -140,6 +140,7 @@ void DataSegment::flush()
 
     if (this->canFlush) {
         this->segment.flush();
+        // fsync ?
         this->canFlush = false;
         ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing successful");
         return;

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,7 +34,7 @@ public:
 private:
     std::filesystem::path indexPath;
     std::fstream index;
-    std::mutex mtx;
+    std::shared_mutex mtx;
     Settings settings;
 
     std::unordered_map<std::string, std::streamoff> memoryTree;

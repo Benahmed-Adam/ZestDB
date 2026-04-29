@@ -28,7 +28,7 @@ IndexManager::~IndexManager()
 
 void IndexManager::loadIndexIntoMemory()
 {
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::shared_mutex> lock(this->mtx);
     this->index.seekg(0, std::ios::end);
     std::streamoff fsize = this->index.tellg();
 
@@ -54,7 +54,7 @@ void IndexManager::loadIndexIntoMemory()
 IndexEntry IndexManager::search(const std::string& key)
 {
     ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::shared_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(key);
     if (it != this->memoryTree.end()) {
@@ -76,7 +76,7 @@ IndexEntry IndexManager::search(const std::string& key)
 void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
     ZestLog(LogLevel::DEBUG, "IndexManager::update - updating key: " + key);
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(key);
     if (it != this->memoryTree.end()) {
@@ -100,7 +100,7 @@ void IndexManager::insert(const IndexEntry& entry)
 {
     std::string keyStr(entry.key);
     ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting key: " + keyStr);
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(keyStr);
     if (it != this->memoryTree.end()) {
@@ -144,19 +144,19 @@ void IndexManager::insert(const IndexEntry& entry)
 std::vector<IndexEntry> IndexManager::getAll()
 {
     std::vector<IndexEntry> res;
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::shared_lock<std::shared_mutex> lock(this->mtx);
 
     res.reserve(this->memoryTree.size());
 
     IndexEntry e;
     for (auto const& [key, offset] : this->memoryTree) {
         this->index.seekg(offset, std::ios::beg);
-        
+
         if (this->index.read((char*)&e, sizeof(IndexEntry))) {
             res.push_back(e);
         } else {
             ZestLog(LogLevel::ERROR, "IndexManager::getAll - Failed to read entry at offset: " + std::to_string(offset));
-            this->index.clear(); 
+            this->index.clear();
         }
     }
 
@@ -170,7 +170,7 @@ std::vector<IndexEntry> IndexManager::compact()
     std::vector<IndexEntry> entries = this->getAll();
     std::vector<IndexEntry> validEntries = entries;
 
-    std::lock_guard<std::mutex> lock(this->mtx);
+    std::unique_lock<std::shared_mutex> lock(this->mtx);
 
     this->index.close();
     this->index.open(this->indexPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
@@ -208,7 +208,7 @@ std::vector<IndexEntry> IndexManager::compact()
 
 void IndexManager::flush()
 {
-    std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
+    std::unique_lock<std::shared_mutex> lock(this->mtx, std::try_to_lock);
     if (!lock.owns_lock()) {
         ZestLog(LogLevel::DEBUG, "IndexManager::flush - could not acquire lock, skipping");
         return;
@@ -218,6 +218,7 @@ void IndexManager::flush()
 
     if (this->canFlush) {
         this->index.flush();
+        // fsync ?
         this->canFlush = false;
         ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing successful");
         return;

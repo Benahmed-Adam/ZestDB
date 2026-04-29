@@ -181,6 +181,7 @@ void ZestDB::boot()
         this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
         setLoggerDebugMode(this->settings.isDebug);
         this->settings.jsonOnly = node["jsonOnly"].get_value_or<bool>(false);
+        this->settings.readOnly = node["readOnly"].get_value_or<bool>(false);
 
         this->settings.useSSL = node["useSSL"].get_value_or<bool>(false);
         this->settings.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
@@ -243,6 +244,7 @@ void ZestDB::boot()
     ZestLog(LogLevel::DEBUG, "FlushInterval : " + std::to_string(this->settings.FlushInterval));
     ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
     ZestLog(LogLevel::DEBUG, "isJson : " + std::to_string(this->settings.jsonOnly));
+    ZestLog(LogLevel::DEBUG, "readOnly : " + std::to_string(this->settings.readOnly));
     ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
     ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
 
@@ -321,6 +323,10 @@ ResultType ZestDB::get(const std::string& key)
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
 {
+    if (this->settings.readOnly) {
+        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+    }
+
     if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
@@ -341,6 +347,10 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
 ResultType ZestDB::del(const std::string& key)
 {
+    if (this->settings.readOnly) {
+        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+    }
+
     if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
@@ -369,6 +379,10 @@ ResultType ZestDB::getBy(const std::string& patern)
 
 ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
 {
+    if (this->settings.readOnly) {
+        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+    }
+
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::setBy - pattern cannot be empty");
         return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };
@@ -397,6 +411,10 @@ ResultType ZestDB::setBy(const std::string& patern, const std::string& value)
 
 ResultType ZestDB::delBy(const std::string& patern)
 {
+    if (this->settings.readOnly) {
+        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+    }
+    
     if (patern.empty()) {
         ZestLog(LogLevel::ERROR, "ZestDB::delBy - pattern cannot be empty");
         return { ResultType::Code::ERROR, Messages::PATTERN_EMPTY };

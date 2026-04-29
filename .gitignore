@@ -5,7 +5,7 @@ obj/
 .vscode/
 DB/
 test.py
-TODO.md
+TODO*
 TEST.md
 cert.pem
 key.pem
