@@ -11,8 +11,8 @@
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
-#include "json.hpp"
-#include "node.hpp"
+#include "lib/json.hpp"
+#include "lib/node.hpp"
 
 namespace fs = std::filesystem;
 
@@ -557,7 +557,7 @@ std::string ZestDB::execCmd(const std::string& command)
         this->flush();
         oss << Messages::FLUSH_SUCCESSFUL << "\n";
     } else {
-        oss << "ERROR: " << Messages::CMD_NOT_FOUND <<"\n";
+        oss << "ERROR: " << Messages::CMD_NOT_FOUND << "\n";
         oss << Messages::TYPE_HELP << "\n";
     }
 

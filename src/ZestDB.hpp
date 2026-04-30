@@ -10,7 +10,7 @@
 #include "Settings.hpp"
 #include "ShardManager.hpp"
 #include "WAL.hpp"
-#include "httplib.hpp"
+#include "lib/httplib.hpp"
 
 #define NUM_SHARDS 32
 

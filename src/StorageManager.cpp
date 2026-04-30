@@ -65,11 +65,10 @@ IndexEntry StorageManager::append(const std::string& value)
     auto it = this->segments.find(currentId);
     if (it != this->segments.end() && !it->second->isFull()) {
         seg = it->second.get();
-    } 
-    else {
+    } else {
         int nextId = currentId + 1;
         ZestLog(LogLevel::DEBUG, "Creating new segment: " + std::to_string(nextId));
-        
+
         this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
         this->latestSegmentId.store(nextId);
         seg = this->segments[nextId].get();
@@ -98,11 +97,11 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
 
     for (auto it = this->segments.begin(); it != this->segments.end();) {
         int id = it->first;
-        
+
         if (usedSet.find(id) == usedSet.end()) {
             std::filesystem::path segPath = this->settings.DbPath / "seg" / (std::to_string(id) + ".seg");
 
-            it = this->segments.erase(it); 
+            it = this->segments.erase(it);
 
             if (std::filesystem::exists(segPath)) {
                 if (std::filesystem::remove(segPath)) {

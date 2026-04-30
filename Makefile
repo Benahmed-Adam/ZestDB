@@ -35,7 +35,7 @@ clean:
 	rm -rf $(OBJDIR) $(BINDIR)
 
 format:
-	find src -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i --verbose {} +
+	find src -path src/lib -prune -o -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i --verbose {} +
 
 run: all
 	./$(OUTPUT)
