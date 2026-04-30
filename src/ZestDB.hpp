@@ -14,6 +14,11 @@
 
 #define NUM_SHARDS 32
 
+struct CreationValidationRuleResult {
+    ValidationRule rule;
+    bool result;
+};
+
 class ZestDB {
 public:
     ZestDB();
@@ -42,8 +47,8 @@ private:
     bool isJsonValid(const std::string& value) const;
     void flush();
     void replayWAL();
-
     std::string help() const;
+    CreationValidationRuleResult createValidationRule(const std::string& mode, const std::string& pattern) const;
 
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;

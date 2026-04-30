@@ -394,6 +394,42 @@ ResultType ZestDB::delBy(ValidationRule valid)
     return this->shardManager->delBy(valid);
 }
 
+CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mode, const std::string& pattern) const
+{
+    ValidationRule valid;
+    bool validMode = true;
+
+    if (mode == "re") {
+        try {
+            std::regex keyRegex(pattern);
+            valid.func = [keyRegex](const std::string& key) {
+                return std::regex_match(key, keyRegex);
+            };
+        } catch (const std::regex_error&) {
+            validMode = false;
+        }
+    } else if (mode == "sw") {
+        valid.func = [pattern](const std::string& key) {
+            return key.find(pattern) == 0;
+        };
+    } else if (mode == "ct") {
+        valid.func = [pattern](const std::string& key) {
+            return key.find(pattern) != std::string::npos;
+        };
+    } else if (mode == "ew") {
+        valid.func = [pattern](const std::string& key) {
+            if (key.size() >= pattern.size()) {
+                return key.compare(key.size() - pattern.size(), pattern.size(), pattern) == 0;
+            }
+            return false;
+        };
+    } else {
+        validMode = false;
+    }
+
+    return { valid, validMode };
+}
+
 std::string ZestDB::execCmd(const std::string& command)
 {
     std::istringstream iss(command);
@@ -448,39 +484,44 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << "ERROR: " << result.message << "\n";
         }
     } else if (cmd == "gb" || cmd == "getby") {
-        std::string pattern;
+        std::string mode, pattern;
+        unsigned int limit = UINT_MAX;
+        if (!(iss >> mode)) {
+            oss << Messages::MISSING_PATTERN << "\n";
+            oss << Messages::USAGE_GETBY << "\n";
+        }
         if (!(iss >> pattern)) {
             oss << Messages::MISSING_PATTERN << "\n";
             oss << Messages::USAGE_GETBY << "\n";
         }
-        unsigned int limit = UINT_MAX;
         std::string word;
-        if (iss >> word) {
-            if (word == "limit" || word == "lim") {
-                iss >> limit;
+        while (iss >> word) {
+            if (word == "lim" && (iss >> limit)) {
+                break;
             } else {
                 oss << "ERROR: unexpected token '" << word << "'" << "\n";
+                break;
             }
         }
-        try {
-            std::regex keyRegex(pattern);
-            ValidationRule valid;
-            valid.limit = limit;
-            valid.func = [keyRegex](const std::string& key) {
-                return std::regex_match(key, keyRegex);
-            };
-            result = this->getBy(valid);
-        } catch (const std::regex_error& e) {
-            oss << "ERROR: invalid regex pattern: " << e.what() << "\n";
-            result = { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-        }
-        if (result.code == ResultType::Code::SUCCESS) {
-            oss << result.message << "\n";
+        auto [valid, validMode] = this->createValidationRule(mode, pattern);
+        if (!validMode) {
+            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
         } else {
-            oss << "(not found): " << result.message << "\n";
+            valid.limit = limit;
+            result = this->getBy(valid);
+            if (result.code == ResultType::Code::SUCCESS) {
+                oss << result.message << "\n";
+            } else {
+                oss << "(not found): " << result.message << "\n";
+            }
         }
     } else if (cmd == "sb" || cmd == "setby") {
-        std::string pattern, value;
+        std::string mode, pattern, value;
+        unsigned int limit = UINT_MAX;
+        if (!(iss >> mode)) {
+            oss << Messages::MISSING_PATTERN << "\n";
+            oss << Messages::USAGE_SETBY << "\n";
+        }
         if (!(iss >> pattern)) {
             oss << Messages::MISSING_PATTERN << "\n";
             oss << Messages::USAGE_SETBY << "\n";
@@ -489,14 +530,13 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::MISSING_VALUE << "\n";
             oss << Messages::USAGE_SETBY << "\n";
         }
-        unsigned int limit = UINT_MAX;
-        std::vector<std::string> words;
         std::string word;
+        std::vector<std::string> words;
         while (iss >> word) {
             words.push_back(word);
         }
         for (size_t i = 0; i < words.size(); i++) {
-            if ((words[i] == "limit" || words[i] == "lim") && i + 1 < words.size()) {
+            if ((words[i] == "lim") && i + 1 < words.size()) {
                 limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
                 break;
             }
@@ -504,52 +544,47 @@ std::string ZestDB::execCmd(const std::string& command)
                 value += (value.empty() ? "" : " ") + words[i];
             }
         }
-        try {
-            std::regex keyRegex(pattern);
-            ValidationRule valid;
+        auto [valid, validMode] = this->createValidationRule(mode, pattern);
+        if (!validMode) {
+            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
+        } else {
             valid.limit = limit;
-            valid.func = [keyRegex](const std::string& key) {
-                return std::regex_match(key, keyRegex);
-            };
             result = this->setBy(valid, value);
-        } catch (const std::regex_error& e) {
-            oss << "ERROR: invalid regex pattern: " << e.what() << "\n";
-            result = { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-        }
-        if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << result.message << "\n";
+            if (result.code == ResultType::Code::SUCCESS) {
+                oss << "OK: " << result.message << "\n";
+            }
         }
     } else if (cmd == "db" || cmd == "delby") {
-        std::string pattern;
+        std::string mode, pattern;
+        unsigned int limit = UINT_MAX;
+        if (!(iss >> mode)) {
+            oss << Messages::MISSING_PATTERN << "\n";
+            oss << Messages::USAGE_DELBY << "\n";
+        }
         if (!(iss >> pattern)) {
             oss << Messages::MISSING_PATTERN << "\n";
             oss << Messages::USAGE_DELBY << "\n";
         }
-        unsigned int limit = UINT_MAX;
         std::string word;
-        if (iss >> word) {
-            if (word == "limit" || word == "lim") {
-                iss >> limit;
+        while (iss >> word) {
+            if (word == "lim" && (iss >> limit)) {
+                break;
             } else {
                 oss << "ERROR: unexpected token '" << word << "'" << "\n";
+                break;
             }
         }
-        try {
-            std::regex keyRegex(pattern);
-            ValidationRule valid;
-            valid.limit = limit;
-            valid.func = [keyRegex](const std::string& key) {
-                return std::regex_match(key, keyRegex);
-            };
-            result = this->delBy(valid);
-        } catch (const std::regex_error& e) {
-            oss << "ERROR: invalid regex pattern: " << e.what() << "\n";
-            result = { ResultType::Code::ERROR, Messages::INVALID_REGEX };
-        }
-        if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << result.message << "\n";
+        auto [valid, validMode] = this->createValidationRule(mode, pattern);
+        if (!validMode) {
+            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
         } else {
-            oss << "ERROR: " << result.message << "\n";
+            valid.limit = limit;
+            result = this->delBy(valid);
+            if (result.code == ResultType::Code::SUCCESS) {
+                oss << "OK: " << result.message << "\n";
+            } else {
+                oss << "ERROR: " << result.message << "\n";
+            }
         }
     } else if (cmd == "h" || cmd == "help") {
         oss << this->help();
@@ -587,14 +622,27 @@ std::string ZestDB::help() const
     std::ostringstream oss;
     oss << "ZestDB Commands:" << "\n";
     oss << "---------------" << "\n";
-    oss << "get <key>                     - Get value by key" << "\n";
-    oss << "set <key> <value>             - Set key-value pair" << "\n";
-    oss << "del <key>                     - Delete key" << "\n";
-    oss << "getby <pattern> [limit <n>]   - Get keys matching regex pattern" << "\n";
-    oss << "setby <pattern> <val> [limit <n>] - Set value for keys matching pattern" << "\n";
-    oss << "delby <pattern> [limit <n>]  - Delete keys matching pattern" << "\n";
-    oss << "flush                         - Flush all data in memory to the disk" << "\n";
-    oss << "help                          - Show this help" << "\n";
+    oss << "get <key>                              - Get value by key" << "\n";
+    oss << "set <key> <value>                      - Set key-value pair" << "\n";
+    oss << "del <key>                              - Delete key" << "\n";
+    oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching pattern" << "\n";
+    oss << "setby <mode> <pattern> <val> [lim <n>] - Set value for keys matching pattern" << "\n";
+    oss << "delby <mode> <pattern> [lim <n>]       - Delete keys matching pattern" << "\n";
+    oss << "flush                                  - Flush all data in memory to the disk" << "\n";
+    oss << "help                                   - Show this help" << "\n";
+    oss << "\n";
+    oss << "Modes:" << "\n";
+    oss << "  re  - regex" << "\n";
+    oss << "  sw  - starts with" << "\n";
+    oss << "  ct  - contains" << "\n";
+    oss << "  ew  - ends with" << "\n";
+    oss << "  lim - limit (optional)" << "\n";
+    oss << "\n";
+    oss << "Examples:" << "\n";
+    oss << "  gb re .* lim 10                      - Get keys matching regex '.*' with limit 10" << "\n";
+    oss << "  gb sw ca lim 20                      - Get keys starting with 'ca' with limit 20" << "\n";
+    oss << "  gb ct ac lim 1                       - Get keys containing 'ac' with limit 1" << "\n";
+    oss << "  gb ew ca                             - Get keys ending with 'ca' (no limit)" << "\n";
     oss << "\n";
     oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, h=help" << "\n";
     return oss.str();

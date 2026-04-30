@@ -5,10 +5,8 @@
 #include <regex>
 #include <string>
 
-using ValidationFunction = std::function<bool(const std::string&)>;
-
 struct ValidationRule {
-    ValidationFunction func;
+    std::function<bool(const std::string&)> func;
     unsigned int limit = UINT_MAX;
 };
 
@@ -35,9 +33,9 @@ struct Messages {
     static constexpr const char* MISSING_PATTERN = "Error: missing pattern";
     static constexpr const char* USAGE_GET = "Usage: get <key>";
     static constexpr const char* USAGE_SET = "Usage: set <key> <value>";
-    static constexpr const char* USAGE_GETBY = "Usage: getby <pattern>";
-    static constexpr const char* USAGE_SETBY = "Usage: setby <pattern> <value>";
-    static constexpr const char* USAGE_DELBY = "Usage: delby <pattern>";
+    static constexpr const char* USAGE_GETBY = "Usage: getby <mode> <pattern> [lim <n>]";
+    static constexpr const char* USAGE_SETBY = "Usage: setby <mode> <pattern> <value> [lim <n>]";
+    static constexpr const char* USAGE_DELBY = "Usage: delby <mode> <pattern> [lim <n>]";
     static constexpr const char* CMD_NOT_FOUND = "Command not found";
     static constexpr const char* TYPE_HELP = "Type h for help";
     static constexpr const char* FLUSH_SUCCESSFUL = "Flush successful !";
