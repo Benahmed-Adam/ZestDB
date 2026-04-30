@@ -7,8 +7,8 @@
 #include <unistd.h>
 #endif
 
-
-void ZestFsync(int fd) {
+void ZestFsync(int fd)
+{
 #ifdef _WIN32
     HANDLE h = (HANDLE)_get_osfhandle(fd);
     if (h != INVALID_HANDLE_VALUE) {

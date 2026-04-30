@@ -8,7 +8,7 @@ else
     CXXFLAGS = $(BASE_CXXFLAGS) -O3
 endif
 
-LDFLAGS = -lcrypto -lpthread -lssl
+LDFLAGS = -lcrypto -lssl
 
 SRCDIR = src
 OBJDIR = obj

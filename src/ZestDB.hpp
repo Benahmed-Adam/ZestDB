@@ -23,9 +23,9 @@ public:
     ResultType set(const std::string& key, const std::string& value);
     ResultType del(const std::string& key);
 
-    ResultType getBy(const std::string& patern, unsigned int limit = UINT_MAX);
-    ResultType setBy(const std::string& patern, const std::string& value, unsigned int limit = UINT_MAX);
-    ResultType delBy(const std::string& patern, unsigned int limit = UINT_MAX);
+    ResultType getBy(ValidationRule valid);
+    ResultType setBy(ValidationRule valid, const std::string& value);
+    ResultType delBy(ValidationRule valid);
 
     std::string execCmd(const std::string& command);
     bool validateToken(const std::string& username, const std::string& token) const;

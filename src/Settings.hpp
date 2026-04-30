@@ -1,8 +1,16 @@
 #pragma once
 
+#include <climits>
 #include <filesystem>
 #include <regex>
 #include <string>
+
+using ValidationFunction = std::function<bool(const std::string&)>;
+
+struct ValidationRule {
+    ValidationFunction func;
+    unsigned int limit = UINT_MAX;
+};
 
 struct ResultType {
     enum class Code {

@@ -45,13 +45,13 @@ ResultType ShardManager::del(const std::string& key)
     return this->shards[static_cast<size_t>(shardId)]->del(key);
 }
 
-ResultType ShardManager::getBy(const std::regex& reg, unsigned int limit)
+ResultType ShardManager::getBy(ValidationRule valid)
 {
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
         futures.push_back(threadPool->enqueue([&]() {
-            return shard->getBy(reg, limit);
+            return shard->getBy(valid);
         }));
     }
 
@@ -68,13 +68,13 @@ ResultType ShardManager::getBy(const std::regex& reg, unsigned int limit)
     return { ResultType::Code::SUCCESS, results, totalMatches };
 }
 
-ResultType ShardManager::setBy(const std::regex& reg, const std::string& value, unsigned int limit)
+ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
 {
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
         futures.push_back(threadPool->enqueue([&]() {
-            return shard->setBy(reg, value, limit);
+            return shard->setBy(valid, value);
         }));
     }
 
@@ -89,13 +89,13 @@ ResultType ShardManager::setBy(const std::regex& reg, const std::string& value, 
     return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries", totalUpdated };
 }
 
-ResultType ShardManager::delBy(const std::regex& reg, unsigned int limit)
+ResultType ShardManager::delBy(ValidationRule valid)
 {
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
         futures.push_back(threadPool->enqueue([&]() {
-            return shard->delBy(reg, limit);
+            return shard->delBy(valid);
         }));
     }
 
