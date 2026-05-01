@@ -87,9 +87,11 @@
             ws.onerror=function(){us('off');E('result').textContent='connection failed'};
             ws.onmessage=function(e){
                 var data=e.data;
+                console.log('Raw message:', data);
                 var execTime='';
                 var match=data.match(/\[execution_time:\s*([\d.]+)ms\]/);
                 if(match){
+                    console.log('Execution time found:', match[1]);
                     execTime=match[1]+'ms';
                     data=data.replace(match[0],'').trim();
                 }

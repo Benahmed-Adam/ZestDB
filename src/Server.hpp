@@ -7,6 +7,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <deque>
 
 using asio::ip::tcp;
 
@@ -20,14 +21,21 @@ public:
     void start();
 
 private:
-    void do_read();
-    void do_write(const std::string& message, bool closeAfter = false);
+    void do_read_size();
+    void do_read_command(uint32_t size);
+    
+    void queue_write(const std::string& message, bool closeAfter = false);
+    void do_write(); 
+    
     void close_stream();
 
     ZestStream stream_;
     asio::streambuf buffer_;
     ZestDB& db_;
     bool authenticated_ = false;
+
+    std::deque<std::string> write_queue_;
+    bool closing_ = false;
 };
 
 class Server {

@@ -2,6 +2,8 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 #include <format>
+#include <istream>
+#include <cstring>
 
 Session::Session(ZestStream stream, ZestDB& db)
     : stream_(std::move(stream))
@@ -15,7 +17,7 @@ void Session::start()
         return s.lowest_layer().remote_endpoint().address().to_string();
     },
         stream_);
-
+    
     unsigned short int remote_port = std::visit([](auto& s) {
         return s.lowest_layer().remote_endpoint().port();
     },
@@ -23,7 +25,7 @@ void Session::start()
 
     if (!std::regex_match(remote_ip, this->db_.settings.NetworkValidation)) {
         ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", remote_ip));
-        this->do_write("unauthorized", true);
+        this->queue_write("unauthorized", true);
         return;
     }
 
@@ -32,97 +34,142 @@ void Session::start()
     if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
         auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
         ssl_stream.async_handshake(asio::ssl::stream_base::server,
-            [self = shared_from_this()](std::error_code ec) {
+            [self = this->shared_from_this()](std::error_code ec) {
                 if (!ec)
-                    self->do_read();
+                    self->do_read_size();
             });
     } else {
-        this->do_read();
+        this->do_read_size();
     }
 }
 
-void Session::do_read()
+void Session::do_read_size()
 {
     auto self(this->shared_from_this());
-
-    auto handle_read = [this, self](auto& stream) {
-        asio::async_read_until(stream, this->buffer_, "\n",
-            [this, self](std::error_code ec, std::size_t) {
-                if (!ec) {
+    std::visit([this, self](auto& stream) {
+        asio::async_read(stream, this->buffer_, asio::transfer_exactly(4),
+            [this, self](std::error_code ec, std::size_t length) {
+                if (!ec && length == 4) {
                     std::istream is(&this->buffer_);
-                    std::string cmd;
-                    std::getline(is, cmd);
-
-                    if (!cmd.empty() && cmd.back() == '\r') {
-                        cmd.pop_back();
-                    }
-
-                    ZestLog(LogLevel::DEBUG, std::format("Session: command received: {}", cmd));
-                    std::string result;
-
-                    if (!this->authenticated_) {
-                        std::string authPrefix = "Authorization: ";
-                        if (cmd.compare(0, authPrefix.length(), authPrefix) == 0) {
-                            std::string authContent = cmd.substr(authPrefix.length());
-
-                            size_t dotPos = authContent.find(".");
-                            if (dotPos != std::string::npos) {
-                                std::string username = authContent.substr(0, dotPos);
-                                std::string token = authContent.substr(dotPos + 1);
-
-                                if (this->db_.validateToken(username, token)) {
-                                    ZestLog(LogLevel::DEBUG, std::format("Session: auth success for {}", username));
-                                    this->authenticated_ = true;
-                                    result = "OK: authenticated";
-                                } else {
-                                    result = "ERROR: authentication failed";
-                                    this->do_write(result + "\n", true);
-                                    return;
-                                }
-                            } else {
-                                result = "ERROR: invalid auth format";
-                                this->do_write(result + "\n", true);
-                                return;
-                            }
-                        } else {
-                            result = "ERROR: authentication required";
-                            this->do_write(result + "\n", true);
-                            return;
-                        }
-                    } else {
-                        result = this->db_.execCmd(cmd);
-                    }
-
-                    this->do_write(result + "\n", false);
+                    uint32_t payload_size;
+                    is.read(reinterpret_cast<char*>(&payload_size), 4);
+                    payload_size = ntohl(payload_size);
+                    this->do_read_command(payload_size);
                 } else if (ec != asio::error::operation_aborted) {
                     ZestLog(LogLevel::INFO, "Client disconnected");
                 }
             });
-    };
-
-    std::visit(handle_read, this->stream_);
+    },
+        stream_);
 }
 
-void Session::do_write(const std::string& message, bool closeAfter)
+void Session::do_read_command(uint32_t payload_size)
 {
     auto self(this->shared_from_this());
+    std::visit([this, self, payload_size](auto& stream) {
+        asio::async_read(stream, this->buffer_, asio::transfer_exactly(payload_size),
+            [this, self, payload_size](std::error_code ec, std::size_t length) {
+                if (!ec && length == payload_size) {
+                    std::istream is(&this->buffer_);
+                    std::string payload(payload_size, '\0');
+                    is.read(&payload[0], payload_size);
 
-    std::visit([this, self, message, closeAfter](auto& stream) {
-        asio::async_write(stream, asio::buffer(message),
-            [this, self, message, closeAfter](std::error_code ec, std::size_t) {
-                if (!ec) {
-                    ZestLog(LogLevel::DEBUG, std::format("Session: sent {} bytes", message.size()));
-                    if (closeAfter) {
-                        this->close_stream();
-                    } else {
-                        this->do_read();
+                    std::string final_result;
+                    bool should_close = false;
+                    uint32_t offset = 0;
+
+                    while (offset < payload_size && !should_close) {
+                        if (offset + 4 > payload_size) {
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + std::string("ERROR: malformed batch");
+                            break;
+                        }
+
+                        uint32_t cmd_size;
+                        std::memcpy(&cmd_size, &payload[offset], 4);
+                        cmd_size = ntohl(cmd_size);
+                        offset += 4;
+
+                        if (offset + cmd_size > payload_size) {
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + std::string("ERROR: malformed batch data");
+                            break;
+                        }
+
+                        std::string cmd = payload.substr(offset, cmd_size);
+                        offset += cmd_size;
+
+                        std::string cmd_result;
+
+                        if (!this->authenticated_) {
+                            std::string authPrefix = "Authorization: ";
+                            if (cmd.compare(0, authPrefix.length(), authPrefix) == 0) {
+                                std::string authContent = cmd.substr(authPrefix.length());
+                                size_t dotPos = authContent.find(".");
+                                if (dotPos != std::string::npos) {
+                                    std::string username = authContent.substr(0, dotPos);
+                                    std::string token = authContent.substr(dotPos + 1);
+                                    if (this->db_.validateToken(username, token)) {
+                                        this->authenticated_ = true;
+                                        cmd_result = "OK: authenticated";
+                                    } else {
+                                        cmd_result = "ERROR: authentication failed";
+                                        should_close = true;
+                                    }
+                                }
+                            } else {
+                                cmd_result = "ERROR: authentication required";
+                                should_close = true;
+                            }
+                        } else {
+                            cmd_result = this->db_.execCmd(cmd);
+                        }
+
+                        if (!final_result.empty()) {
+                            final_result += "\r\n\r\n";
+                        }
+                        final_result += cmd_result;
                     }
-                } else {
-                    ZestLog(LogLevel::WARNING, std::format("Session: write error: {}", ec.message()));
+
+                    this->queue_write(final_result + "\n", should_close);
+
+                    if (!should_close) {
+                        this->do_read_size();
+                    }
                 }
             });
     },
-        this->stream_);
+        stream_);
+}
+
+void Session::queue_write(const std::string& message, bool closeAfter)
+{
+    bool write_in_progress = !write_queue_.empty();
+    write_queue_.push_back(message);
+    closing_ = closeAfter;
+
+    if (!write_in_progress) {
+        this->do_write();
+    }
+}
+
+void Session::do_write()
+{
+    auto self(this->shared_from_this());
+    std::visit([this, self](auto& stream) {
+        asio::async_write(stream, asio::buffer(write_queue_.front()),
+            [this, self](std::error_code ec, std::size_t) {
+                if (!ec) {
+                    write_queue_.pop_front();
+                    if (!write_queue_.empty()) {
+                        this->do_write();
+                    } else if (closing_) {
+                        this->close_stream();
+                    }
+                } else {
+                    this->close_stream();
+                }
+            });
+    },
+        stream_);
 }
 
 void Session::close_stream()
