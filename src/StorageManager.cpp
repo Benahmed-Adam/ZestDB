@@ -1,3 +1,4 @@
+#include <format>
 #include <iostream>
 #include <mutex>
 #include <unordered_set>
@@ -38,7 +39,7 @@ void StorageManager::boot()
                 maxId = id;
         }
         this->latestSegmentId = maxId;
-        ZestLog(LogLevel::DEBUG, "StorageManager::boot - found " + std::to_string(nb) + " segments, latest: " + std::to_string(this->latestSegmentId.load()));
+        ZestLog(LogLevel::DEBUG, std::format("StorageManager::boot - found {} segments, latest: {}", nb, this->latestSegmentId.load()));
     }
 }
 
@@ -51,7 +52,7 @@ IndexEntry StorageManager::appendToSegment(DataSegment* seg, const std::string& 
         return { "", -1, 0, 0, false };
     }
 
-    ZestLog(LogLevel::DEBUG, "StorageManager::appendToSegment - written to segment: " + std::to_string(seg->getSegmentId()) + " at offset: " + std::to_string(pos));
+    ZestLog(LogLevel::DEBUG, std::format("StorageManager::appendToSegment - written to segment: {} at offset: {}", seg->getSegmentId(), pos));
     return { "", seg->getSegmentId(), pos, (unsigned int)value.size(), false };
 }
 
@@ -67,7 +68,7 @@ IndexEntry StorageManager::append(const std::string& value)
         seg = it->second.get();
     } else {
         int nextId = currentId + 1;
-        ZestLog(LogLevel::DEBUG, "Creating new segment: " + std::to_string(nextId));
+        ZestLog(LogLevel::DEBUG, std::format("Creating new segment: {}", nextId));
 
         this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
         this->latestSegmentId.store(nextId);
@@ -79,14 +80,14 @@ IndexEntry StorageManager::append(const std::string& value)
 
 std::string StorageManager::read(const IndexEntry& entry)
 {
-    ZestLog(LogLevel::DEBUG, "StorageManager::read - segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset) + ", size: " + std::to_string(entry.size));
+    ZestLog(LogLevel::DEBUG, std::format("StorageManager::read - segment: {}, offset: {}, size: {}", entry.segmentId, entry.offset, entry.size));
 
     auto it = this->segments.find(entry.segmentId);
     if (it != this->segments.end()) {
         return it->second->read(entry.offset, entry.size);
     }
 
-    ZestLog(LogLevel::ERROR, "StorageManager::read - segment not found: " + std::to_string(entry.segmentId));
+    ZestLog(LogLevel::ERROR, std::format("StorageManager::read - segment not found: {}", entry.segmentId));
     return "";
 }
 
@@ -99,15 +100,15 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
         int id = it->first;
 
         if (usedSet.find(id) == usedSet.end()) {
-            std::filesystem::path segPath = this->settings.DbPath / "seg" / (std::to_string(id) + ".seg");
+            std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", id);
 
             it = this->segments.erase(it);
 
             if (std::filesystem::exists(segPath)) {
                 if (std::filesystem::remove(segPath)) {
-                    ZestLog(LogLevel::DEBUG, "StorageManager - Removed segment file: " + segPath.string());
+                    ZestLog(LogLevel::DEBUG, std::format("StorageManager - Removed segment file: {}", segPath.string()));
                 } else {
-                    ZestLog(LogLevel::ERROR, "StorageManager - Failed to remove file: " + segPath.string());
+                    ZestLog(LogLevel::ERROR, std::format("StorageManager - Failed to remove file: {}", segPath.string()));
                 }
             }
         } else {
@@ -115,7 +116,7 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "StorageManager - Remaining segments in memory: " + std::to_string(this->segments.size()));
+    ZestLog(LogLevel::DEBUG, std::format("StorageManager - Remaining segments in memory: {}", this->segments.size()));
 }
 
 void StorageManager::flush()

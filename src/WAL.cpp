@@ -1,5 +1,6 @@
 #include "WAL.hpp"
 #include "Logger.hpp"
+#include <format>
 #include <iostream>
 
 WAL::WAL(const Settings& set)

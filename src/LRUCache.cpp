@@ -1,15 +1,16 @@
 #include "LRUCache.hpp"
 #include "Logger.hpp"
+#include <format>
 
 LRUCache::LRUCache(unsigned int cap)
     : capacity(cap)
 {
-    ZestLog(LogLevel::DEBUG, "LRUCache::LRUCache - created cache with capacity: " + std::to_string(cap));
+    ZestLog(LogLevel::DEBUG, std::format("LRUCache::LRUCache - created cache with capacity: {}", cap));
 }
 
 CacheEntry LRUCache::get(const std::string& key)
 {
-    ZestLog(LogLevel::DEBUG, "LRUCache::get - looking for key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("LRUCache::get - looking for key: {}", key));
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
@@ -32,7 +33,7 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
 {
     std::string key(entry.key);
 
-    ZestLog(LogLevel::DEBUG, "LRUCache::put - putting key: " + key + " with value: " + value);
+    ZestLog(LogLevel::DEBUG, std::format("LRUCache::put - putting key: {} with value: {}", key, value));
 
     std::lock_guard<std::mutex> lock(this->mtx);
 
@@ -51,12 +52,12 @@ void LRUCache::put(const IndexEntry& entry, const std::string& value)
 
     this->lru_list.push_front(key);
     this->map[key] = { { entry, value }, this->lru_list.begin() };
-    ZestLog(LogLevel::DEBUG, "LRUCache::put - key inserted, cache size: " + std::to_string(this->map.size()));
+    ZestLog(LogLevel::DEBUG, std::format("LRUCache::put - key inserted, cache size: {}", this->map.size()));
 }
 
 void LRUCache::remove(const std::string& key)
 {
-    ZestLog(LogLevel::DEBUG, "LRUCache::remove - removing key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("LRUCache::remove - removing key: {}", key));
 
     std::lock_guard<std::mutex> lock(this->mtx);
 

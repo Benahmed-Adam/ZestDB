@@ -1,5 +1,6 @@
 #include "ShardManager.hpp"
 #include <algorithm>
+#include <format>
 #include <future>
 #include <regex>
 #include <thread>
@@ -86,7 +87,7 @@ ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
         }
     }
     threadPool->waitAll();
-    return { ResultType::Code::SUCCESS, "Value successfully modified for " + std::to_string(totalUpdated) + " entries", totalUpdated };
+    return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
 }
 
 ResultType ShardManager::delBy(ValidationRule valid)
@@ -107,7 +108,7 @@ ResultType ShardManager::delBy(ValidationRule valid)
         }
     }
     threadPool->waitAll();
-    return { ResultType::Code::SUCCESS, "Successfully deleted " + std::to_string(totalDeleted) + " entries", totalDeleted };
+    return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
 }
 
 void ShardManager::flush()

@@ -1,5 +1,6 @@
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -26,7 +27,7 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
 
-    ZestLog(LogLevel::INFO, "Shard " + std::to_string(shardId) + " initialized successfully");
+    ZestLog(LogLevel::INFO, std::format("Shard {} initialized successfully", shardId));
 
     std::promise<void> cachePromise;
     std::future<void> cacheFuture = cachePromise.get_future();
@@ -63,7 +64,7 @@ void Shard::boot()
 
     if (!fs::exists(this->settings.DbPath / "INDEX")) {
         fs::path indexPath = this->settings.DbPath / "INDEX";
-        ZestLog(LogLevel::INFO, "Creating INDEX for shard " + std::to_string(shardId) + " at " + indexPath.string());
+        ZestLog(LogLevel::INFO, std::format("Creating INDEX for shard {} at {}", shardId, indexPath.string()));
 
         if (auto parent = indexPath.parent_path(); !fs::exists(parent)) {
             fs::create_directories(parent);
@@ -71,7 +72,7 @@ void Shard::boot()
 
         std::ofstream index(indexPath);
         if (!index) {
-            ZestLog(LogLevel::ERROR, "Failed to create INDEX for shard " + std::to_string(shardId));
+            ZestLog(LogLevel::ERROR, std::format("Failed to create INDEX for shard {}", shardId));
             throw std::runtime_error("Failed to create INDEX for shard");
         }
     }
@@ -84,11 +85,11 @@ void Shard::boot()
 void Shard::fillCache()
 {
     while (!this->initialized.load()) {
-        ZestLog(LogLevel::WARNING, "Shard::fillCache - shard " + std::to_string(shardId) + " not initialized yet, waiting...");
+        ZestLog(LogLevel::WARNING, std::format("Shard::fillCache - shard {} not initialized yet, waiting...", shardId));
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    ZestLog(LogLevel::INFO, "Filling up the cache for shard " + std::to_string(shardId) + "...");
+    ZestLog(LogLevel::INFO, std::format("Filling up the cache for shard {}...", shardId));
 
     std::vector<IndexEntry> entries = this->indexManager->getAll();
     int numKeysInserted = 0;
@@ -107,33 +108,33 @@ void Shard::fillCache()
         }
         seenKeys.insert(key);
 
-        ZestLog(LogLevel::DEBUG, "Shard::fillCache - inserting key: " + key + " in shard " + std::to_string(shardId));
+        ZestLog(LogLevel::DEBUG, std::format("Shard::fillCache - inserting key: {} in shard {}", key, shardId));
         std::string value = this->storageManager->read(entries[i]);
         this->cache->put(entries[i], value);
         numKeysInserted++;
     }
-    ZestLog(LogLevel::INFO, "Shard " + std::to_string(shardId) + " cache filled with " + std::to_string(numKeysInserted) + " keys");
+    ZestLog(LogLevel::INFO, std::format("Shard {} cache filled with {} keys", shardId, numKeysInserted));
 }
 
 ResultType Shard::get(const std::string& key)
 {
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
-    ZestLog(LogLevel::DEBUG, "Shard::get - shard " + std::to_string(shardId) + " looking for key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("Shard::get - shard {} looking for key: {}", shardId, key));
 
     CacheEntry cacheEntry = this->cache->get(key);
 
     if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
-        ZestLog(LogLevel::DEBUG, "Shard::get - found in cache for shard " + std::to_string(shardId));
+        ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in cache for shard {}", shardId));
         return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::get - key not in cache, searching index in shard " + std::to_string(shardId));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not in cache, searching index in shard {}", shardId));
 
     IndexEntry entry;
     entry = this->indexManager->search(key);
 
     if (entry.segmentId != -1 && !entry.isTombstone) {
-        ZestLog(LogLevel::DEBUG, "Shard::get - found in segment: " + std::to_string(entry.segmentId));
+        ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in segment: {}", entry.segmentId));
         std::string value = this->storageManager->read(entry);
 
         this->cache->put(entry, value);
@@ -141,17 +142,17 @@ ResultType Shard::get(const std::string& key)
         return { ResultType::Code::SUCCESS, value, 1 };
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::get - key not found: " + key + " in shard " + std::to_string(shardId));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not found: {} in shard {}", key, shardId));
     return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    ZestLog(LogLevel::DEBUG, "Shard::set - shard " + std::to_string(shardId) + " key: " + key + ", value size: " + std::to_string(value.size()));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::set - shard {} key: {}, value size: {}", shardId, key, value.size()));
 
     IndexEntry entry = this->storageManager->append(value);
-    ZestLog(LogLevel::DEBUG, "Shard::set - appended to segment: " + std::to_string(entry.segmentId) + ", offset: " + std::to_string(entry.offset));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::set - appended to segment: {}, offset: {}", entry.segmentId, entry.offset));
 
     memset(entry.key, 0, sizeof(entry.key));
     size_t copySize = (key.size() < sizeof(entry.key) - 1) ? key.size() : sizeof(entry.key) - 1;
@@ -162,7 +163,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 
     this->cache->put(entry, value);
 
-    ZestLog(LogLevel::DEBUG, "Shard::set - successfully set key: " + key + " in shard " + std::to_string(shardId));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::set - successfully set key: {} in shard {}", key, shardId));
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
     result.message = std::string(Messages::SUCCESS_SET) + key;
@@ -173,7 +174,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 ResultType Shard::del(const std::string& key)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
-    ZestLog(LogLevel::DEBUG, "Shard::del - shard " + std::to_string(shardId) + " deleting key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("Shard::del - shard {} deleting key: {}", shardId, key));
 
     this->cache->remove(key);
     IndexEntry entry = this->indexManager->search(key);
@@ -184,7 +185,7 @@ ResultType Shard::del(const std::string& key)
         this->indexManager->update(key, entry);
         this->cache->remove(key);
 
-        ZestLog(LogLevel::DEBUG, "Shard::del - successfully deleted key: " + key + " in shard " + std::to_string(shardId));
+        ZestLog(LogLevel::DEBUG, std::format("Shard::del - successfully deleted key: {} in shard {}", key, shardId));
         ResultType result;
         result.code = ResultType::Code::SUCCESS;
         result.message = std::string(Messages::SUCCESS_DEL) + key;
@@ -192,10 +193,10 @@ ResultType Shard::del(const std::string& key)
         return result;
     }
 
-    ZestLog(LogLevel::DEBUG, "Shard::del - key not found or already deleted: " + key + " in shard " + std::to_string(shardId));
+    ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
     ResultType result;
     result.code = ResultType::Code::ERROR;
-    result.message = std::string(Messages::KEY_NOT_FOUND) + ": " + key;
+    result.message = std::format("{}: {}", Messages::KEY_NOT_FOUND, key);
     result.affectedRows = 0;
     return result;
 }
@@ -218,7 +219,7 @@ ResultType Shard::getBy(ValidationRule valid)
         }
         std::string key(entry.key);
         if (valid.func(key)) {
-            ZestLog(LogLevel::DEBUG, "Shard::getBy - match found: " + key);
+            ZestLog(LogLevel::DEBUG, std::format("Shard::getBy - match found: {}", key));
             std::string value = this->storageManager->read(entry);
             oss << key << ":" << value << ";";
             matchCount++;
@@ -249,7 +250,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
         }
         std::string key(entry.key);
         if (valid.func(key)) {
-            ZestLog(LogLevel::DEBUG, "Shard::setBy - match found: " + key);
+            ZestLog(LogLevel::DEBUG, std::format("Shard::setBy - match found: {}", key));
             IndexEntry newEntry = this->storageManager->append(value);
             memset(newEntry.key, 0, sizeof(newEntry.key));
             size_t copySize = (key.size() < sizeof(newEntry.key) - 1) ? key.size() : sizeof(newEntry.key) - 1;
@@ -266,7 +267,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
 
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
-    result.message = "Value successfully modified for " + std::to_string(matchCount) + " entries";
+    result.message = std::format("Value successfully modified for {} entries", matchCount);
     result.affectedRows = matchCount;
     return result;
 }
@@ -288,7 +289,7 @@ ResultType Shard::delBy(ValidationRule valid)
         }
         std::string key(entry.key);
         if (valid.func(key)) {
-            ZestLog(LogLevel::DEBUG, "Shard::delBy - match found: " + key);
+            ZestLog(LogLevel::DEBUG, std::format("Shard::delBy - match found: {}", key));
             IndexEntry tombstoneEntry = entry;
             tombstoneEntry.isTombstone = true;
 
@@ -301,20 +302,20 @@ ResultType Shard::delBy(ValidationRule valid)
 
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
-    result.message = "Successfully deleted " + std::to_string(matchCount) + " entries";
+    result.message = std::format("Successfully deleted {} entries", matchCount);
     result.affectedRows = matchCount;
     return result;
 }
 
 void Shard::flush()
 {
-    ZestLog(LogLevel::DEBUG, "Flushing shard " + std::to_string(shardId) + "...");
+    ZestLog(LogLevel::DEBUG, std::format("Flushing shard {}...", shardId));
     this->indexManager->flush();
     this->storageManager->flush();
 }
 
 void Shard::stop()
 {
-    ZestLog(LogLevel::INFO, "Exiting shard " + std::to_string(shardId) + "...");
+    ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
     this->flush();
 }

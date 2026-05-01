@@ -1,4 +1,6 @@
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -49,7 +51,7 @@ ZestDB::ZestDB()
 
     this->replayWAL();
 
-    ZestLog(LogLevel::INFO, "ZestDB initialized with " + std::to_string(NUM_SHARDS) + " shards");
+    ZestLog(LogLevel::INFO, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
     this->initialized.store(true);
 
@@ -71,12 +73,12 @@ ZestDB::ZestDB()
 
     this->srv->WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
         if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
-            ZestLog(LogLevel::WARNING, "Session: Unauthorized IP: " + req.remote_addr);
+            ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", req.remote_addr));
             ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
             return;
         }
 
-        ZestLog(LogLevel::INFO, "Session: client connected from " + req.remote_addr + ":" + std::to_string(req.remote_port));
+        ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", req.remote_addr, req.remote_port));
 
         bool authenticated = false;
         std::string cmd;
@@ -93,7 +95,7 @@ ZestDB::ZestDB()
                     std::string username = authCmd.substr(0, dotPos);
                     std::string token = authCmd.substr(dotPos + 1);
 
-                    ZestLog(LogLevel::DEBUG, "WS auth - username: " + username + ", token: " + token);
+                    ZestLog(LogLevel::DEBUG, std::format("WS auth - username: {}, token: {}", username, token));
 
                     if (this->users.find(username) == this->users.end()) {
                         ZestLog(LogLevel::DEBUG, "WS auth - user not found");
@@ -102,7 +104,7 @@ ZestDB::ZestDB()
                         break;
                     }
 
-                    ZestLog(LogLevel::DEBUG, "WS auth - stored token: " + this->users.at(username));
+                    ZestLog(LogLevel::DEBUG, std::format("WS auth - stored token: {}", this->users.at(username)));
 
                     if (this->validateToken(username, token)) {
                         authenticated = true;
@@ -118,7 +120,11 @@ ZestDB::ZestDB()
                     break;
                 }
             } else {
+                auto start = std::chrono::high_resolution_clock::now();
                 std::string result = this->execCmd(cmd);
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double, std::milli> elapsed = end - start;
+                result += "\n[execution_time: " + std::format("{:.5f}ms]", elapsed.count());
                 ws.send(result);
             }
         }
@@ -208,7 +214,7 @@ void ZestDB::boot()
                 std::string password = user_node["password"].get_value<std::string>();
 
                 this->users[username] = sha256(username + password);
-                ZestLog(LogLevel::DEBUG, "Loaded user: " + username + " with token: " + this->users[username]);
+                ZestLog(LogLevel::DEBUG, std::format("Loaded user: {} with token: {}", username, this->users[username]));
             }
         }
     } catch (const std::exception& e) {
@@ -217,12 +223,12 @@ void ZestDB::boot()
     }
 
     if (this->settings.MaxValueSize >= this->settings.SegSize) {
-        ZestLog(LogLevel::CRITICAL, "MaxValueSize is higher than SegSize ! MaxValueSize : " + std::to_string(this->settings.MaxValueSize) + " | SegSize : " + std::to_string(this->settings.SegSize));
+        ZestLog(LogLevel::CRITICAL, std::format("MaxValueSize is higher than SegSize ! MaxValueSize : {} | SegSize : {}", this->settings.MaxValueSize, this->settings.SegSize));
         throw std::runtime_error("MaxValueSize >= SegSize");
     }
 
     if (this->settings.MaxKeySize > IndexEntry::MAX_KEY_SIZE) {
-        ZestLog(LogLevel::WARNING, "MaxKeySize (" + std::to_string(this->settings.MaxKeySize) + ") exceeds internal limit (" + std::to_string(IndexEntry::MAX_KEY_SIZE) + "), clamping...");
+        ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", this->settings.MaxKeySize, IndexEntry::MAX_KEY_SIZE));
         this->settings.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
     }
 
@@ -236,18 +242,18 @@ void ZestDB::boot()
         throw std::runtime_error("DBPort == WebPort");
     }
 
-    ZestLog(LogLevel::DEBUG, "Database path : " + this->settings.DbPath.string());
-    ZestLog(LogLevel::DEBUG, "SegSize : " + std::to_string(this->settings.SegSize));
-    ZestLog(LogLevel::DEBUG, "MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
-    ZestLog(LogLevel::DEBUG, "MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
-    ZestLog(LogLevel::DEBUG, "CacheSize : " + std::to_string(this->settings.CacheSize));
-    ZestLog(LogLevel::DEBUG, "CompactingInterval : " + std::to_string(this->settings.CompactingInterval));
-    ZestLog(LogLevel::DEBUG, "FlushInterval : " + std::to_string(this->settings.FlushInterval));
-    ZestLog(LogLevel::DEBUG, "isDebug : " + std::to_string(this->settings.isDebug));
-    ZestLog(LogLevel::DEBUG, "isJson : " + std::to_string(this->settings.jsonOnly));
-    ZestLog(LogLevel::DEBUG, "readOnly : " + std::to_string(this->settings.readOnly));
-    ZestLog(LogLevel::DEBUG, "DBPort : " + std::to_string(this->settings.DBPort));
-    ZestLog(LogLevel::DEBUG, "WebPort : " + std::to_string(this->settings.WebPort));
+    ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
+    ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
+    ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
+    ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
+    ZestLog(LogLevel::DEBUG, std::format("CacheSize : {}", this->settings.CacheSize));
+    ZestLog(LogLevel::DEBUG, std::format("CompactingInterval : {}", this->settings.CompactingInterval));
+    ZestLog(LogLevel::DEBUG, std::format("FlushInterval : {}", this->settings.FlushInterval));
+    ZestLog(LogLevel::DEBUG, std::format("isDebug : {}", this->settings.isDebug));
+    ZestLog(LogLevel::DEBUG, std::format("isJson : {}", this->settings.jsonOnly));
+    ZestLog(LogLevel::DEBUG, std::format("readOnly : {}", this->settings.readOnly));
+    ZestLog(LogLevel::DEBUG, std::format("DBPort : {}", this->settings.DBPort));
+    ZestLog(LogLevel::DEBUG, std::format("WebPort : {}", this->settings.WebPort));
 
     if (!fs::exists(this->settings.DbPath)) {
         fs::create_directories(this->settings.DbPath);
@@ -257,7 +263,7 @@ void ZestDB::boot()
 
     if (!fs::exists(this->settings.DbPath / "WAL")) {
         fs::path WalPath = this->settings.DbPath / "WAL";
-        ZestLog(LogLevel::INFO, "Creating the WAL at " + WalPath.string());
+        ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", WalPath.string()));
 
         if (auto parent = WalPath.parent_path(); !fs::exists(parent)) {
             fs::create_directories(parent);
@@ -265,7 +271,7 @@ void ZestDB::boot()
 
         std::ofstream index(WalPath);
         if (!index) {
-            ZestLog(LogLevel::ERROR, "Failed to create WAL at " + WalPath.string());
+            ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", WalPath.string()));
             throw std::runtime_error("Failed to create WAL");
         }
         this->settings.WalPath = WalPath;
@@ -277,7 +283,7 @@ void ZestDB::boot()
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
 {
     if (this->users.find(username) == this->users.end()) {
-        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - user not found: " + username);
+        ZestLog(LogLevel::DEBUG, std::format("ZestDB::validateToken - user not found: {}", username));
         return false;
     }
 
@@ -293,7 +299,7 @@ bool ZestDB::validateToken(const std::string& username, const std::string& token
 bool ZestDB::validateKey(const std::string& key) const
 {
     if (key.size() > this->settings.MaxKeySize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::validateKey - " + std::string(Messages::KEY_TOO_LONG) + " MaxKeySize : " + std::to_string(this->settings.MaxKeySize));
+        ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG, this->settings.MaxKeySize));
         return false;
     }
     return true;
@@ -302,7 +308,7 @@ bool ZestDB::validateKey(const std::string& key) const
 bool ZestDB::validateValue(const std::string& value) const
 {
     if (value.size() > this->settings.MaxValueSize) {
-        ZestLog(LogLevel::ERROR, "ZestDB::validateValue - " + std::string(Messages::VALUE_TOO_LONG) + " MaxValueSize : " + std::to_string(this->settings.MaxValueSize));
+        ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}", Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
         return false;
     }
     return true;
@@ -319,7 +325,7 @@ ResultType ZestDB::get(const std::string& key)
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
-    ZestLog(LogLevel::DEBUG, "ZestDB::get - looking for key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("ZestDB::get - looking for key: {}", key));
     return this->shardManager->get(key);
 }
 
@@ -343,7 +349,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "ZestDB::set - key: " + key + ", value size: " + std::to_string(value.size()));
+    ZestLog(LogLevel::DEBUG, std::format("ZestDB::set - key: {}, value size: {}", key, value.size()));
     return this->shardManager->set(key, value);
 }
 
@@ -357,7 +363,7 @@ ResultType ZestDB::del(const std::string& key)
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
     }
 
-    ZestLog(LogLevel::DEBUG, "ZestDB::del - deleting key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("ZestDB::del - deleting key: {}", key));
     return this->shardManager->del(key);
 }
 
@@ -662,13 +668,13 @@ void ZestDB::replayWAL()
     std::vector<std::string> cmds = this->wal->getCmds();
 
     for (const std::string& cmd : cmds) {
-        ZestLog(LogLevel::INFO, "WAL replay: " + cmd);
+        ZestLog(LogLevel::INFO, std::format("WAL replay: {}", cmd));
         std::string result = this->execCmd(cmd);
-        ZestLog(LogLevel::INFO, "WAL replay result: " + result);
+        ZestLog(LogLevel::INFO, std::format("WAL replay result: {}", result));
     }
 
     this->shardManager->flush();
     this->wal->clear();
     this->replaying.store(false);
-    ZestLog(LogLevel::INFO, "WAL replay complete, processed " + std::to_string(cmds.size()) + " commands");
+    ZestLog(LogLevel::INFO, std::format("WAL replay complete, processed {} commands", cmds.size()));
 }

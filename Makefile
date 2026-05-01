@@ -1,6 +1,6 @@
 CXX = g++
 
-BASE_CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++17 -I$(SRCDIR) -Wno-deprecated-declarations
+BASE_CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -std=c++20 -I$(SRCDIR) -Wno-deprecated-declarations
 
 ifeq ($(DEBUG), 1)
     CXXFLAGS = $(BASE_CXXFLAGS) -g -O0

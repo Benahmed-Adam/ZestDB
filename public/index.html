@@ -85,7 +85,17 @@
             ws.onopen=function(){us('on');h(u+p).then(function(token){ws.send('Authorization: '+u+'.'+token)})};
             ws.onclose=function(){us('off')};
             ws.onerror=function(){us('off');E('result').textContent='connection failed'};
-            ws.onmessage=function(e){E('result').innerHTML=sh(f(e.data))};
+            ws.onmessage=function(e){
+                var data=e.data;
+                var execTime='';
+                var match=data.match(/\[execution_time:\s*([\d.]+)ms\]/);
+                if(match){
+                    execTime=match[1]+'ms';
+                    data=data.replace(match[0],'').trim();
+                }
+                var t=execTime?execTime+' (server)':'';
+                E('result').innerHTML='<div style="color:#666;font-size:11px;margin-bottom:8px">'+t+'</div>'+sh(f(data));
+            };
         };
         E('connect').onclick=doConnect;
         E('send').onclick=function(){

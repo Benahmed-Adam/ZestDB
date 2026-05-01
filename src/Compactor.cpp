@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <format>
 #include <thread>
 
 #include "Compactor.hpp"

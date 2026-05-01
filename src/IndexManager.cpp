@@ -1,6 +1,7 @@
 #include "IndexManager.hpp"
 #include "Logger.hpp"
 #include <chrono>
+#include <format>
 
 IndexManager::IndexManager(const Settings& set)
     : settings(set)
@@ -53,7 +54,7 @@ void IndexManager::loadIndexIntoMemory()
 
 IndexEntry IndexManager::search(const std::string& key)
 {
-    ZestLog(LogLevel::DEBUG, "IndexManager::search - searching for key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - searching for key: {}", key));
     std::shared_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(key);
@@ -64,18 +65,18 @@ IndexEntry IndexManager::search(const std::string& key)
         IndexEntry entry;
 
         if (this->index.read((char*)&entry, sizeof(entry)) && !entry.isTombstone) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::search - found key: " + key);
+            ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - found key: {}", key));
             return entry;
         }
     }
 
-    ZestLog(LogLevel::DEBUG, "IndexManager::search - key not found: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - key not found: {}", key));
     return { "", -1, 0, 0, false };
 }
 
 void IndexManager::update(const std::string& key, const IndexEntry& entry)
 {
-    ZestLog(LogLevel::DEBUG, "IndexManager::update - updating key: " + key);
+    ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - updating key: {}", key));
     std::unique_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(key);
@@ -90,16 +91,16 @@ void IndexManager::update(const std::string& key, const IndexEntry& entry)
             this->tombstoneOffsets.push_back(offset);
         }
 
-        ZestLog(LogLevel::DEBUG, "IndexManager::update - key updated at offset: " + std::to_string(offset));
+        ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - key updated at offset: {}", offset));
     } else {
-        ZestLog(LogLevel::DEBUG, "IndexManager::update - key not found for update: " + key);
+        ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - key not found for update: {}", key));
     }
 }
 
 void IndexManager::insert(const IndexEntry& entry)
 {
     std::string keyStr(entry.key);
-    ZestLog(LogLevel::DEBUG, "IndexManager::insert - inserting key: " + keyStr);
+    ZestLog(LogLevel::DEBUG, std::format("IndexManager::insert - inserting key: {}", keyStr));
     std::unique_lock<std::shared_mutex> lock(this->mtx);
 
     auto it = this->memoryTree.find(keyStr);
@@ -150,14 +151,15 @@ std::vector<IndexEntry> IndexManager::getAll(unsigned int limit)
 
     IndexEntry e;
     for (auto const& [key, offset] : this->memoryTree) {
-        if (res.size() >= limit) break;
-        
+        if (res.size() >= limit)
+            break;
+
         this->index.seekg(offset, std::ios::beg);
 
         if (this->index.read((char*)&e, sizeof(IndexEntry))) {
             res.push_back(e);
         } else {
-            ZestLog(LogLevel::ERROR, "IndexManager::getAll - Failed to read entry at offset: " + std::to_string(offset));
+            ZestLog(LogLevel::ERROR, std::format("IndexManager::getAll - Failed to read entry at offset: {}", offset));
             this->index.clear();
         }
     }
@@ -197,7 +199,7 @@ std::vector<IndexEntry> IndexManager::compact()
             this->memoryTree[std::string(entry.key)] = newPos;
             result.push_back(entry);
         } else {
-            ZestLog(LogLevel::ERROR, "Compact - Failed to write entry for key: " + std::string(entry.key));
+            ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
         }
     }
 
