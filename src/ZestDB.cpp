@@ -402,8 +402,8 @@ CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mod
     if (mode == "re") {
         try {
             std::regex keyRegex(pattern);
-            valid.func = [keyRegex](const std::string& key) {
-                return std::regex_match(key, keyRegex);
+            valid.func = [reg = std::move(keyRegex)](const std::string& key) {
+                return std::regex_match(key, reg);
             };
         } catch (const std::regex_error&) {
             validMode = false;

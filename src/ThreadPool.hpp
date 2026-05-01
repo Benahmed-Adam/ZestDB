@@ -42,10 +42,10 @@ std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F&& task)
     std::future<returnType> result = taskPtr->get_future();
 
     {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        tasks.push([taskPtr]() { (*taskPtr)(); });
+        std::lock_guard<std::mutex> lock(this->queueMutex);
+        this->tasks.push([taskPtr = std::move(taskPtr)]() { (*taskPtr)(); });
     }
 
-    condition.notify_one();
+    this->condition.notify_one();
     return result;
 }

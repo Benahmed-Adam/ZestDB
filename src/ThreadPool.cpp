@@ -5,35 +5,35 @@ ThreadPool::ThreadPool(size_t numThreads)
     : stopFlag(false)
     , activeTasks(0)
 {
-    workers.reserve(numThreads);
+    this->workers.reserve(numThreads);
     for (size_t i = 0; i < numThreads; ++i) {
-        workers.emplace_back([this] {
+        this->workers.emplace_back([this] {
             while (true) {
                 std::function<void()> task;
                 {
-                    std::unique_lock<std::mutex> lock(queueMutex);
-                    condition.wait(lock, [this] {
-                        return stopFlag || !tasks.empty();
+                    std::unique_lock<std::mutex> lock(this->queueMutex);
+                    this->condition.wait(lock, [this] {
+                        return this->stopFlag || !this->tasks.empty();
                     });
 
-                    if (stopFlag && tasks.empty()) {
+                    if (this->stopFlag && this->tasks.empty()) {
                         return;
                     }
 
-                    if (!tasks.empty()) {
-                        task = std::move(tasks.front());
-                        tasks.pop();
-                        ++activeTasks;
+                    if (!this->tasks.empty()) {
+                        task = std::move(this->tasks.front());
+                        this->tasks.pop();
+                        ++this->activeTasks;
                     }
                 }
 
                 if (task) {
                     task();
                     {
-                        std::lock_guard<std::mutex> lock(queueMutex);
-                        --activeTasks;
-                        if (activeTasks == 0 && tasks.empty()) {
-                            completionCondition.notify_all();
+                        std::lock_guard<std::mutex> lock(this->queueMutex);
+                        --this->activeTasks;
+                        if (this->activeTasks == 0 && this->tasks.empty()) {
+                            this->completionCondition.notify_all();
                         }
                     }
                 }
@@ -44,20 +44,20 @@ ThreadPool::ThreadPool(size_t numThreads)
 
 void ThreadPool::waitAll()
 {
-    std::unique_lock<std::mutex> lock(queueMutex);
-    completionCondition.wait(lock, [this] {
-        return tasks.empty() && activeTasks == 0;
+    std::unique_lock<std::mutex> lock(this->queueMutex);
+    this->completionCondition.wait(lock, [this] {
+        return this->tasks.empty() && this->activeTasks == 0;
     });
 }
 
 ThreadPool::~ThreadPool()
 {
     {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        stopFlag = true;
+        std::lock_guard<std::mutex> lock(this->queueMutex);
+        this->stopFlag = true;
     }
-    condition.notify_all();
-    for (auto& worker : workers) {
+    this->condition.notify_all();
+    for (auto& worker : this->workers) {
         worker.join();
     }
 }
