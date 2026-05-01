@@ -204,7 +204,7 @@ ResultType Shard::getBy(ValidationRule valid)
 {
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
+    entries = this->indexManager->getAll(valid.limit);
 
     std::ostringstream oss;
     int matchCount = 0;
@@ -236,7 +236,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
+    entries = this->indexManager->getAll(valid.limit);
 
     int matchCount = 0;
 
@@ -275,7 +275,7 @@ ResultType Shard::delBy(ValidationRule valid)
 {
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
-    entries = this->indexManager->getAll();
+    entries = this->indexManager->getAll(valid.limit);
 
     int matchCount = 0;
 

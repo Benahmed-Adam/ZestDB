@@ -141,7 +141,7 @@ void IndexManager::insert(const IndexEntry& entry)
     this->memoryTree[keyStr] = insertPosition;
 }
 
-std::vector<IndexEntry> IndexManager::getAll()
+std::vector<IndexEntry> IndexManager::getAll(unsigned int limit)
 {
     std::vector<IndexEntry> res;
     std::shared_lock<std::shared_mutex> lock(this->mtx);
@@ -150,6 +150,8 @@ std::vector<IndexEntry> IndexManager::getAll()
 
     IndexEntry e;
     for (auto const& [key, offset] : this->memoryTree) {
+        if (res.size() >= limit) break;
+        
         this->index.seekg(offset, std::ios::beg);
 
         if (this->index.read((char*)&e, sizeof(IndexEntry))) {
