@@ -71,78 +71,8 @@ ZestDB::ZestDB()
         ZestLog(LogLevel::INFO, "Server mode: Plain");
     }
 
-    this->srv->WebSocket("/ws", [this](const httplib::Request& req, httplib::ws::WebSocket& ws) {
-        if (!std::regex_match(req.remote_addr, this->settings.NetworkValidation)) {
-            ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", req.remote_addr));
-            ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
-            return;
-        }
-
-        ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", req.remote_addr, req.remote_port));
-
-        bool authenticated = false;
-        std::string cmd;
-
-        while (ws.read(cmd)) {
-            if (!authenticated) {
-                std::string authCmd = cmd;
-                if (authCmd.find("Authorization: ") == 0) {
-                    authCmd = authCmd.substr(15);
-                }
-
-                unsigned int dotPos = authCmd.find(".");
-                if (dotPos != std::string::npos) {
-                    std::string username = authCmd.substr(0, dotPos);
-                    std::string token = authCmd.substr(dotPos + 1);
-
-                    ZestLog(LogLevel::DEBUG, std::format("WS auth - username: {}, token: {}", username, token));
-
-                    if (this->users.find(username) == this->users.end()) {
-                        ZestLog(LogLevel::DEBUG, "WS auth - user not found");
-                        ws.send("ERROR: authentication failed");
-                        ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
-                        break;
-                    }
-
-                    ZestLog(LogLevel::DEBUG, std::format("WS auth - stored token: {}", this->users.at(username)));
-
-                    if (this->validateToken(username, token)) {
-                        authenticated = true;
-                        ws.send("OK: authenticated");
-                    } else {
-                        ws.send("ERROR: authentication failed");
-                        ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication failed");
-                        break;
-                    }
-                } else {
-                    ws.send("ERROR: authentication required");
-                    ws.close(httplib::ws::CloseStatus::PolicyViolation, "authentication required");
-                    break;
-                }
-            } else {
-                auto start = std::chrono::high_resolution_clock::now();
-                std::string result = this->execCmd(cmd);
-                auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double, std::milli> elapsed = end - start;
-                result += "\n[execution_time: " + std::format("{:.5f}ms]", elapsed.count());
-                ws.send(result);
-            }
-        }
-
-        ZestLog(LogLevel::INFO, "Session: client disconnected");
-    });
-
     this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
-        fs::path indexPath = fs::current_path() / "public" / "index.html";
-        if (fs::exists(indexPath)) {
-            std::ifstream file(indexPath);
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            res.set_content(buffer.str(), "text/html");
-        } else {
-            res.status = 404;
-            res.set_content("Not Found", "text/plain");
-        }
+        res.set_content("raaaaaaaaaaaaaaaaaaaah", "text/plain");
     });
 }
 
