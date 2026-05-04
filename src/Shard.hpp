@@ -6,6 +6,7 @@
 #include "Compactor.hpp"
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
+#include "PerfMonitoring.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
 
@@ -27,9 +28,12 @@ public:
 
     int getShardId() const { return shardId; }
 
+    PerfMonitoring& getPerfMonitoring() { return perfMonitor; }
+
     std::unique_ptr<IndexManager> indexManager;
     Settings settings;
     int shardId;
+    PerfMonitoring perfMonitor;
 
 private:
     void boot();
@@ -41,5 +45,7 @@ private:
 
     std::atomic<bool> initialized;
     std::atomic<bool> replaying;
+    std::atomic<bool> stopRequested;
+    std::atomic<bool> stopped;
     std::shared_mutex readMtx;
 };

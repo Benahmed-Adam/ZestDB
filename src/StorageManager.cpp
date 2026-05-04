@@ -93,15 +93,20 @@ std::string StorageManager::read(const IndexEntry& entry)
 
 void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds)
 {
-    std::lock_guard<std::mutex>(this->mtx);
+    std::lock_guard<std::mutex> lock(this->mtx);
     std::unordered_set<int> usedSet(usedSegmentIds.begin(), usedSegmentIds.end());
 
-    for (auto it = this->segments.begin(); it != this->segments.end();) {
-        int id = it->first;
-
+    std::vector<int> toRemove;
+    for (const auto& [id, seg] : this->segments) {
         if (usedSet.find(id) == usedSet.end()) {
-            std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", id);
+            toRemove.push_back(id);
+        }
+    }
 
+    for (int id : toRemove) {
+        auto it = this->segments.find(id);
+        if (it != this->segments.end()) {
+            std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", id);
             it = this->segments.erase(it);
 
             if (std::filesystem::exists(segPath)) {
@@ -111,8 +116,6 @@ void StorageManager::removeUnusedSegments(const std::vector<int>& usedSegmentIds
                     ZestLog(LogLevel::ERROR, std::format("StorageManager - Failed to remove file: {}", segPath.string()));
                 }
             }
-        } else {
-            ++it;
         }
     }
 

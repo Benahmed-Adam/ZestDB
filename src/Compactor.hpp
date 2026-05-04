@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "IndexManager.hpp"
 #include "StorageManager.hpp"
 
@@ -7,7 +9,7 @@ class Compactor {
 public:
     Compactor(unsigned int compactingInterval);
     void compactIndex(IndexManager& indexManager);
-    void run(IndexManager& indexManager, StorageManager& storageManager, bool& isRunning);
+    void run(IndexManager& indexManager, StorageManager& storageManager, std::atomic<bool>& stopFlag);
 
 private:
     unsigned int compactingInterval;

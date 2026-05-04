@@ -3,38 +3,26 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <chrono>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
 void populate(ZestDB* db)
 {
-    for (int i = 0; i < 1000; ++i) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < 1000000; ++i) {
         std::string key = "key_" + std::to_string(i);
-        std::string value = "value_" + std::to_string(i) + "_" + std::string(100, 'x');
+        std::string value = "val_" + std::to_string(i);
+        
         db->set(key, value);
     }
 
-    for (int i = 0; i < 100; ++i) {
-        std::string key = "dup_" + std::to_string(i);
-        db->set(key, "first");
-        db->set(key, "second");
-        db->set(key, "third");
-    }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
 
-    std::string longKey(300, 'k');
-    db->set(longKey, "long key test");
-
-    std::string longValue(10000, 'v');
-    db->set("long_value", longValue);
-
-    for (int i = 0; i < 50; ++i) {
-        db->del("key_" + std::to_string(i));
-    }
-
-    db->set("empty", "");
-    db->set("special", "abc\ndef\tghi\r\n");
-    db->set("unicode", "émojis: 🎉 € 中文");
+    ZestLog(LogLevel::INFO, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
 void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard)

@@ -19,6 +19,8 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     , shardId(shardIdNum)
     , initialized(false)
     , replaying(false)
+    , stopRequested(false)
+    , stopped(false)
 {
     boot();
 
@@ -38,7 +40,7 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     });
 
     std::thread compactorThread([this]() mutable {
-        this->compactor->run(*this->indexManager, *this->storageManager, this->settings.isRunning);
+        this->compactor->run(*this->indexManager, *this->storageManager, this->stopRequested);
     });
 
     this->initialized.store(true);
@@ -49,9 +51,7 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
 
 Shard::~Shard()
 {
-    if (this->settings.isRunning) {
-        this->stop();
-    }
+    this->stop();
 }
 
 void Shard::boot()
@@ -118,14 +118,20 @@ void Shard::fillCache()
 
 ResultType Shard::get(const std::string& key)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, std::format("Shard::get - shard {} looking for key: {}", shardId, key));
 
     CacheEntry cacheEntry = this->cache->get(key);
 
-    if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
+    bool fromCache = (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone);
+
+    if (fromCache) {
         ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in cache for shard {}", shardId));
-        return { ResultType::Code::SUCCESS, cacheEntry.value, 1, true};
+        auto end = std::chrono::high_resolution_clock::now();
+        double latency = std::chrono::duration<double, std::milli>(end - start).count();
+        this->perfMonitor.addGetStats(true, false, latency);
+        return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not in cache, searching index in shard {}", shardId));
@@ -139,15 +145,22 @@ ResultType Shard::get(const std::string& key)
 
         this->cache->put(entry, value);
 
+        auto end = std::chrono::high_resolution_clock::now();
+        double latency = std::chrono::duration<double, std::milli>(end - start).count();
+        this->perfMonitor.addGetStats(true, true, latency);
         return { ResultType::Code::SUCCESS, value, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not found: {} in shard {}", key, shardId));
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addGetStats(false, true, latency);
     return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, std::format("Shard::set - shard {} key: {}, value size: {}", shardId, key, value.size()));
 
@@ -164,6 +177,9 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     this->cache->put(entry, value);
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::set - successfully set key: {} in shard {}", key, shardId));
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addSetStats(true, false, latency);
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
     result.message = std::string(Messages::SUCCESS_SET) + key;
@@ -173,6 +189,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 
 ResultType Shard::del(const std::string& key)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - shard {} deleting key: {}", shardId, key));
 
@@ -186,6 +203,9 @@ ResultType Shard::del(const std::string& key)
         this->cache->remove(key);
 
         ZestLog(LogLevel::DEBUG, std::format("Shard::del - successfully deleted key: {} in shard {}", key, shardId));
+        auto end = std::chrono::high_resolution_clock::now();
+        double latency = std::chrono::duration<double, std::milli>(end - start).count();
+        this->perfMonitor.addDelStats(true, false, latency);
         ResultType result;
         result.code = ResultType::Code::SUCCESS;
         result.message = std::string(Messages::SUCCESS_DEL) + key;
@@ -194,6 +214,9 @@ ResultType Shard::del(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addDelStats(false, false, latency);
     ResultType result;
     result.code = ResultType::Code::ERROR;
     result.message = std::format("{}: {}", Messages::KEY_NOT_FOUND, key);
@@ -203,6 +226,7 @@ ResultType Shard::del(const std::string& key)
 
 ResultType Shard::getBy(ValidationRule valid)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll(valid.limit);
@@ -226,6 +250,10 @@ ResultType Shard::getBy(ValidationRule valid)
         }
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addGetByStats(matchCount > 0, false, latency);
+
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
     result.message = oss.str();
@@ -235,6 +263,7 @@ ResultType Shard::getBy(ValidationRule valid)
 
 ResultType Shard::setBy(ValidationRule valid, const std::string& value)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll(valid.limit);
@@ -265,6 +294,10 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
         }
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addSetByStats(matchCount > 0, false, latency);
+
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
     result.message = std::format("Value successfully modified for {} entries", matchCount);
@@ -274,6 +307,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
 
 ResultType Shard::delBy(ValidationRule valid)
 {
+    auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll(valid.limit);
@@ -300,6 +334,10 @@ ResultType Shard::delBy(ValidationRule valid)
         }
     }
 
+    auto end = std::chrono::high_resolution_clock::now();
+    double latency = std::chrono::duration<double, std::milli>(end - start).count();
+    this->perfMonitor.addDelByStats(matchCount > 0, false, latency);
+
     ResultType result;
     result.code = ResultType::Code::SUCCESS;
     result.message = std::format("Successfully deleted {} entries", matchCount);
@@ -316,6 +354,18 @@ void Shard::flush()
 
 void Shard::stop()
 {
+    bool expected = false;
+    if (!this->stopped.compare_exchange_strong(expected, true)) {
+        return;
+    }
+
     ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
+
+    this->stopRequested.store(true);
+
     this->flush();
+
+    if (this->indexManager) {
+        this->indexManager->waitReady();
+    }
 }

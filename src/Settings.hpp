@@ -18,13 +18,13 @@ struct ResultType {
     Code code;
     std::string message;
     long long affectedRows = 0;
-    bool fromCache = false;
 };
 
 struct Messages {
     static constexpr const char* KEY_TOO_LONG = "The key is too long !";
     static constexpr const char* KEY_NOT_FOUND = "Key not found";
     static constexpr const char* VALUE_TOO_LONG = "The value is too long !";
+    static constexpr const char* VALUE_EMPTY = "The value cannot be empty !";
     static constexpr const char* SUCCESS_SET = "Successfully set key: ";
     static constexpr const char* SUCCESS_DEL = "Successfully deleted key: ";
     static constexpr const char* PATTERN_EMPTY = "Pattern cannot be empty";

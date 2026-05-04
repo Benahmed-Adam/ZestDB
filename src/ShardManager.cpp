@@ -17,9 +17,7 @@ ShardManager::ShardManager(const Settings& baseSettings, int numShardsCount)
 
 ShardManager::~ShardManager()
 {
-    if (this->settings.isRunning) {
-        this->stop();
-    }
+    this->stop();
 }
 
 int ShardManager::getShardId(const std::string& key) const

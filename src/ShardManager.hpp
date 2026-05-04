@@ -24,6 +24,8 @@ public:
     void flush();
     void stop();
 
+    const std::vector<std::unique_ptr<Shard>>& getShards() const { return shards; }
+
 private:
     int getShardId(const std::string& key) const;
 

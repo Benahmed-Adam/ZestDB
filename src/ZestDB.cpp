@@ -18,6 +18,8 @@
 
 namespace fs = std::filesystem;
 
+using json = nlohmann::json;
+
 std::string sha256(const std::string& str)
 {
     EVP_MD_CTX* context = EVP_MD_CTX_new();
@@ -74,7 +76,16 @@ ZestDB::ZestDB()
     this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
         try {
             res.status = 200;
-            res.set_content(this->perfMonitor.getPerformances().dump(), "application/json");
+
+            json result = json::object();
+
+            const auto& shards = this->shardManager->getShards();
+            for (size_t i = 0; i < shards.size(); ++i) {
+                std::string shardKey = "shard" + std::to_string(i);
+                result[shardKey] = shards[i]->getPerfMonitoring().getPerformances();
+            }
+
+            res.set_content(result.dump(), "application/json");
         } catch (const std::exception& e) {
             ZestLog(LogLevel::CRITICAL, e.what());
         }
@@ -262,15 +273,8 @@ ResultType ZestDB::get(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::get - looking for key: {}", key));
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->get(key);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addGetStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->get(key);
+    ;
 }
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
@@ -281,6 +285,10 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     if (!this->validateKey(key)) {
         return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
+    }
+
+    if (value.empty()) {
+        return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
     }
 
     if (!this->validateValue(value)) {
@@ -295,15 +303,7 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::set - key: {}, value size: {}", key, value.size()));
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->set(key, value);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addSetStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->set(key, value);
 }
 
 ResultType ZestDB::del(const std::string& key)
@@ -318,34 +318,22 @@ ResultType ZestDB::del(const std::string& key)
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::del - deleting key: {}", key));
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->del(key);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addDelStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->del(key);
 }
 
 ResultType ZestDB::getBy(ValidationRule valid)
 {
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->getBy(valid);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addGetByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->getBy(valid);
 }
 
 ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
 {
     if (this->settings.readOnly) {
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+    }
+
+    if (value.empty()) {
+        return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
     }
 
     if (!this->validateValue(value)) {
@@ -358,15 +346,7 @@ ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
         }
     }
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->setBy(valid, value);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addSetByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->setBy(valid, value);
 }
 
 ResultType ZestDB::delBy(ValidationRule valid)
@@ -375,15 +355,7 @@ ResultType ZestDB::delBy(ValidationRule valid)
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
     }
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    ResultType res = this->shardManager->delBy(valid);
-
-    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-
-    this->perfMonitor.addDelByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
-
-    return res;
+    return this->shardManager->delBy(valid);
 }
 
 CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mode, const std::string& pattern) const
@@ -438,10 +410,10 @@ std::string ZestDB::execCmd(const std::string& command)
             oss << Messages::USAGE_GET << "\n";
         }
         result = this->get(key);
-        if (result.code == ResultType::Code::SUCCESS) {
+        if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
             oss << result.message << "\n";
         } else {
-            oss << "(not found): " << result.message << "\n";
+            oss << "(not found): " << (result.message.empty() ? Messages::KEY_NOT_FOUND : result.message) << "\n";
         }
     } else if (cmd == "s" || cmd == "set") {
         std::string key, value;
@@ -459,9 +431,9 @@ std::string ZestDB::execCmd(const std::string& command)
         }
         result = this->set(key, value);
         if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << result.message << "\n";
+            oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_SET : result.message) << "\n";
         } else {
-            oss << "ERROR: " << result.message << "\n";
+            oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
         }
     } else if (cmd == "d" || cmd == "del") {
         std::string key;
@@ -471,9 +443,9 @@ std::string ZestDB::execCmd(const std::string& command)
         }
         result = this->del(key);
         if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << result.message << "\n";
+            oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_DEL : result.message) << "\n";
         } else {
-            oss << "ERROR: " << result.message << "\n";
+            oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
         }
     } else if (cmd == "gb" || cmd == "getby") {
         std::string mode, pattern;
@@ -501,10 +473,11 @@ std::string ZestDB::execCmd(const std::string& command)
         } else {
             valid.limit = limit;
             result = this->getBy(valid);
-            if (result.code == ResultType::Code::SUCCESS) {
-                oss << result.message << "\n";
+            if (result.code == ResultType::Code::SUCCESS && result.affectedRows > 0 && !result.message.empty()) {
+                std::string msg = result.message;
+                oss << msg << "\n";
             } else {
-                oss << "(not found): " << result.message << "\n";
+                oss << "(not found): no keys match the pattern" << "\n";
             }
         }
     } else if (cmd == "sb" || cmd == "setby") {
@@ -542,8 +515,10 @@ std::string ZestDB::execCmd(const std::string& command)
         } else {
             valid.limit = limit;
             result = this->setBy(valid, value);
-            if (result.code == ResultType::Code::SUCCESS) {
+            if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
                 oss << "OK: " << result.message << "\n";
+            } else {
+                oss << "OK: value modified" << "\n";
             }
         }
     } else if (cmd == "db" || cmd == "delby") {
@@ -572,10 +547,12 @@ std::string ZestDB::execCmd(const std::string& command)
         } else {
             valid.limit = limit;
             result = this->delBy(valid);
-            if (result.code == ResultType::Code::SUCCESS) {
+            if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
                 oss << "OK: " << result.message << "\n";
+            } else if (result.code == ResultType::Code::SUCCESS) {
+                oss << "OK: entries deleted" << "\n";
             } else {
-                oss << "ERROR: " << result.message << "\n";
+                oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
             }
         }
     } else if (cmd == "h" || cmd == "help") {
@@ -602,11 +579,12 @@ void ZestDB::stop()
     ZestLog(LogLevel::INFO, "Exiting ZestDB...");
 
     this->settings.isRunning = false;
+
     this->ioCtx.stop();
     this->srv->stop();
 
     this->shardManager->stop();
-    this->flush();
+    this->wal->clear();
 }
 
 std::string ZestDB::help() const
