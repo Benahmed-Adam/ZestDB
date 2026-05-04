@@ -125,7 +125,7 @@ ResultType Shard::get(const std::string& key)
 
     if (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone) {
         ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in cache for shard {}", shardId));
-        return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
+        return { ResultType::Code::SUCCESS, cacheEntry.value, 1, true};
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not in cache, searching index in shard {}", shardId));

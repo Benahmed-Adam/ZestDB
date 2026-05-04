@@ -18,6 +18,7 @@ struct ResultType {
     Code code;
     std::string message;
     long long affectedRows = 0;
+    bool fromCache = false;
 };
 
 struct Messages {

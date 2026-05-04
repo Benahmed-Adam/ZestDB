@@ -72,7 +72,12 @@ ZestDB::ZestDB()
     }
 
     this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content("raaaaaaaaaaaaaaaaaaaah", "text/plain");
+        try {
+            res.status = 200;
+            res.set_content(this->perfMonitor.getPerformances().dump(), "application/json");
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::CRITICAL, e.what());
+        }
     });
 }
 
@@ -256,7 +261,16 @@ ResultType ZestDB::get(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::get - looking for key: {}", key));
-    return this->shardManager->get(key);
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->get(key);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addGetStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 ResultType ZestDB::set(const std::string& key, const std::string& value)
@@ -280,7 +294,16 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
     }
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::set - key: {}, value size: {}", key, value.size()));
-    return this->shardManager->set(key, value);
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->set(key, value);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addSetStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 ResultType ZestDB::del(const std::string& key)
@@ -294,12 +317,29 @@ ResultType ZestDB::del(const std::string& key)
     }
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::del - deleting key: {}", key));
-    return this->shardManager->del(key);
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->del(key);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addDelStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 ResultType ZestDB::getBy(ValidationRule valid)
 {
-    return this->shardManager->getBy(valid);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->getBy(valid);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addGetByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
@@ -318,7 +358,15 @@ ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
         }
     }
 
-    return this->shardManager->setBy(valid, value);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->setBy(valid, value);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addSetByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 ResultType ZestDB::delBy(ValidationRule valid)
@@ -327,7 +375,15 @@ ResultType ZestDB::delBy(ValidationRule valid)
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
     }
 
-    return this->shardManager->delBy(valid);
+    auto startTime = std::chrono::high_resolution_clock::now();
+
+    ResultType res = this->shardManager->delBy(valid);
+
+    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
+
+    this->perfMonitor.addDelByStats(res.code == ResultType::Code::SUCCESS, res.fromCache, latency);
+
+    return res;
 }
 
 CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mode, const std::string& pattern) const

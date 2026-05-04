@@ -10,6 +10,8 @@
 #include "Settings.hpp"
 #include "ShardManager.hpp"
 #include "WAL.hpp"
+#include "PerfMonitoring.hpp"
+
 #include "lib/httplib.hpp"
 
 #define NUM_SHARDS 32
@@ -53,6 +55,7 @@ private:
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;
     std::unique_ptr<WAL> wal;
+    PerfMonitoring perfMonitor;
 
     std::atomic<bool> initialized;
     std::atomic<bool> replaying;

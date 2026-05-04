@@ -47,7 +47,7 @@ PORT = 7321
 USERNAME = "bob"
 PASSWORD = "bob"
 CONCURRENT_USERS = 50
-REQUESTS_PER_USER = 20000
+REQUESTS_PER_USER = 200
 
 stats_lock = Lock()
 all_latencies = []
