@@ -1,5 +1,8 @@
-#include "ThreadPool.hpp"
 #include <atomic>
+#include <format>
+
+#include "ThreadPool.hpp"
+#include "Logger.hpp"
 
 ThreadPool::ThreadPool(size_t numThreads)
     : stopFlag(false)
@@ -28,7 +31,12 @@ ThreadPool::ThreadPool(size_t numThreads)
                 }
 
                 if (task) {
-                    task();
+                    try {
+                        task();
+                    } catch (const std::exception& e) {
+                        ZestLog(LogLevel::CRITICAL, std::format("Exception during the execution of a task in the ThreadPool : {}", e.what()));
+                    }
+
                     {
                         std::lock_guard<std::mutex> lock(this->queueMutex);
                         --this->activeTasks;
