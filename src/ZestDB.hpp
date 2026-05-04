@@ -57,7 +57,8 @@ private:
 
     std::atomic<bool> initialized;
     std::atomic<bool> replaying;
-
+    std::atomic<bool> isFlushing;
+    
     std::unordered_map<std::string, std::string> users;
 };
 

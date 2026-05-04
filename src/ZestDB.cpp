@@ -58,7 +58,7 @@ ZestDB::ZestDB()
     this->initialized.store(true);
 
     std::thread flushThread = std::thread([this]() {
-        while (this->settings.isRunning) {
+        while (this->settings.isRunning && !this->isFlushing.load()) {
             std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
             this->flush();
         }
@@ -621,8 +621,10 @@ std::string ZestDB::help() const
 void ZestDB::flush()
 {
     ZestLog(LogLevel::DEBUG, "Flushing all shards...");
+    this->isFlushing.store(true);
     this->shardManager->flush();
     this->wal->clear();
+    this->isFlushing.store(false);
 }
 
 void ZestDB::replayWAL()
