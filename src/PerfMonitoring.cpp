@@ -35,13 +35,15 @@ json PerfMonitoring::getPerformances() const
     unsigned int totalRequests = this->gStats.nbRequests + this->sStats.nbRequests + this->dStats.nbRequests + this->gbStats.nbRequests + this->sbStats.nbRequests + this->dbStats.nbRequests;
     unsigned int totalCacheMisses = this->gStats.nbCacheMisses + this->sStats.nbCacheMisses + this->dStats.nbCacheMisses + this->gbStats.nbCacheMisses + this->sbStats.nbCacheMisses + this->dbStats.nbCacheMisses;
     unsigned int totalSuccess = this->gStats.nbSuccessfulRequests + this->sStats.nbSuccessfulRequests + this->dStats.nbSuccessfulRequests + this->gbStats.nbSuccessfulRequests + this->sbStats.nbSuccessfulRequests + this->dbStats.nbSuccessfulRequests;
+    double totalLatency = this->gStats.totalLatency + this->sStats.totalLatency + this->dStats.totalLatency + this->gbStats.totalLatency + this->sbStats.totalLatency + this->dbStats.totalLatency;
 
     result["total"] = {
         { "nbRequests", totalRequests },
         { "nbCacheMisses", totalCacheMisses },
         { "nbSuccessfulRequests", totalSuccess },
         { "avgCacheMissPercent", totalRequests > 0 ? (static_cast<double>(totalCacheMisses) / totalRequests) * 100.0 : 0.0 },
-        { "avgSuccessPercent", totalRequests > 0 ? (static_cast<double>(totalSuccess) / totalRequests) * 100.0 : 0.0 }
+        { "avgSuccessPercent", totalRequests > 0 ? (static_cast<double>(totalSuccess) / totalRequests) * 100.0 : 0.0 },
+        { "avgLatencyMs", totalRequests > 0 ? totalLatency / totalRequests : 0.0 }
     };
 
     return result;
