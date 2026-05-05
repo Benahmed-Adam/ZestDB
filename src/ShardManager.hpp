@@ -23,8 +23,11 @@ public:
 
     void flush();
     void stop();
+    void clearAllWAL();
+    void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
+    void appendToWAL(const std::string& key, const std::string& command);
 
-    const std::vector<std::unique_ptr<Shard>>& getShards() const { return shards; }
+    const std::vector<std::unique_ptr<Shard>>& getShards() const { return this->shards; }
 
 private:
     int getShardId(const std::string& key) const;

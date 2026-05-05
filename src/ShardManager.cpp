@@ -1,4 +1,5 @@
 #include "ShardManager.hpp"
+#include "Logger.hpp"
 #include <algorithm>
 #include <format>
 #include <future>
@@ -121,4 +122,45 @@ void ShardManager::stop()
     for (auto& shard : this->shards) {
         shard->stop();
     }
+}
+
+void ShardManager::clearAllWAL()
+{
+    for (auto& shard : this->shards) {
+        shard->getWAL().clear();
+    }
+}
+
+void ShardManager::replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc)
+{
+
+    std::vector<WalEntry> allWalEntries;
+
+    for (size_t i = 0; i < this->shards.size(); ++i) {
+        WAL& wal = this->shards[i]->getWAL();
+        std::vector<WalEntry> cmds = wal.getCmds();
+        
+        allWalEntries.insert(
+            allWalEntries.end(), 
+            std::make_move_iterator(cmds.begin()), 
+            std::make_move_iterator(cmds.end())
+        );
+    }
+
+    std::sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.timestamp < b.timestamp; });
+
+    for (const auto& entry : allWalEntries) {
+        ZestLog(LogLevel::INFO, std::format("WAL replay command: {}", entry.cmd));
+        std::string result = execCmdFunc(entry.cmd);
+        ZestLog(LogLevel::INFO, std::format("WAL replay result: {}", result));
+    }
+
+    this->flush();
+    this->clearAllWAL();
+}
+
+void ShardManager::appendToWAL(const std::string& key, const std::string& command) {
+    int shardId = this->getShardId(key);
+    auto& shard = this->getShards()[static_cast<size_t>(shardId)];
+    shard->getWAL().append(command);
 }

@@ -48,7 +48,6 @@ ZestDB::ZestDB()
     this->boot();
 
     this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
-    this->wal = std::make_unique<WAL>(this->settings);
     this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
     this->replayWAL();
@@ -203,26 +202,6 @@ void ZestDB::boot()
 
     if (!fs::exists(this->settings.DbPath)) {
         fs::create_directories(this->settings.DbPath);
-    }
-
-    this->settings.WalPath = this->settings.DbPath / "WAL";
-
-    if (!fs::exists(this->settings.DbPath / "WAL")) {
-        fs::path WalPath = this->settings.DbPath / "WAL";
-        ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", WalPath.string()));
-
-        if (auto parent = WalPath.parent_path(); !fs::exists(parent)) {
-            fs::create_directories(parent);
-        }
-
-        std::ofstream index(WalPath);
-        if (!index) {
-            ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", WalPath.string()));
-            throw std::runtime_error("Failed to create WAL");
-        }
-        this->settings.WalPath = WalPath;
-    } else {
-        this->settings.WalPath = this->settings.DbPath / "WAL";
     }
 }
 
@@ -392,6 +371,15 @@ CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mod
     }
 
     return { valid, validMode };
+}
+
+void ZestDB::appendToWAL(const std::string& key, const std::string& command)
+{
+    if (this->replaying.load()) {
+        return;
+    }
+
+    this->shardManager->appendToWAL(key, command);
 }
 
 std::string ZestDB::execCmd(const std::string& command)
@@ -567,7 +555,10 @@ std::string ZestDB::execCmd(const std::string& command)
 
     if (!this->replaying.load()) {
         if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "set" || cmd == "d" || cmd == "del" || cmd == "sb" || cmd == "setby" || cmd == "db" || cmd == "delby")) {
-            this->wal->append(command);
+            std::istringstream iss2(command);
+            std::string tmpCmd, key;
+            iss2 >> tmpCmd >> key;
+            this->appendToWAL(key, command);
         }
     }
 
@@ -584,7 +575,6 @@ void ZestDB::stop()
     this->srv->stop();
 
     this->shardManager->stop();
-    this->wal->clear();
 }
 
 std::string ZestDB::help() const
@@ -623,7 +613,7 @@ void ZestDB::flush()
     ZestLog(LogLevel::DEBUG, "Flushing all shards...");
     this->isFlushing.store(true);
     this->shardManager->flush();
-    this->wal->clear();
+    this->shardManager->clearAllWAL();
     this->isFlushing.store(false);
 }
 
@@ -631,16 +621,8 @@ void ZestDB::replayWAL()
 {
     ZestLog(LogLevel::INFO, "Replaying WAL...");
     this->replaying.store(true);
-    std::vector<std::string> cmds = this->wal->getCmds();
-
-    for (const std::string& cmd : cmds) {
-        ZestLog(LogLevel::INFO, std::format("WAL replay: {}", cmd));
-        std::string result = this->execCmd(cmd);
-        ZestLog(LogLevel::INFO, std::format("WAL replay result: {}", result));
-    }
-
-    this->shardManager->flush();
-    this->wal->clear();
+    this->shardManager->replayAllWAL([this](const std::string& cmd) {
+        return this->execCmd(cmd);
+    });
     this->replaying.store(false);
-    ZestLog(LogLevel::INFO, std::format("WAL replay complete, processed {} commands", cmds.size()));
 }

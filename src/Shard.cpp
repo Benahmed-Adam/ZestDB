@@ -22,14 +22,14 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     , stopRequested(false)
     , stopped(false)
 {
-    boot();
+    this->boot();
 
-    indexManager = std::make_unique<IndexManager>(this->settings);
-    storageManager = std::make_unique<StorageManager>(this->settings);
-    cache = std::make_unique<LRUCache>(this->settings.CacheSize);
-    compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
+    this->indexManager = std::make_unique<IndexManager>(this->settings);
+    this->storageManager = std::make_unique<StorageManager>(this->settings);
+    this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
+    this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
 
-    ZestLog(LogLevel::INFO, std::format("Shard {} initialized successfully", shardId));
+    ZestLog(LogLevel::INFO, std::format("Shard {} initialized successfully", this->shardId));
 
     std::promise<void> cachePromise;
     std::future<void> cacheFuture = cachePromise.get_future();
@@ -80,6 +80,28 @@ void Shard::boot()
     if (!fs::exists(this->settings.DbPath / "seg")) {
         fs::create_directory(this->settings.DbPath / "seg");
     }
+
+    this->settings.WalPath = this->settings.DbPath / "WAL";
+
+    if (!fs::exists(this->settings.DbPath / "WAL")) {
+        fs::path WalPath = this->settings.DbPath / "WAL";
+        ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", WalPath.string()));
+
+        if (auto parent = WalPath.parent_path(); !fs::exists(parent)) {
+            fs::create_directories(parent);
+        }
+
+        std::ofstream index(WalPath);
+        if (!index) {
+            ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", WalPath.string()));
+            throw std::runtime_error("Failed to create WAL");
+        }
+        this->settings.WalPath = WalPath;
+    } else {
+        this->settings.WalPath = this->settings.DbPath / "WAL";
+    }
+
+    this->wal = std::make_unique<WAL>(this->settings);
 }
 
 void Shard::fillCache()
@@ -350,6 +372,7 @@ void Shard::flush()
     ZestLog(LogLevel::DEBUG, std::format("Flushing shard {}...", shardId));
     this->indexManager->flush();
     this->storageManager->flush();
+    this->wal->clear();
 }
 
 void Shard::stop()

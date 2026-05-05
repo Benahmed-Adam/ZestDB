@@ -9,6 +9,7 @@
 #include "PerfMonitoring.hpp"
 #include "Settings.hpp"
 #include "StorageManager.hpp"
+#include "WAL.hpp"
 
 class Shard {
 public:
@@ -26,9 +27,10 @@ public:
     void flush();
     void stop();
 
-    int getShardId() const { return shardId; }
+    int getShardId() const { return this->shardId; }
 
-    PerfMonitoring& getPerfMonitoring() { return perfMonitor; }
+    PerfMonitoring& getPerfMonitoring() { return this->perfMonitor; }
+    WAL& getWAL() { return *this->wal; };
 
     std::unique_ptr<IndexManager> indexManager;
     Settings settings;
@@ -42,6 +44,7 @@ private:
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;
     std::unique_ptr<Compactor> compactor;
+    std::unique_ptr<WAL> wal;
 
     std::atomic<bool> initialized;
     std::atomic<bool> replaying;

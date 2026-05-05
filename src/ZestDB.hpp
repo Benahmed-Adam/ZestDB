@@ -9,7 +9,6 @@
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "ShardManager.hpp"
-#include "WAL.hpp"
 
 #include "lib/httplib.hpp"
 
@@ -50,15 +49,15 @@ private:
     void replayWAL();
     std::string help() const;
     CreationValidationRuleResult createValidationRule(const std::string& mode, const std::string& pattern) const;
+    void appendToWAL(const std::string& key, const std::string& command);
 
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;
-    std::unique_ptr<WAL> wal;
 
     std::atomic<bool> initialized;
     std::atomic<bool> replaying;
     std::atomic<bool> isFlushing;
-    
+
     std::unordered_map<std::string, std::string> users;
 };
 
