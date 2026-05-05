@@ -1,9 +1,9 @@
 #include "Server.hpp"
 #include "Logger.hpp"
 #include "ZestDB.hpp"
+#include <cstring>
 #include <format>
 #include <istream>
-#include <cstring>
 
 Session::Session(ZestStream stream, ZestDB& db)
     : stream_(std::move(stream))
@@ -17,7 +17,7 @@ void Session::start()
         return s.lowest_layer().remote_endpoint().address().to_string();
     },
         stream_);
-    
+
     unsigned short int remote_port = std::visit([](auto& s) {
         return s.lowest_layer().remote_endpoint().port();
     },

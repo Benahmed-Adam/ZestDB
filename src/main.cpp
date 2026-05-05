@@ -1,9 +1,9 @@
+#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
-#include <chrono>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -15,7 +15,7 @@ void populate(ZestDB* db)
     for (int i = 0; i < 1000000; ++i) {
         std::string key = "key_" + std::to_string(i);
         std::string value = "val_" + std::to_string(i);
-        
+
         db->set(key, value);
     }
 

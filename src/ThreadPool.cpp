@@ -1,8 +1,8 @@
 #include <atomic>
 #include <format>
 
-#include "ThreadPool.hpp"
 #include "Logger.hpp"
+#include "ThreadPool.hpp"
 
 ThreadPool::ThreadPool(size_t numThreads)
     : stopFlag(false)

@@ -139,12 +139,11 @@ void ShardManager::replayAllWAL(const std::function<std::string(const std::strin
     for (size_t i = 0; i < this->shards.size(); ++i) {
         WAL& wal = this->shards[i]->getWAL();
         std::vector<WalEntry> cmds = wal.getCmds();
-        
+
         allWalEntries.insert(
-            allWalEntries.end(), 
-            std::make_move_iterator(cmds.begin()), 
-            std::make_move_iterator(cmds.end())
-        );
+            allWalEntries.end(),
+            std::make_move_iterator(cmds.begin()),
+            std::make_move_iterator(cmds.end()));
     }
 
     std::sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.timestamp < b.timestamp; });
@@ -159,7 +158,8 @@ void ShardManager::replayAllWAL(const std::function<std::string(const std::strin
     this->clearAllWAL();
 }
 
-void ShardManager::appendToWAL(const std::string& key, const std::string& command) {
+void ShardManager::appendToWAL(const std::string& key, const std::string& command)
+{
     int shardId = this->getShardId(key);
     auto& shard = this->getShards()[static_cast<size_t>(shardId)];
     shard->getWAL().append(command);

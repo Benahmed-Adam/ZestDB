@@ -2,12 +2,12 @@
 
 #include <asio.hpp>
 #include <asio/ssl.hpp>
+#include <deque>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <variant>
 #include <vector>
-#include <deque>
 
 using asio::ip::tcp;
 
@@ -23,10 +23,10 @@ public:
 private:
     void do_read_size();
     void do_read_command(uint32_t size);
-    
+
     void queue_write(const std::string& message, bool closeAfter = false);
-    void do_write(); 
-    
+    void do_write();
+
     void close_stream();
 
     ZestStream stream_;
