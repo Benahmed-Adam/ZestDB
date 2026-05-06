@@ -10,10 +10,12 @@ IndexManager::IndexManager(const Settings& set)
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = set.IndexPath;
 
-    if (std::filesystem::exists(this->settings.DbPath / "INDEX.tmp")) {
+    std::filesystem::path indexTmpPath(this->settings.DbPath / "INDEX.tmp");
+
+    if (std::filesystem::exists(indexTmpPath) && std::filesystem::file_size(indexTmpPath) != 0) {
         std::filesystem::remove(this->indexPath);
-        std::filesystem::copy_file(this->settings.DbPath / "INDEX.tmp", this->indexPath);
-        std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
+        std::filesystem::copy_file(indexTmpPath, this->indexPath);
+        std::filesystem::remove(indexTmpPath);
     }
 
     this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
