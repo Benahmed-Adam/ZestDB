@@ -81,7 +81,7 @@ ZestDB::ZestDB()
             const auto& shards = this->shardManager->getShards();
             for (size_t i = 0; i < shards.size(); ++i) {
                 std::string shardKey = "shard" + std::to_string(i);
-                result[shardKey] = shards[i]->getPerfMonitoring().getPerformances();
+                result["stats"][shardKey] = shards[i]->getPerfMonitoring().getPerformances();
             }
 
             res.set_content(result.dump(), "application/json");
