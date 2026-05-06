@@ -10,6 +10,12 @@ IndexManager::IndexManager(const Settings& set)
     ZestLog(LogLevel::INFO, "Opening INDEX file...");
     this->indexPath = set.IndexPath;
 
+    if (std::filesystem::exists(this->settings.DbPath / "INDEX.tmp")) {
+        std::filesystem::remove(this->indexPath);
+        std::filesystem::copy_file(this->settings.DbPath / "INDEX.tmp", this->indexPath);
+        std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
+    }
+
     this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
     if (!this->index.is_open()) {
         this->index.open(this->indexPath, std::ios::out | std::ios::binary);
@@ -18,6 +24,7 @@ IndexManager::IndexManager(const Settings& set)
     }
 
     this->loadIndexIntoMemory();
+    this->compact();
 }
 
 IndexManager::~IndexManager()
