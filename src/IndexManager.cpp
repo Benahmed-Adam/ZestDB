@@ -12,7 +12,7 @@ IndexManager::IndexManager(const Settings& set)
 
     std::filesystem::path indexTmpPath(this->settings.DbPath / "INDEX.tmp");
 
-    if (std::filesystem::exists(indexTmpPath) && std::filesystem::file_size(indexTmpPath) != 0) {
+    if (std::filesystem::exists(indexTmpPath) && std::filesystem::file_size(indexTmpPath) > 0) {
         std::filesystem::remove(this->indexPath);
         std::filesystem::copy_file(indexTmpPath, this->indexPath);
         std::filesystem::remove(indexTmpPath);
