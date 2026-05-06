@@ -382,76 +382,96 @@ void ZestDB::appendToWAL(const std::string& key, const std::string& command)
     this->shardManager->appendToWAL(key, command);
 }
 
+std::string toLowerStr(const std::string& str)
+{
+    std::string result = str;
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c){ return std::tolower(c); });
+    return result;
+}
+
 std::string ZestDB::execCmd(const std::string& command)
 {
     std::istringstream iss(command);
-    std::string cmd;
-    iss >> cmd;
+
+    std::vector<std::string> words;
+    std::string word;
+
+    while (iss >> word)
+        words.push_back(word);
 
     std::ostringstream oss;
     ResultType result = { ResultType::Code::ERROR, "" };
 
-    if (cmd == "g" || cmd == "get") {
-        std::string key;
-        if (!(iss >> key)) {
+    if (words.empty()) {
+        oss << Messages::NO_COMMAND_GIVEN;
+        return oss.str();
+    }
+
+    std::string cmd = toLowerStr(words[0]);
+
+    if (cmd == "g") {
+        if (words.size() < 2) {
             oss << Messages::MISSING_KEY << "\n";
             oss << Messages::USAGE_GET << "\n";
+            return oss.str();
         }
+        const std::string& key = words[1];
         result = this->get(key);
         if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
             oss << result.message << "\n";
         } else {
             oss << "(not found): " << (result.message.empty() ? Messages::KEY_NOT_FOUND : result.message) << "\n";
         }
-    } else if (cmd == "s" || cmd == "set") {
-        std::string key, value;
-        if (!(iss >> key)) {
+    } else if (cmd == "s") {
+        if (words.size() < 2) {
             oss << Messages::MISSING_KEY << "\n";
             oss << Messages::USAGE_SET << "\n";
         }
-        if (!(iss >> value)) {
+        if (words.size() < 3) {
             oss << Messages::MISSING_VALUE << "\n";
             oss << Messages::USAGE_SET << "\n";
         }
-        std::string rest;
-        while (iss >> rest) {
-            value += " " + rest;
+        if (words.size() >= 2 && words.size() >= 3) {
+            const std::string& key = words[1];
+            std::string value = words[2];
+            for (size_t i = 3; i < words.size(); i++) {
+                value += " " + words[i];
+            }
+            result = this->set(key, value);
+            if (result.code == ResultType::Code::SUCCESS) {
+                oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_SET : result.message) << "\n";
+            } else {
+                oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
+            }
         }
-        result = this->set(key, value);
-        if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_SET : result.message) << "\n";
-        } else {
-            oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
-        }
-    } else if (cmd == "d" || cmd == "del") {
-        std::string key;
-        if (!(iss >> key)) {
+    } else if (cmd == "d") {
+        if (words.size() < 2) {
             oss << Messages::MISSING_KEY << "\n";
             oss << Messages::USAGE_GET << "\n";
+            return oss.str();
         }
+        const std::string& key = words[1];
         result = this->del(key);
         if (result.code == ResultType::Code::SUCCESS) {
             oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_DEL : result.message) << "\n";
         } else {
             oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
         }
-    } else if (cmd == "gb" || cmd == "getby") {
-        std::string mode, pattern;
+    } else if (cmd == "gb") {
+        if (words.size() < 3) {
+            oss << Messages::MISSING_PATTERN << "\n";
+            oss << Messages::USAGE_GETBY << "\n";
+            return oss.str();
+        }
+        std::string mode = toLowerStr(words[1]);
+        const std::string& pattern = words[2];
         unsigned int limit = UINT_MAX;
-        if (!(iss >> mode)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_GETBY << "\n";
-        }
-        if (!(iss >> pattern)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_GETBY << "\n";
-        }
-        std::string word;
-        while (iss >> word) {
-            if (word == "lim" && (iss >> limit)) {
+        for (size_t i = 3; i < words.size(); i++) {
+            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
+                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
                 break;
             } else {
-                oss << "ERROR: unexpected token '" << word << "'" << "\n";
+                oss << "ERROR: unexpected token '" << words[i] << "'" << "\n";
                 break;
             }
         }
@@ -462,39 +482,37 @@ std::string ZestDB::execCmd(const std::string& command)
             valid.limit = limit;
             result = this->getBy(valid);
             if (result.code == ResultType::Code::SUCCESS && result.affectedRows > 0 && !result.message.empty()) {
-                std::string msg = result.message;
-                oss << msg << "\n";
+                oss << result.message << "\n";
             } else {
                 oss << "(not found): no keys match the pattern" << "\n";
             }
         }
-    } else if (cmd == "sb" || cmd == "setby") {
-        std::string mode, pattern, value;
+    } else if (cmd == "sb") {
+        if (words.size() < 4) {
+            if (words.size() < 2) {
+                oss << Messages::MISSING_PATTERN << "\n";
+                oss << Messages::USAGE_SETBY << "\n";
+            }
+            if (words.size() < 3) {
+                oss << Messages::MISSING_PATTERN << "\n";
+                oss << Messages::USAGE_SETBY << "\n";
+            }
+            if (words.size() < 4) {
+                oss << Messages::MISSING_VALUE << "\n";
+                oss << Messages::USAGE_SETBY << "\n";
+            }
+            return oss.str();
+        }
+        std::string mode = toLowerStr(words[1]);
+        const std::string& pattern = words[2];
         unsigned int limit = UINT_MAX;
-        if (!(iss >> mode)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_SETBY << "\n";
-        }
-        if (!(iss >> pattern)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_SETBY << "\n";
-        }
-        if (!(iss >> value)) {
-            oss << Messages::MISSING_VALUE << "\n";
-            oss << Messages::USAGE_SETBY << "\n";
-        }
-        std::string word;
-        std::vector<std::string> words;
-        while (iss >> word) {
-            words.push_back(word);
-        }
-        for (size_t i = 0; i < words.size(); i++) {
-            if ((words[i] == "lim") && i + 1 < words.size()) {
+        std::string value = words[3];
+        for (size_t i = 4; i < words.size(); i++) {
+            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
                 limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
                 break;
-            }
-            if (i == 0 || (i > 0 && words[i - 1] != "limit")) {
-                value += (value.empty() ? "" : " ") + words[i];
+            } else {
+                value += " " + words[i];
             }
         }
         auto [valid, validMode] = this->createValidationRule(mode, pattern);
@@ -509,23 +527,21 @@ std::string ZestDB::execCmd(const std::string& command)
                 oss << "OK: value modified" << "\n";
             }
         }
-    } else if (cmd == "db" || cmd == "delby") {
-        std::string mode, pattern;
+    } else if (cmd == "db") {
+        if (words.size() < 3) {
+            oss << Messages::MISSING_PATTERN << "\n";
+            oss << Messages::USAGE_DELBY << "\n";
+            return oss.str();
+        }
+        std::string mode = toLowerStr(words[1]);
+        const std::string& pattern = words[2];
         unsigned int limit = UINT_MAX;
-        if (!(iss >> mode)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_DELBY << "\n";
-        }
-        if (!(iss >> pattern)) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_DELBY << "\n";
-        }
-        std::string word;
-        while (iss >> word) {
-            if (word == "lim" && (iss >> limit)) {
+        for (size_t i = 3; i < words.size(); i++) {
+            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
+                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
                 break;
             } else {
-                oss << "ERROR: unexpected token '" << word << "'" << "\n";
+                oss << "ERROR: unexpected token '" << words[i] << "'" << "\n";
                 break;
             }
         }
@@ -543,9 +559,9 @@ std::string ZestDB::execCmd(const std::string& command)
                 oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
             }
         }
-    } else if (cmd == "h" || cmd == "help") {
+    } else if (cmd == "h") {
         oss << this->help();
-    } else if (cmd == "f" || cmd == "flush") {
+    } else if (cmd == "f") {
         this->flush();
         oss << Messages::FLUSH_SUCCESSFUL << "\n";
     } else {
@@ -554,7 +570,7 @@ std::string ZestDB::execCmd(const std::string& command)
     }
 
     if (!this->replaying.load()) {
-        if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "set" || cmd == "d" || cmd == "del" || cmd == "sb" || cmd == "setby" || cmd == "db" || cmd == "delby")) {
+        if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
             std::istringstream iss2(command);
             std::string tmpCmd, key;
             iss2 >> tmpCmd >> key;
