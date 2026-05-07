@@ -387,8 +387,4 @@ void Shard::stop()
     this->stopRequested.store(true);
 
     this->flush();
-
-    if (this->indexManager) {
-        this->indexManager->waitReady();
-    }
 }
