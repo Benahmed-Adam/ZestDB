@@ -29,6 +29,8 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
 
+    this->verifyIndexEntries();
+
     ZestLog(LogLevel::INFO, std::format("Shard {} initialized successfully", this->shardId));
 
     std::promise<void> cachePromise;
@@ -387,4 +389,36 @@ void Shard::stop()
     this->stopRequested.store(true);
 
     this->flush();
+}
+
+void Shard::verifyIndexEntries()
+{
+    ZestLog(LogLevel::INFO, std::format("Shard {} - Verifying index entries...", this->shardId));
+
+    std::vector<IndexEntry> entries = this->indexManager->getAll();
+    int verifiedCount = 0;
+    int removedCount = 0;
+
+    for (const auto& entry : entries) {
+        if (entry.isTombstone || entry.segmentId == -1) {
+            continue;
+        }
+
+        std::string key(entry.key);
+
+        std::string storedValue = this->storageManager->read(entry);
+
+        if (storedValue.empty()) {
+            ZestLog(LogLevel::WARNING, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, key));
+
+            IndexEntry tombstoneEntry = entry;
+            tombstoneEntry.isTombstone = true;
+            this->indexManager->update(key, tombstoneEntry);
+            removedCount++;
+        } else {
+            verifiedCount++;
+        }
+    }
+
+    ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
 }

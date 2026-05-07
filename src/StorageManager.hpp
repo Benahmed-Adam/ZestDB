@@ -18,7 +18,6 @@ public:
     std::string read(const IndexEntry& entry);
     void removeUnusedSegments(const std::vector<int>& usedSegmentIds);
     void flush();
-
 private:
     void boot();
     IndexEntry appendToSegment(DataSegment* seg, const std::string& value);

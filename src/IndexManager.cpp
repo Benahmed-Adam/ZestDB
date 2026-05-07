@@ -212,7 +212,8 @@ std::vector<IndexEntry> IndexManager::compact()
         }
     }
 
-    this->index.flush();
+    this->canFlush = true;
+    this->flush();
     ZestLog(LogLevel::DEBUG, "Index compaction completed successfully.");
 
     std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");

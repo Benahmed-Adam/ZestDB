@@ -46,7 +46,7 @@ void WAL::append(const std::string& cmd)
     this->wal.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
     this->wal.put('\n');
     this->wal.flush();
-
+    // fsync ?
     if (!this->wal.good()) {
         ZestLog(LogLevel::ERROR, "WAL::append - Write failed");
     }

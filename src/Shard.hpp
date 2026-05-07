@@ -31,6 +31,7 @@ public:
 
     PerfMonitoring& getPerfMonitoring() { return this->perfMonitor; }
     WAL& getWAL() { return *this->wal; };
+    StorageManager& getStorageManager() { return *this->storageManager; }
 
     std::unique_ptr<IndexManager> indexManager;
     Settings settings;
@@ -40,6 +41,7 @@ public:
 private:
     void boot();
     void fillCache();
+    void verifyIndexEntries();
 
     std::unique_ptr<StorageManager> storageManager;
     std::unique_ptr<LRUCache> cache;

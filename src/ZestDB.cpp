@@ -385,7 +385,7 @@ void ZestDB::appendToWAL(const std::string& key, const std::string& command)
 std::string toLowerStr(const std::string& str)
 {
     std::string result = str;
-    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c){ return std::tolower(c); });
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
     return result;
 }
 
