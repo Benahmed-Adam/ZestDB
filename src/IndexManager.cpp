@@ -232,7 +232,7 @@ void IndexManager::flush()
 
     if (this->canFlush) {
         this->index.flush();
-        // fsync ?
+        // this->index.fsync();
         this->canFlush = false;
         ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing successful");
         return;

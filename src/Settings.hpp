@@ -21,28 +21,23 @@ struct ResultType {
 };
 
 struct Messages {
-    static constexpr const char* KEY_TOO_LONG = "The key is too long !";
-    static constexpr const char* KEY_NOT_FOUND = "Key not found";
-    static constexpr const char* VALUE_TOO_LONG = "The value is too long !";
-    static constexpr const char* VALUE_EMPTY = "The value cannot be empty !";
-    static constexpr const char* SUCCESS_SET = "Successfully set key: ";
-    static constexpr const char* SUCCESS_DEL = "Successfully deleted key: ";
-    static constexpr const char* PATTERN_EMPTY = "Pattern cannot be empty";
-    static constexpr const char* INVALID_REGEX = "Invalid regex pattern";
-    static constexpr const char* MISSING_KEY = "Error: missing key";
-    static constexpr const char* MISSING_VALUE = "Error: missing value";
-    static constexpr const char* MISSING_PATTERN = "Error: missing pattern";
-    static constexpr const char* USAGE_GET = "Usage: get <key>";
-    static constexpr const char* USAGE_SET = "Usage: set <key> <value>";
-    static constexpr const char* USAGE_GETBY = "Usage: getby <mode> <pattern> [lim <n>]";
-    static constexpr const char* USAGE_SETBY = "Usage: setby <mode> <pattern> <value> [lim <n>]";
-    static constexpr const char* USAGE_DELBY = "Usage: delby <mode> <pattern> [lim <n>]";
-    static constexpr const char* CMD_NOT_FOUND = "Command not found";
-    static constexpr const char* TYPE_HELP = "Type h for help";
-    static constexpr const char* FLUSH_SUCCESSFUL = "Flush successful !";
-    static constexpr const char* JSON_ONLY_ERROR = "Invalid format, only json data allowed !";
-    static constexpr const char* READ_ONLY_ERROR = "Modification not allowed ! The database is in read-only mode !";
-    static constexpr const char* NO_COMMAND_GIVEN = "No command were given !";
+    static constexpr const unsigned int KEY_TOO_LONG     = 0;
+    static constexpr const unsigned int KEY_NOT_FOUND    = 1;
+    static constexpr const unsigned int VALUE_TOO_LONG   = 2;
+    static constexpr const unsigned int VALUE_EMPTY      = 3;
+    static constexpr const unsigned int SUCCESS          = 4;
+    static constexpr const unsigned int FAIL             = 5;
+    static constexpr const unsigned int PATTERN_EMPTY    = 7;
+    static constexpr const unsigned int INVALID_REGEX    = 8;
+    static constexpr const unsigned int MISSING_KEY      = 9;
+    static constexpr const unsigned int MISSING_VALUE    = 10;
+    static constexpr const unsigned int MISSING_PATTERN  = 11;
+    static constexpr const unsigned int CMD_NOT_FOUND    = 12;
+    static constexpr const unsigned int FLUSH_SUCCESSFUL = 14;
+    static constexpr const unsigned int JSON_ONLY_ERROR  = 15;
+    static constexpr const unsigned int READ_ONLY_ERROR  = 16;
+    static constexpr const unsigned int NO_COMMAND_GIVEN = 17;
+    static constexpr const unsigned int INVALID_MODE     = 18;
 };
 
 struct Settings {

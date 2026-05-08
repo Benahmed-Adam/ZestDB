@@ -179,7 +179,7 @@ ResultType Shard::get(const std::string& key)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addGetStats(false, true, latency);
-    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
+    return { ResultType::Code::ERROR, std::to_string(Messages::KEY_NOT_FOUND), 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
@@ -204,11 +204,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addSetStats(true, false, latency);
-    ResultType result;
-    result.code = ResultType::Code::SUCCESS;
-    result.message = std::string(Messages::SUCCESS_SET) + key;
-    result.affectedRows = 1;
-    return result;
+    return { ResultType::Code::SUCCESS, std::to_string(Messages::SUCCESS), 1};
 }
 
 ResultType Shard::del(const std::string& key)
@@ -230,22 +226,14 @@ ResultType Shard::del(const std::string& key)
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(true, false, latency);
-        ResultType result;
-        result.code = ResultType::Code::SUCCESS;
-        result.message = std::string(Messages::SUCCESS_DEL) + key;
-        result.affectedRows = 1;
-        return result;
+        return { ResultType::Code::SUCCESS, std::to_string(Messages::SUCCESS), 1};
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addDelStats(false, false, latency);
-    ResultType result;
-    result.code = ResultType::Code::ERROR;
-    result.message = std::format("{}: {}", Messages::KEY_NOT_FOUND, key);
-    result.affectedRows = 0;
-    return result;
+    return { ResultType::Code::ERROR, std::to_string(Messages::FAIL), 0};
 }
 
 ResultType Shard::getBy(ValidationRule valid)
@@ -278,11 +266,7 @@ ResultType Shard::getBy(ValidationRule valid)
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addGetByStats(matchCount > 0, false, latency);
 
-    ResultType result;
-    result.code = ResultType::Code::SUCCESS;
-    result.message = oss.str();
-    result.affectedRows = matchCount;
-    return result;
+    return { ResultType::Code::SUCCESS, oss.str(), matchCount };
 }
 
 ResultType Shard::setBy(ValidationRule valid, const std::string& value)
@@ -322,11 +306,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addSetByStats(matchCount > 0, false, latency);
 
-    ResultType result;
-    result.code = ResultType::Code::SUCCESS;
-    result.message = std::format("Value successfully modified for {} entries", matchCount);
-    result.affectedRows = matchCount;
-    return result;
+    return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
 }
 
 ResultType Shard::delBy(ValidationRule valid)
@@ -362,11 +342,7 @@ ResultType Shard::delBy(ValidationRule valid)
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addDelByStats(matchCount > 0, false, latency);
 
-    ResultType result;
-    result.code = ResultType::Code::SUCCESS;
-    result.message = std::format("Successfully deleted {} entries", matchCount);
-    result.affectedRows = matchCount;
-    return result;
+    return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", matchCount), matchCount };
 }
 
 void Shard::flush()

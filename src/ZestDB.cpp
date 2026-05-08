@@ -247,7 +247,7 @@ bool ZestDB::isJsonValid(const std::string& value) const
 ResultType ZestDB::get(const std::string& key)
 {
     if (!this->validateKey(key)) {
-        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
+        return { ResultType::Code::ERROR, std::to_string(Messages::KEY_TOO_LONG) };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::get - looking for key: {}", key));
@@ -259,24 +259,24 @@ ResultType ZestDB::get(const std::string& key)
 ResultType ZestDB::set(const std::string& key, const std::string& value)
 {
     if (this->settings.readOnly) {
-        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+        return { ResultType::Code::ERROR, std::to_string(Messages::READ_ONLY_ERROR) };
     }
 
     if (!this->validateKey(key)) {
-        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
+        return { ResultType::Code::ERROR, std::to_string(Messages::KEY_TOO_LONG) };
     }
 
     if (value.empty()) {
-        return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
+        return { ResultType::Code::ERROR, std::to_string(Messages::VALUE_EMPTY) };
     }
 
     if (!this->validateValue(value)) {
-        return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
+        return { ResultType::Code::ERROR, std::to_string(Messages::VALUE_TOO_LONG) };
     }
 
     if (this->settings.jsonOnly) {
         if (!this->isJsonValid(value)) {
-            return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
+            return { ResultType::Code::ERROR, std::to_string(Messages::JSON_ONLY_ERROR) };
         }
     }
 
@@ -288,11 +288,11 @@ ResultType ZestDB::set(const std::string& key, const std::string& value)
 ResultType ZestDB::del(const std::string& key)
 {
     if (this->settings.readOnly) {
-        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+        return { ResultType::Code::ERROR, std::to_string(Messages::READ_ONLY_ERROR) };
     }
 
     if (!this->validateKey(key)) {
-        return { ResultType::Code::ERROR, Messages::KEY_TOO_LONG };
+        return { ResultType::Code::ERROR, std::to_string(Messages::KEY_TOO_LONG) };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("ZestDB::del - deleting key: {}", key));
@@ -308,20 +308,20 @@ ResultType ZestDB::getBy(ValidationRule valid)
 ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
 {
     if (this->settings.readOnly) {
-        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+        return { ResultType::Code::ERROR, std::to_string(Messages::READ_ONLY_ERROR) };
     }
 
     if (value.empty()) {
-        return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
+        return { ResultType::Code::ERROR, std::to_string(Messages::VALUE_EMPTY) };
     }
 
     if (!this->validateValue(value)) {
-        return { ResultType::Code::ERROR, Messages::VALUE_TOO_LONG };
+        return { ResultType::Code::ERROR, std::to_string(Messages::VALUE_TOO_LONG) };
     }
 
     if (this->settings.jsonOnly) {
         if (!this->isJsonValid(value)) {
-            return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
+            return { ResultType::Code::ERROR, std::to_string(Messages::JSON_ONLY_ERROR) };
         }
     }
 
@@ -331,7 +331,7 @@ ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
 ResultType ZestDB::delBy(ValidationRule valid)
 {
     if (this->settings.readOnly) {
-        return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
+        return { ResultType::Code::ERROR, std::to_string(Messages::READ_ONLY_ERROR) };
     }
 
     return this->shardManager->delBy(valid);
@@ -399,39 +399,46 @@ std::string ZestDB::execCmd(const std::string& command)
     while (iss >> word)
         words.push_back(word);
 
-    std::ostringstream oss;
+    json response = json::object();
     ResultType result = { ResultType::Code::ERROR, "" };
 
     if (words.empty()) {
-        oss << Messages::NO_COMMAND_GIVEN;
-        return oss.str();
+        response["code"] = Messages::NO_COMMAND_GIVEN;
+        response["message"] = "No command given";
+        response["affectedRows"] = 0;
+        return response.dump();
     }
 
     std::string cmd = toLowerStr(words[0]);
 
     if (cmd == "g") {
         if (words.size() < 2) {
-            oss << Messages::MISSING_KEY << "\n";
-            oss << Messages::USAGE_GET << "\n";
-            return oss.str();
-        }
-        const std::string& key = words[1];
-        result = this->get(key);
-        if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
-            oss << result.message << "\n";
+            response["code"] = Messages::MISSING_KEY;
+            response["message"] = "Missing key";
+            response["affectedRows"] = 0;
         } else {
-            oss << "(not found): " << (result.message.empty() ? Messages::KEY_NOT_FOUND : result.message) << "\n";
+            const std::string& key = words[1];
+            result = this->get(key);
+            if (result.code == ResultType::Code::SUCCESS) {
+                response["code"] = Messages::SUCCESS;
+                response["message"] = result.message;
+                response["affectedRows"] = 1;
+            } else {
+                response["code"] = Messages::KEY_NOT_FOUND;
+                response["message"] = "Key not found";
+                response["affectedRows"] = 0;
+            }
         }
     } else if (cmd == "s") {
         if (words.size() < 2) {
-            oss << Messages::MISSING_KEY << "\n";
-            oss << Messages::USAGE_SET << "\n";
-        }
-        if (words.size() < 3) {
-            oss << Messages::MISSING_VALUE << "\n";
-            oss << Messages::USAGE_SET << "\n";
-        }
-        if (words.size() >= 2 && words.size() >= 3) {
+            response["code"] = Messages::MISSING_KEY;
+            response["message"] = "Missing key";
+            response["affectedRows"] = 0;
+        } else if (words.size() < 3) {
+            response["code"] = Messages::MISSING_VALUE;
+            response["message"] = "Missing value";
+            response["affectedRows"] = 0;
+        } else {
             const std::string& key = words[1];
             std::string value = words[2];
             for (size_t i = 3; i < words.size(); i++) {
@@ -439,138 +446,152 @@ std::string ZestDB::execCmd(const std::string& command)
             }
             result = this->set(key, value);
             if (result.code == ResultType::Code::SUCCESS) {
-                oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_SET : result.message) << "\n";
+                response["code"] = Messages::SUCCESS;
+                response["message"] = "Value set";
+                response["affectedRows"] = 1;
             } else {
-                oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
+                response["code"] = std::stoi(result.message);
+                response["message"] = result.message;
+                response["affectedRows"] = 0;
             }
         }
     } else if (cmd == "d") {
         if (words.size() < 2) {
-            oss << Messages::MISSING_KEY << "\n";
-            oss << Messages::USAGE_GET << "\n";
-            return oss.str();
-        }
-        const std::string& key = words[1];
-        result = this->del(key);
-        if (result.code == ResultType::Code::SUCCESS) {
-            oss << "OK: " << (result.message.empty() ? Messages::SUCCESS_DEL : result.message) << "\n";
+            response["code"] = Messages::MISSING_KEY;
+            response["message"] = "Missing key";
+            response["affectedRows"] = 0;
         } else {
-            oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
+            const std::string& key = words[1];
+            result = this->del(key);
+            if (result.code == ResultType::Code::SUCCESS) {
+                response["code"] = Messages::SUCCESS;
+                response["message"] = "Key deleted";
+                response["affectedRows"] = 1;
+            } else {
+                response["code"] = Messages::KEY_NOT_FOUND;
+                response["message"] = "Key not found";
+                response["affectedRows"] = 0;
+            }
         }
     } else if (cmd == "gb") {
         if (words.size() < 3) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_GETBY << "\n";
-            return oss.str();
-        }
-        std::string mode = toLowerStr(words[1]);
-        const std::string& pattern = words[2];
-        unsigned int limit = UINT_MAX;
-        for (size_t i = 3; i < words.size(); i++) {
-            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
-                break;
-            } else {
-                oss << "ERROR: unexpected token '" << words[i] << "'" << "\n";
-                break;
-            }
-        }
-        auto [valid, validMode] = this->createValidationRule(mode, pattern);
-        if (!validMode) {
-            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
+            response["code"] = Messages::MISSING_PATTERN;
+            response["message"] = "Missing pattern";
+            response["affectedRows"] = 0;
         } else {
-            valid.limit = limit;
-            result = this->getBy(valid);
-            if (result.code == ResultType::Code::SUCCESS && result.affectedRows > 0 && !result.message.empty()) {
-                oss << result.message << "\n";
+            std::string mode = toLowerStr(words[1]);
+            const std::string& pattern = words[2];
+            unsigned int limit = UINT_MAX;
+            for (size_t i = 3; i < words.size(); i++) {
+                if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
+                    limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
+                }
+            }
+            auto [valid, validMode] = this->createValidationRule(mode, pattern);
+            if (!validMode) {
+                response["code"] = Messages::INVALID_REGEX;
+                response["message"] = "Invalid regex mode";
+                response["affectedRows"] = 0;
             } else {
-                oss << "(not found): no keys match the pattern" << "\n";
+                valid.limit = limit;
+                result = this->getBy(valid);
+                if (result.code == ResultType::Code::SUCCESS && result.affectedRows > 0 && !result.message.empty()) {
+                    response["code"] = Messages::SUCCESS;
+                    response["message"] = result.message;
+                    response["affectedRows"] = result.affectedRows;
+                } else {
+                    response["code"] = Messages::KEY_NOT_FOUND;
+                    response["message"] = "No keys match the pattern";
+                    response["affectedRows"] = 0;
+                }
             }
         }
     } else if (cmd == "sb") {
         if (words.size() < 4) {
-            if (words.size() < 2) {
-                oss << Messages::MISSING_PATTERN << "\n";
-                oss << Messages::USAGE_SETBY << "\n";
-            }
-            if (words.size() < 3) {
-                oss << Messages::MISSING_PATTERN << "\n";
-                oss << Messages::USAGE_SETBY << "\n";
-            }
-            if (words.size() < 4) {
-                oss << Messages::MISSING_VALUE << "\n";
-                oss << Messages::USAGE_SETBY << "\n";
-            }
-            return oss.str();
-        }
-        std::string mode = toLowerStr(words[1]);
-        const std::string& pattern = words[2];
-        unsigned int limit = UINT_MAX;
-        std::string value = words[3];
-        for (size_t i = 4; i < words.size(); i++) {
-            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
-                break;
-            } else {
-                value += " " + words[i];
-            }
-        }
-        auto [valid, validMode] = this->createValidationRule(mode, pattern);
-        if (!validMode) {
-            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
+            response["code"] = Messages::MISSING_VALUE;
+            response["message"] = "Missing value";
+            response["affectedRows"] = 0;
         } else {
-            valid.limit = limit;
-            result = this->setBy(valid, value);
-            if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
-                oss << "OK: " << result.message << "\n";
+            std::string mode = toLowerStr(words[1]);
+            const std::string& pattern = words[2];
+            unsigned int limit = UINT_MAX;
+            std::string value = words[3];
+            for (size_t i = 4; i < words.size(); i++) {
+                if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
+                    limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
+                } else {
+                    value += " " + words[i];
+                }
+            }
+            auto [valid, validMode] = this->createValidationRule(mode, pattern);
+            if (!validMode) {
+                response["code"] = Messages::INVALID_REGEX;
+                response["message"] = "Invalid regex mode";
+                response["affectedRows"] = 0;
             } else {
-                oss << "OK: value modified" << "\n";
+                valid.limit = limit;
+                result = this->setBy(valid, value);
+                if (result.code == ResultType::Code::SUCCESS) {
+                    response["code"] = Messages::SUCCESS;
+                    response["message"] = "Values updated";
+                    response["affectedRows"] = result.affectedRows;
+                } else {
+                    response["code"] = std::stoi(result.message);
+                    response["message"] = result.message;
+                    response["affectedRows"] = 0;
+                }
             }
         }
     } else if (cmd == "db") {
         if (words.size() < 3) {
-            oss << Messages::MISSING_PATTERN << "\n";
-            oss << Messages::USAGE_DELBY << "\n";
-            return oss.str();
-        }
-        std::string mode = toLowerStr(words[1]);
-        const std::string& pattern = words[2];
-        unsigned int limit = UINT_MAX;
-        for (size_t i = 3; i < words.size(); i++) {
-            if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
-                break;
-            } else {
-                oss << "ERROR: unexpected token '" << words[i] << "'" << "\n";
-                break;
-            }
-        }
-        auto [valid, validMode] = this->createValidationRule(mode, pattern);
-        if (!validMode) {
-            oss << "ERROR: invalid mode '" << mode << "'. Use re, sw, ct, or ew" << "\n";
+            response["code"] = Messages::MISSING_PATTERN;
+            response["message"] = "Missing pattern";
+            response["affectedRows"] = 0;
         } else {
-            valid.limit = limit;
-            result = this->delBy(valid);
-            if (result.code == ResultType::Code::SUCCESS && !result.message.empty()) {
-                oss << "OK: " << result.message << "\n";
-            } else if (result.code == ResultType::Code::SUCCESS) {
-                oss << "OK: entries deleted" << "\n";
+            std::string mode = toLowerStr(words[1]);
+            const std::string& pattern = words[2];
+            unsigned int limit = UINT_MAX;
+            for (size_t i = 3; i < words.size(); i++) {
+                if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
+                    limit = static_cast<unsigned int>(std::stoi(words[i + 1]));
+                }
+            }
+            auto [valid, validMode] = this->createValidationRule(mode, pattern);
+            if (!validMode) {
+                response["code"] = Messages::INVALID_MODE;
+                response["message"] = "Invalid mode";
+                response["affectedRows"] = 0;
             } else {
-                oss << "ERROR: " << (result.message.empty() ? "operation failed" : result.message) << "\n";
+                valid.limit = limit;
+                result = this->delBy(valid);
+                if (result.code == ResultType::Code::SUCCESS) {
+                    response["code"] = Messages::SUCCESS;
+                    response["message"] = "Keys deleted";
+                    response["affectedRows"] = result.affectedRows;
+                } else {
+                    response["code"] = std::stoi(result.message);
+                    response["message"] = result.message;
+                    response["affectedRows"] = 0;
+                }
             }
         }
     } else if (cmd == "h") {
-        oss << this->help();
+        response["code"] = Messages::SUCCESS;
+        response["message"] = this->help();
+        response["affectedRows"] = 0;
     } else if (cmd == "f") {
         this->flush();
-        oss << Messages::FLUSH_SUCCESSFUL << "\n";
+        response["code"] = Messages::SUCCESS;
+        response["message"] = "Flush successful";
+        response["affectedRows"] = 0;
     } else {
-        oss << "ERROR: " << Messages::CMD_NOT_FOUND << "\n";
-        oss << Messages::TYPE_HELP << "\n";
+        response["code"] = Messages::CMD_NOT_FOUND;
+        response["message"] = "Command not found";
+        response["affectedRows"] = 0;
     }
 
     if (!this->replaying.load()) {
-        if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
+        if (response["code"] == Messages::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
             std::istringstream iss2(command);
             std::string tmpCmd, key;
             iss2 >> tmpCmd >> key;
@@ -578,7 +599,7 @@ std::string ZestDB::execCmd(const std::string& command)
         }
     }
 
-    return oss.str();
+    return response.dump();
 }
 
 void ZestDB::stop()

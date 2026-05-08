@@ -30,6 +30,7 @@ public:
     std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX);
     std::vector<IndexEntry> compact();
     void flush();
+
 private:
     std::filesystem::path indexPath;
     std::fstream index;
