@@ -48,7 +48,8 @@ void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>*
             db->stop();
             break;
         } else {
-            std::cout << db->execCmd(line) << std::endl;
+            auto resp = db->execCmd(line);
+            std::cout << ZestDB::responseToJson(resp) << std::endl;
         }
     }
 }

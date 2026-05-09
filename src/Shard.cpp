@@ -179,7 +179,7 @@ ResultType Shard::get(const std::string& key)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addGetStats(false, true, latency);
-    return { ResultType::Code::ERROR, std::to_string(Messages::KEY_NOT_FOUND), 0 };
+    return { ResultType::Code::ERROR, "", 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
@@ -204,7 +204,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addSetStats(true, false, latency);
-    return { ResultType::Code::SUCCESS, std::to_string(Messages::SUCCESS), 1};
+    return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1};
 }
 
 ResultType Shard::del(const std::string& key)
@@ -226,14 +226,14 @@ ResultType Shard::del(const std::string& key)
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(true, false, latency);
-        return { ResultType::Code::SUCCESS, std::to_string(Messages::SUCCESS), 1};
+        return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1};
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addDelStats(false, false, latency);
-    return { ResultType::Code::ERROR, std::to_string(Messages::FAIL), 0};
+    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0};
 }
 
 ResultType Shard::getBy(ValidationRule valid)

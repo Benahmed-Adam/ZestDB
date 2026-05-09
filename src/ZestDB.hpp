@@ -32,7 +32,7 @@ public:
     ResultType setBy(ValidationRule valid, const std::string& value);
     ResultType delBy(ValidationRule valid);
 
-    std::string execCmd(const std::string& command);
+    CommandResponse execCmd(const std::string& command);
     bool validateToken(const std::string& username, const std::string& token) const;
     void stop();
 
@@ -40,7 +40,10 @@ public:
     asio::io_context ioCtx;
     std::unique_ptr<httplib::Server> srv;
 
-private:
+    static std::string responseToJson(const CommandResponse& resp);
+
+    private:
+
     void boot();
     bool validateKey(const std::string& key) const;
     bool validateValue(const std::string& value) const;

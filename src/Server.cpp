@@ -80,7 +80,7 @@ void Session::do_read_command(uint32_t payload_size)
 
                     while (offset < payload_size && !should_close) {
                         if (offset + 4 > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + std::string("ERROR: malformed batch");
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0});
                             break;
                         }
 
@@ -90,7 +90,7 @@ void Session::do_read_command(uint32_t payload_size)
                         offset += 4;
 
                         if (offset + cmd_size > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + std::string("ERROR: malformed batch data");
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0});
                             break;
                         }
 
@@ -109,18 +109,19 @@ void Session::do_read_command(uint32_t payload_size)
                                     std::string token = authContent.substr(dotPos + 1);
                                     if (this->db_.validateToken(username, token)) {
                                         this->authenticated_ = true;
-                                        cmd_result = "OK: authenticated";
+                                        cmd_result = ZestDB::responseToJson({ResultType::Code::SUCCESS, Messages::AUTH_SUCCESS, 0});
                                     } else {
-                                        cmd_result = "ERROR: authentication failed";
+                                        cmd_result = ZestDB::responseToJson({ResultType::Code::ERROR, Messages::AUTH_FAILED, 0});
                                         should_close = true;
                                     }
                                 }
                             } else {
-                                cmd_result = "ERROR: authentication required";
+                                cmd_result = ZestDB::responseToJson({ResultType::Code::ERROR, Messages::AUTH_FAILED, 0});
                                 should_close = true;
                             }
                         } else {
-                            cmd_result = this->db_.execCmd(cmd);
+                            auto resp = this->db_.execCmd(cmd);
+                            cmd_result = ZestDB::responseToJson(resp);
                         }
 
                         if (!final_result.empty()) {
