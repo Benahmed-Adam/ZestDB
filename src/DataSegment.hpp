@@ -9,7 +9,7 @@
 
 class DataSegment {
 public:
-    DataSegment(const Settings& set, int segmentId);
+    DataSegment(Settings& set, int segmentId);
     ~DataSegment();
     unsigned long write(const std::string& value);
     std::string read(unsigned long offset, unsigned int size);
@@ -23,7 +23,7 @@ private:
     void openSegment();
     int segmentId;
     std::atomic<unsigned long> currentOffset;
-    Settings settings;
+    Settings& settings;
     std::fstream segment;
     std::mutex mtx;
 

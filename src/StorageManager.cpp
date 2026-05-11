@@ -6,10 +6,10 @@
 #include "Logger.hpp"
 #include "StorageManager.hpp"
 
-StorageManager::StorageManager(const Settings& set)
+StorageManager::StorageManager(Settings& set)
+    : settings(set)
 {
     ZestLog(LogLevel::DEBUG, "Initializing StorageManager...");
-    this->settings = set;
     this->latestSegmentId = 0;
     this->boot();
     ZestLog(LogLevel::DEBUG, "StorageManager initialized");

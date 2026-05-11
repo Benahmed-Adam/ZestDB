@@ -21,7 +21,7 @@ struct IndexEntry {
 
 class IndexManager {
 public:
-    IndexManager(const Settings& set);
+    IndexManager(Settings& set);
     ~IndexManager();
 
     IndexEntry search(const std::string& key);
@@ -35,7 +35,7 @@ private:
     std::filesystem::path indexPath;
     std::fstream index;
     std::shared_mutex mtx;
-    Settings settings;
+    Settings& settings;
 
     std::unordered_map<std::string, std::streamoff> memoryTree;
     std::vector<std::streamoff> tombstoneOffsets;

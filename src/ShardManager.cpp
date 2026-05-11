@@ -6,7 +6,7 @@
 #include <regex>
 #include <thread>
 
-ShardManager::ShardManager(const Settings& baseSettings, int numShardsCount)
+ShardManager::ShardManager(Settings& baseSettings, int numShardsCount)
     : settings(baseSettings)
     , numShards(numShardsCount)
     , threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency()))

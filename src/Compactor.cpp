@@ -6,8 +6,8 @@
 #include "Compactor.hpp"
 #include "Logger.hpp"
 
-Compactor::Compactor(unsigned int compInter)
-    : compactingInterval(compInter)
+Compactor::Compactor(const Settings& set)
+    : compactingInterval(set.CompactingInterval)
 {
 }
 

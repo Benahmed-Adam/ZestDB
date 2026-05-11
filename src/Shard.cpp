@@ -14,7 +14,7 @@
 
 namespace fs = std::filesystem;
 
-Shard::Shard(const Settings& baseSettings, int shardIdNum)
+Shard::Shard(Settings& baseSettings, int shardIdNum)
     : settings(baseSettings)
     , shardId(shardIdNum)
     , initialized(false)
@@ -23,11 +23,63 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     , stopped(false)
 {
     this->boot();
+}
 
-    this->indexManager = std::make_unique<IndexManager>(this->settings);
-    this->storageManager = std::make_unique<StorageManager>(this->settings);
+Shard::~Shard()
+{
+    this->stop();
+}
+
+void Shard::boot()
+{
+    fs::path shardPath = this->settings.DbPath / "shards" / std::to_string(shardId);
+    fs::path indexPath = shardPath / "INDEX";
+    fs::path walPath = shardPath / "WAL";
+
+    if (!fs::exists(indexPath)) {
+        ZestLog(LogLevel::INFO, std::format("Creating INDEX for shard {} at {}", shardId, indexPath.string()));
+
+        if (auto parent = indexPath.parent_path(); !fs::exists(parent)) {
+            fs::create_directories(parent);
+        }
+
+        std::ofstream idx(indexPath);
+        if (!idx) {
+            ZestLog(LogLevel::ERROR, std::format("Failed to create INDEX for shard {}", shardId));
+            throw std::runtime_error("Failed to create INDEX for shard");
+        }
+    }
+
+    if (!fs::exists(shardPath / "seg")) {
+        fs::create_directory(shardPath / "seg");
+    }
+
+    if (!fs::exists(walPath)) {
+        ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", walPath.string()));
+
+        if (auto parent = walPath.parent_path(); !fs::exists(parent)) {
+            fs::create_directories(parent);
+        }
+
+        std::ofstream walFile(walPath);
+        if (!walFile) {
+            ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", walPath.string()));
+            throw std::runtime_error("Failed to create WAL");
+        }
+    }
+
+    this->wal = std::make_unique<WAL>(walPath);
+
+    Settings shardSettings = this->settings;
+    shardSettings.DbPath = shardPath;
+    shardSettings.IndexPath = indexPath;
+    shardSettings.WalPath = walPath;
+
+    this->indexManager = std::make_unique<IndexManager>(shardSettings);
+    this->storageManager = std::make_unique<StorageManager>(shardSettings);
+
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
-    this->compactor = std::make_unique<Compactor>(this->settings.CompactingInterval);
+    this->compactor = std::make_unique<Compactor>(this->settings);
 
     this->verifyIndexEntries();
 
@@ -49,61 +101,6 @@ Shard::Shard(const Settings& baseSettings, int shardIdNum)
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
-}
-
-Shard::~Shard()
-{
-    this->stop();
-}
-
-void Shard::boot()
-{
-    auto shardSettings = this->settings;
-    shardSettings.DbPath = this->settings.DbPath / "shards" / std::to_string(shardId);
-    shardSettings.IndexPath = shardSettings.DbPath / "INDEX";
-
-    this->settings = shardSettings;
-
-    if (!fs::exists(this->settings.DbPath / "INDEX")) {
-        fs::path indexPath = this->settings.DbPath / "INDEX";
-        ZestLog(LogLevel::INFO, std::format("Creating INDEX for shard {} at {}", shardId, indexPath.string()));
-
-        if (auto parent = indexPath.parent_path(); !fs::exists(parent)) {
-            fs::create_directories(parent);
-        }
-
-        std::ofstream index(indexPath);
-        if (!index) {
-            ZestLog(LogLevel::ERROR, std::format("Failed to create INDEX for shard {}", shardId));
-            throw std::runtime_error("Failed to create INDEX for shard");
-        }
-    }
-
-    if (!fs::exists(this->settings.DbPath / "seg")) {
-        fs::create_directory(this->settings.DbPath / "seg");
-    }
-
-    this->settings.WalPath = this->settings.DbPath / "WAL";
-
-    if (!fs::exists(this->settings.DbPath / "WAL")) {
-        fs::path WalPath = this->settings.DbPath / "WAL";
-        ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", WalPath.string()));
-
-        if (auto parent = WalPath.parent_path(); !fs::exists(parent)) {
-            fs::create_directories(parent);
-        }
-
-        std::ofstream index(WalPath);
-        if (!index) {
-            ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", WalPath.string()));
-            throw std::runtime_error("Failed to create WAL");
-        }
-        this->settings.WalPath = WalPath;
-    } else {
-        this->settings.WalPath = this->settings.DbPath / "WAL";
-    }
-
-    this->wal = std::make_unique<WAL>(this->settings);
 }
 
 void Shard::fillCache()
@@ -204,7 +201,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addSetStats(true, false, latency);
-    return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1};
+    return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1 };
 }
 
 ResultType Shard::del(const std::string& key)
@@ -226,14 +223,14 @@ ResultType Shard::del(const std::string& key)
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(true, false, latency);
-        return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1};
+        return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addDelStats(false, false, latency);
-    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0};
+    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
 ResultType Shard::getBy(ValidationRule valid)

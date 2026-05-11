@@ -4,11 +4,11 @@
 #include <format>
 #include <iostream>
 
-WAL::WAL(const Settings& set)
+WAL::WAL(const std::filesystem::path& walPath)
     : canClear(true)
 {
     ZestLog(LogLevel::INFO, "Opening WAL file...");
-    this->WalPath = set.WalPath;
+    this->WalPath = walPath;
 
     this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     if (!this->wal.is_open()) {

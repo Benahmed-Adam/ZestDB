@@ -13,7 +13,7 @@
 
 class Shard {
 public:
-    Shard(const Settings& baseSettings, int shardIdNum);
+    Shard(Settings& baseSettings, int shardIdNum);
     ~Shard();
 
     ResultType get(const std::string& key);
@@ -34,7 +34,7 @@ public:
     StorageManager& getStorageManager() { return *this->storageManager; }
 
     std::unique_ptr<IndexManager> indexManager;
-    Settings settings;
+    Settings& settings;
     int shardId;
     PerfMonitoring perfMonitor;
 

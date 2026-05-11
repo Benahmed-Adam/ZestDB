@@ -22,7 +22,8 @@ namespace fs = std::filesystem;
 
 using json = nlohmann::json;
 
-std::string ZestDB::responseToJson(const ResultType& resp) {
+std::string ZestDB::responseToJson(const ResultType& resp)
+{
     json j;
     j["code"] = static_cast<unsigned int>(resp.code);
     j["message"] = resp.message;
@@ -130,7 +131,8 @@ void ZestDB::boot()
     }
 }
 
-Settings ZestDB::loadConfig() {
+Settings ZestDB::loadConfig()
+{
     Settings result;
 
     const fs::path current_path = fs::current_path().string();
@@ -223,16 +225,25 @@ Settings ZestDB::loadConfig() {
     return result;
 }
 
-ResultType ZestDB::reloadConfig() {
+ResultType ZestDB::reloadConfig()
+{
     try {
+        Settings oldSettings = this->settings;
         Settings s = this->loadConfig();
-        this->settings = std::move(s);
 
-        return {ResultType::Code::SUCCESS, "Reload successful !"};
+        if (s.DbPath != oldSettings.DbPath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
+            ZestLog(LogLevel::ERROR, "Cannot change path settings during hot-reload. Paths are immutable.");
+            return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are immutable. Restart the database to apply changes" };
+        }
+
+        this->settings = std::move(s);
+        setLoggerDebugMode(this->settings.isDebug);
+
+        return { ResultType::Code::SUCCESS, "Reload successful !" };
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
     }
-    return {ResultType::Code::ERROR, "Reload failed !"};
+    return { ResultType::Code::ERROR, "Reload failed !" };
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const

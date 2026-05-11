@@ -15,7 +15,7 @@ struct WalEntry {
 
 class WAL {
 public:
-    WAL(const Settings& set);
+    WAL(const std::filesystem::path& walPath);
     void clear();
     void append(const std::string& cmd);
     std::vector<WalEntry> getCmds();

@@ -3,7 +3,7 @@
 #include <chrono>
 #include <format>
 
-IndexManager::IndexManager(const Settings& set)
+IndexManager::IndexManager(Settings& set)
     : settings(set)
     , canFlush(false)
 {

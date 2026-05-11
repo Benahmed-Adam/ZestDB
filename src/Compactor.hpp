@@ -7,7 +7,7 @@
 
 class Compactor {
 public:
-    Compactor(unsigned int compactingInterval);
+    Compactor(const Settings& set);
     void compactIndex(IndexManager& indexManager);
     void run(IndexManager& indexManager, StorageManager& storageManager, std::atomic<bool>& stopFlag);
 

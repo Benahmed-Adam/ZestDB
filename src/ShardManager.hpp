@@ -10,7 +10,7 @@
 
 class ShardManager {
 public:
-    ShardManager(const Settings& baseSettings, int numShardsCount);
+    ShardManager(Settings& baseSettings, int numShardsCount);
     ~ShardManager();
 
     ResultType get(const std::string& key);
@@ -32,7 +32,7 @@ public:
 private:
     int getShardId(const std::string& key) const;
 
-    Settings settings;
+    Settings& settings;
     int numShards;
     std::vector<std::unique_ptr<Shard>> shards;
     std::unique_ptr<ThreadPool> threadPool;

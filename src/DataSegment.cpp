@@ -3,7 +3,7 @@
 #include <chrono>
 #include <format>
 
-DataSegment::DataSegment(const Settings& set, int id)
+DataSegment::DataSegment(Settings& set, int id)
     : segmentId(id)
     , currentOffset(0)
     , settings(set)
