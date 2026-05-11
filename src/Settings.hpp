@@ -21,12 +21,6 @@ struct ResultType {
     long long affectedRows = 0;
 };
 
-struct CommandResponse {
-    ResultType::Code code;
-    std::string message;
-    long long affectedRows = 0;
-};
-
 struct Messages {
     static constexpr const char* KEY_TOO_LONG      = "The key is too long !";
     static constexpr const char* KEY_NOT_FOUND     = "Key not found";

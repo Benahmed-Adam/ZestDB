@@ -22,7 +22,7 @@ namespace fs = std::filesystem;
 
 using json = nlohmann::json;
 
-std::string ZestDB::responseToJson(const CommandResponse& resp) {
+std::string ZestDB::responseToJson(const ResultType& resp) {
     json j;
     j["code"] = static_cast<unsigned int>(resp.code);
     j["message"] = resp.message;
@@ -109,6 +109,30 @@ ZestDB::~ZestDB()
 
 void ZestDB::boot()
 {
+    this->settings = std::move(this->loadConfig());
+    setLoggerDebugMode(this->settings.isDebug);
+
+    ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
+    ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
+    ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
+    ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
+    ZestLog(LogLevel::DEBUG, std::format("CacheSize : {}", this->settings.CacheSize));
+    ZestLog(LogLevel::DEBUG, std::format("CompactingInterval : {}", this->settings.CompactingInterval));
+    ZestLog(LogLevel::DEBUG, std::format("FlushInterval : {}", this->settings.FlushInterval));
+    ZestLog(LogLevel::DEBUG, std::format("isDebug : {}", this->settings.isDebug));
+    ZestLog(LogLevel::DEBUG, std::format("isJson : {}", this->settings.jsonOnly));
+    ZestLog(LogLevel::DEBUG, std::format("readOnly : {}", this->settings.readOnly));
+    ZestLog(LogLevel::DEBUG, std::format("DBPort : {}", this->settings.DBPort));
+    ZestLog(LogLevel::DEBUG, std::format("WebPort : {}", this->settings.WebPort));
+
+    if (!fs::exists(this->settings.DbPath)) {
+        fs::create_directories(this->settings.DbPath);
+    }
+}
+
+Settings ZestDB::loadConfig() {
+    Settings result;
+
     const fs::path current_path = fs::current_path().string();
     const std::string configName = "config.yaml";
 
@@ -128,35 +152,34 @@ void ZestDB::boot()
 
         auto node = fkyaml::node::deserialize(buffer.str());
 
-        this->settings.DbPath = node["DbPath"].get_value_or<std::string>(current_path.string());
-        this->settings.SegSize = node["SegSize"].get_value_or<unsigned long>(128000);
-        this->settings.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
-        this->settings.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
-        this->settings.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
-        this->settings.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
-        this->settings.FlushInterval = node["FlushInterval"].get_value_or<unsigned int>(120);
-        this->settings.DBPort = node["DBPort"].get_value_or<short>(7321);
-        this->settings.WebPort = node["WebPort"].get_value_or<short>(1237);
+        result.DbPath = node["DbPath"].get_value_or<std::string>(current_path.string());
+        result.SegSize = node["SegSize"].get_value_or<unsigned long>(128000);
+        result.MaxKeySize = node["MaxKeySize"].get_value_or<unsigned int>(64);
+        result.MaxValueSize = node["MaxValueSize"].get_value_or<unsigned int>(10000);
+        result.CacheSize = node["CacheSize"].get_value_or<unsigned int>(1000);
+        result.CompactingInterval = node["CompactingInterval"].get_value_or<unsigned int>(3600);
+        result.FlushInterval = node["FlushInterval"].get_value_or<unsigned int>(120);
+        result.DBPort = node["DBPort"].get_value_or<short>(7321);
+        result.WebPort = node["WebPort"].get_value_or<short>(1237);
 
-        this->settings.NetworkValidationStr = node["NetworkValidation"].get_value_or<std::string>("");
+        result.NetworkValidationStr = node["NetworkValidation"].get_value_or<std::string>("");
 
-        this->settings.isDebug = node["isDebug"].get_value_or<bool>(false);
-        setLoggerDebugMode(this->settings.isDebug);
-        this->settings.jsonOnly = node["jsonOnly"].get_value_or<bool>(false);
-        this->settings.readOnly = node["readOnly"].get_value_or<bool>(false);
+        result.isDebug = node["isDebug"].get_value_or<bool>(false);
+        result.jsonOnly = node["jsonOnly"].get_value_or<bool>(false);
+        result.readOnly = node["readOnly"].get_value_or<bool>(false);
 
-        this->settings.useSSL = node["useSSL"].get_value_or<bool>(false);
-        this->settings.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
-        this->settings.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
+        result.useSSL = node["useSSL"].get_value_or<bool>(false);
+        result.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
+        result.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
 
-        if (this->settings.useSSL && (this->settings.SSLCertPath == "" || this->settings.SSLKeyPath == "")) {
+        if (result.useSSL && (result.SSLCertPath == "" || result.SSLKeyPath == "")) {
             ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
             throw std::runtime_error("SSL with no cert or key");
         }
 
-        if (!this->settings.NetworkValidationStr.empty()) {
+        if (!result.NetworkValidationStr.empty()) {
             try {
-                this->settings.NetworkValidation = std::regex(this->settings.NetworkValidationStr);
+                result.NetworkValidation = std::regex(result.NetworkValidationStr);
             } catch (const std::regex_error& e) {
                 ZestLog(LogLevel::CRITICAL, "Invalid NetworkValidation regex: " + std::string(e.what()));
                 throw std::runtime_error("Invalid NetworkValidation regex");
@@ -177,42 +200,39 @@ void ZestDB::boot()
         throw std::runtime_error("Failed to parse config: " + std::string(e.what()));
     }
 
-    if (this->settings.MaxValueSize >= this->settings.SegSize) {
-        ZestLog(LogLevel::CRITICAL, std::format("MaxValueSize is higher than SegSize ! MaxValueSize : {} | SegSize : {}", this->settings.MaxValueSize, this->settings.SegSize));
+    if (result.MaxValueSize >= result.SegSize) {
+        ZestLog(LogLevel::CRITICAL, std::format("MaxValueSize is higher than SegSize ! MaxValueSize : {} | SegSize : {}", result.MaxValueSize, result.SegSize));
         throw std::runtime_error("MaxValueSize >= SegSize");
     }
 
-    if (this->settings.MaxKeySize > IndexEntry::MAX_KEY_SIZE) {
-        ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", this->settings.MaxKeySize, IndexEntry::MAX_KEY_SIZE));
-        this->settings.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
+    if (result.MaxKeySize > IndexEntry::MAX_KEY_SIZE) {
+        ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", result.MaxKeySize, IndexEntry::MAX_KEY_SIZE));
+        result.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
     }
 
-    if (this->settings.DBPort < 0 || this->settings.WebPort < 0) {
+    if (result.DBPort < 0 || result.WebPort < 0) {
         ZestLog(LogLevel::CRITICAL, "Ports cant be lower that zero");
         throw std::runtime_error("Port < 0");
     }
 
-    if (this->settings.DBPort == this->settings.WebPort) {
+    if (result.DBPort == result.WebPort) {
         ZestLog(LogLevel::CRITICAL, "DBPort and WebPort cannot be the same");
         throw std::runtime_error("DBPort == WebPort");
     }
 
-    ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
-    ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
-    ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
-    ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
-    ZestLog(LogLevel::DEBUG, std::format("CacheSize : {}", this->settings.CacheSize));
-    ZestLog(LogLevel::DEBUG, std::format("CompactingInterval : {}", this->settings.CompactingInterval));
-    ZestLog(LogLevel::DEBUG, std::format("FlushInterval : {}", this->settings.FlushInterval));
-    ZestLog(LogLevel::DEBUG, std::format("isDebug : {}", this->settings.isDebug));
-    ZestLog(LogLevel::DEBUG, std::format("isJson : {}", this->settings.jsonOnly));
-    ZestLog(LogLevel::DEBUG, std::format("readOnly : {}", this->settings.readOnly));
-    ZestLog(LogLevel::DEBUG, std::format("DBPort : {}", this->settings.DBPort));
-    ZestLog(LogLevel::DEBUG, std::format("WebPort : {}", this->settings.WebPort));
+    return result;
+}
 
-    if (!fs::exists(this->settings.DbPath)) {
-        fs::create_directories(this->settings.DbPath);
+ResultType ZestDB::reloadConfig() {
+    try {
+        Settings s = this->loadConfig();
+        this->settings = std::move(s);
+
+        return {ResultType::Code::SUCCESS, "Reload successful !"};
+    } catch (const std::exception& e) {
+        ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
     }
+    return {ResultType::Code::ERROR, "Reload failed !"};
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -398,7 +418,7 @@ std::string toLowerStr(const std::string& str)
     return result;
 }
 
-CommandResponse ZestDB::execCmd(const std::string& command)
+ResultType ZestDB::execCmd(const std::string& command)
 {
     std::string_view sv(command);
     auto start = sv.find_first_not_of(" \t\r\n");
@@ -419,7 +439,6 @@ CommandResponse ZestDB::execCmd(const std::string& command)
             break;
     }
 
-    CommandResponse response = { ResultType::Code::ERROR, "" };
     ResultType result = { ResultType::Code::ERROR, "" };
 
     if (words.empty()) {
@@ -430,17 +449,16 @@ CommandResponse ZestDB::execCmd(const std::string& command)
 
     if (cmd == "g" || cmd == "get") {
         if (words.size() < 2) {
-            response.message = Messages::MISSING_KEY;
+            result.message = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->get(key);
-            response = {result.code, result.message, result.affectedRows};
         }
     } else if (cmd == "s" || cmd == "set") {
         if (words.size() < 2) {
-            response.message = Messages::MISSING_KEY;
+            result.message = Messages::MISSING_KEY;
         } else if (words.size() < 3) {
-            response.message = Messages::MISSING_VALUE;
+            result.message = Messages::MISSING_VALUE;
         } else {
             std::string key(words[1]);
             size_t keyPos = command.find(words[1]);
@@ -448,19 +466,17 @@ CommandResponse ZestDB::execCmd(const std::string& command)
             std::string value = command.substr(valPos);
 
             result = this->set(key, value);
-            response = {result.code, result.message, result.affectedRows};
         }
     } else if (cmd == "d" || cmd == "del") {
         if (words.size() < 2) {
-            response.message = Messages::MISSING_KEY;
+            result.message = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->del(key);
-            response = {result.code, result.message, result.affectedRows};
         }
     } else if (cmd == "gb" || cmd == "getby") {
         if (words.size() < 3) {
-            response.message = Messages::MISSING_ARGUMENTS;
+            result.message = Messages::MISSING_ARGUMENTS;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -472,16 +488,15 @@ CommandResponse ZestDB::execCmd(const std::string& command)
             }
             auto [valid, validMode] = this->createValidationRule(mode, pattern);
             if (!validMode) {
-                response.message = Messages::INVALID_REGEX;
+                result.message = Messages::INVALID_REGEX;
             } else {
                 valid.limit = limit;
                 result = this->getBy(valid);
-                response = {result.code, result.message, result.affectedRows};
             }
         }
     } else if (cmd == "sb" || cmd == "setby") {
         if (words.size() < 4) {
-            response.message = Messages::MISSING_VALUE;
+            result.message = Messages::MISSING_VALUE;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -499,24 +514,23 @@ CommandResponse ZestDB::execCmd(const std::string& command)
             }
 
             if (valStartIdx >= words.size()) {
-                response.message = Messages::MISSING_VALUE;
+                result.message = Messages::MISSING_VALUE;
             } else {
                 size_t valPosInCmd = command.find(words[valStartIdx]);
                 std::string value = command.substr(valPosInCmd);
 
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
                 if (!validMode) {
-                    response.message = Messages::INVALID_REGEX;
+                    result.message = Messages::INVALID_REGEX;
                 } else {
                     valid.limit = limit;
                     result = this->setBy(valid, value);
-                    response = {result.code, result.message, result.affectedRows};
                 }
             }
         }
     } else if (cmd == "db" || cmd == "delby") {
         if (words.size() < 3) {
-            response.message = Messages::MISSING_PATTERN;
+            result.message = Messages::MISSING_PATTERN;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -528,33 +542,34 @@ CommandResponse ZestDB::execCmd(const std::string& command)
             }
             auto [valid, validMode] = this->createValidationRule(mode, pattern);
             if (!validMode) {
-                response.message = Messages::INVALID_MODE;
+                result.message = Messages::INVALID_MODE;
             } else {
                 valid.limit = limit;
                 result = this->delBy(valid);
-                response = {result.code, result.message, result.affectedRows};
             }
         }
     } else if (cmd == "h" || cmd == "help") {
-        response.code = ResultType::Code::SUCCESS;
-        response.message = this->help();
+        result.code = ResultType::Code::SUCCESS;
+        result.message = this->help();
     } else if (cmd == "f" || cmd == "flush") {
         this->flush();
-        response.code = ResultType::Code::SUCCESS;
-        response.message = Messages::FLUSH_SUCCESSFUL;
+        result.code = ResultType::Code::SUCCESS;
+        result.message = Messages::FLUSH_SUCCESSFUL;
+    } else if (cmd == "r" || cmd == "reload") {
+        result = this->reloadConfig();
     } else {
-        response.message = Messages::CMD_NOT_FOUND;
+        result.message = Messages::CMD_NOT_FOUND;
     }
 
     if (!this->replaying.load()) {
-        if (response.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
+        if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
             if (words.size() >= 2) {
                 this->appendToWAL(std::string(words[1]), command);
             }
         }
     }
 
-    return response;
+    return result;
 }
 
 void ZestDB::stop()
