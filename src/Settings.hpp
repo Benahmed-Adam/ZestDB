@@ -78,6 +78,4 @@ struct Settings {
     bool isRunning = true;
     bool jsonOnly;
     bool readOnly;
-
-    bool hasCrashedLastTime;
 };

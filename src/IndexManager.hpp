@@ -10,8 +10,9 @@
 
 #include "Settings.hpp"
 
+static constexpr size_t MAX_KEY_SIZE = 256;
+
 struct IndexEntry {
-    static constexpr size_t MAX_KEY_SIZE = 256;
     char key[MAX_KEY_SIZE];
     int segmentId;
     unsigned long offset;

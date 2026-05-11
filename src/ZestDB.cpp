@@ -13,6 +13,7 @@
 
 #include <string_view>
 
+#include "IndexManager.hpp"
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 #include "lib/json.hpp"
@@ -207,9 +208,9 @@ Settings ZestDB::loadConfig()
         throw std::runtime_error("MaxValueSize >= SegSize");
     }
 
-    if (result.MaxKeySize > IndexEntry::MAX_KEY_SIZE) {
-        ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", result.MaxKeySize, IndexEntry::MAX_KEY_SIZE));
-        result.MaxKeySize = IndexEntry::MAX_KEY_SIZE;
+    if (result.MaxKeySize > MAX_KEY_SIZE) {
+        ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", result.MaxKeySize, MAX_KEY_SIZE));
+        result.MaxKeySize = MAX_KEY_SIZE;
     }
 
     if (result.DBPort < 0 || result.WebPort < 0) {
@@ -244,6 +245,38 @@ ResultType ZestDB::reloadConfig()
         ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
     }
     return { ResultType::Code::ERROR, "Reload failed !" };
+}
+
+void ZestDB::setConfig()
+{
+    const fs::path current_path = fs::current_path();
+    const std::string configName = "config.yaml";
+    fs::path configPath = current_path / configName;
+
+    std::fstream configFile(configPath);
+    std::stringstream buffer;
+    buffer << configFile.rdbuf();
+    configFile.close();
+
+    auto node = fkyaml::node::deserialize(buffer.str());
+
+    node["SegSize"] = this->settings.SegSize;
+    node["MaxKeySize"] = this->settings.MaxKeySize;
+    node["MaxValueSize"] = this->settings.MaxValueSize;
+    node["CacheSize"] = this->settings.CacheSize;
+    node["CompactingInterval"] = this->settings.CompactingInterval;
+    node["FlushInterval"] = this->settings.FlushInterval;
+    node["DBPort"] = this->settings.DBPort;
+    node["WebPort"] = this->settings.WebPort;
+    node["isDebug"] = this->settings.isDebug;
+    node["jsonOnly"] = this->settings.jsonOnly;
+    node["readOnly"] = this->settings.readOnly;
+
+    std::ofstream outFile(configPath);
+    outFile << node;
+    outFile.close();
+
+    ZestLog(LogLevel::INFO, "Configuration saved to config.yaml");
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -568,6 +601,145 @@ ResultType ZestDB::execCmd(const std::string& command)
         result.message = Messages::FLUSH_SUCCESSFUL;
     } else if (cmd == "r") {
         result = this->reloadConfig();
+    } else if (cmd == "scfg") {
+        if (words.size() < 3) {
+            result.message = Messages::MISSING_ARGUMENTS;
+            return result;
+        }
+
+        std::string param = toLowerStr(std::string(words[1]));
+        std::string valueStr(words[2]);
+
+        bool valueSet = false;
+
+        if (param == "segsize") {
+            try {
+                unsigned long val = std::stoul(valueStr);
+                if (val <= this->settings.MaxValueSize) {
+                    result.message = "SegSize must be greater than MaxValueSize";
+                    return result;
+                }
+                this->settings.SegSize = val;
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid SegSize value";
+                return result;
+            }
+        } else if (param == "maxkeysize") {
+            try {
+                unsigned int val = std::stoul(valueStr);
+                if (val > MAX_KEY_SIZE) {
+                    result.message = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
+                    return result;
+                }
+                this->settings.MaxKeySize = val;
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid MaxKeySize value";
+                return result;
+            }
+        } else if (param == "maxvaluesize") {
+            try {
+                unsigned int val = std::stoul(valueStr);
+                if (val >= this->settings.SegSize) {
+                    result.message = "MaxValueSize must be less than SegSize";
+                    return result;
+                }
+                this->settings.MaxValueSize = val;
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid MaxValueSize value";
+                return result;
+            }
+        } else if (param == "cachesize") {
+            try {
+                this->settings.CacheSize = std::stoul(valueStr);
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid CacheSize value";
+                return result;
+            }
+        } else if (param == "compactinginterval") {
+            try {
+                this->settings.CompactingInterval = std::stoul(valueStr);
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid CompactingInterval value";
+                return result;
+            }
+        } else if (param == "flushinterval") {
+            try {
+                this->settings.FlushInterval = std::stoul(valueStr);
+                valueSet = true;
+            } catch (...) {
+                result.message = "Invalid FlushInterval value";
+                return result;
+            }
+        } else if (param == "networkvalidationstr") {
+            try {
+                std::regex testRegex(valueStr);
+                this->settings.NetworkValidationStr = valueStr;
+                this->settings.NetworkValidation = std::move(testRegex);
+                valueSet = true;
+            } catch (const std::regex_error& e) {
+                result.message = std::format("Invalid regex: {}", e.what());
+                return result;
+            }
+        } else if (param == "isdebug") {
+            if (valueStr == "true" || valueStr == "1") {
+                this->settings.isDebug = true;
+                valueSet = true;
+            } else if (valueStr == "false" || valueStr == "0") {
+                this->settings.isDebug = false;
+                valueSet = true;
+            } else {
+                result.message = "Invalid isDebug value (use true/false or 0/1)";
+                return result;
+            }
+            setLoggerDebugMode(this->settings.isDebug);
+        } else if (param == "usessl") {
+            if (valueStr == "true" || valueStr == "1") {
+                this->settings.useSSL = true;
+                valueSet = true;
+            } else if (valueStr == "false" || valueStr == "0") {
+                this->settings.useSSL = false;
+                valueSet = true;
+            } else {
+                result.message = "Invalid useSSL value (use true/false or 0/1)";
+                return result;
+            }
+        } else if (param == "jsononly") {
+            if (valueStr == "true" || valueStr == "1") {
+                this->settings.jsonOnly = true;
+                valueSet = true;
+            } else if (valueStr == "false" || valueStr == "0") {
+                this->settings.jsonOnly = false;
+                valueSet = true;
+            } else {
+                result.message = "Invalid jsonOnly value (use true/false or 0/1)";
+                return result;
+            }
+        } else if (param == "readonly") {
+            if (valueStr == "true" || valueStr == "1") {
+                this->settings.readOnly = true;
+                valueSet = true;
+            } else if (valueStr == "false" || valueStr == "0") {
+                this->settings.readOnly = false;
+                valueSet = true;
+            } else {
+                result.message = "Invalid readOnly value (use true/false or 0/1)";
+                return result;
+            }
+        } else {
+            result.message = "Unknown parameter: " + param;
+            return result;
+        }
+
+        if (valueSet) {
+            result.code = ResultType::Code::SUCCESS;
+            result.message = Messages::UPDATE_SUCCESSFUL;
+            this->setConfig();
+        }
     } else {
         result.message = Messages::CMD_NOT_FOUND;
     }
@@ -608,7 +780,12 @@ std::string ZestDB::help() const
     oss << "setby <mode> <pattern> <val> [lim <n>] - Set value for keys matching pattern" << "\n";
     oss << "delby <mode> <pattern> [lim <n>]       - Delete keys matching pattern" << "\n";
     oss << "flush                                  - Flush all data in memory to the disk" << "\n";
+    oss << "reload                                 - Reload configuration from config.yaml" << "\n";
+    oss << "scfg <param> <value>                   - Set config parameter" << "\n";
     oss << "help                                   - Show this help" << "\n";
+    oss << "\n";
+    oss << "Config Parameters:" << "\n";
+    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), useSSL(bool), jsonOnly(bool), readOnly(bool), NetworkValidationStr(string), SSLCertPath(string), SSLKeyPath(string)" << "\n";
     oss << "\n";
     oss << "Modes:" << "\n";
     oss << "  re  - regex" << "\n";
@@ -623,7 +800,7 @@ std::string ZestDB::help() const
     oss << "  gb ct ac lim 1                       - Get keys containing 'ac' with limit 1" << "\n";
     oss << "  gb ew ca                             - Get keys ending with 'ca' (no limit)" << "\n";
     oss << "\n";
-    oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, h=help" << "\n";
+    oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, r=reload, scfg=setconfig, h=help" << "\n";
     return oss.str();
 }
 

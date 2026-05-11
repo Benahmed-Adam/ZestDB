@@ -176,7 +176,7 @@ ResultType Shard::get(const std::string& key)
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addGetStats(false, true, latency);
-    return { ResultType::Code::ERROR, "", 0 };
+    return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
 ResultType Shard::set(const std::string& key, const std::string& value)
@@ -187,6 +187,14 @@ ResultType Shard::set(const std::string& key, const std::string& value)
 
     IndexEntry entry = this->storageManager->append(value);
     ZestLog(LogLevel::DEBUG, std::format("Shard::set - appended to segment: {}, offset: {}", entry.segmentId, entry.offset));
+
+    if (entry.segmentId == -1) {
+        ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} - segment full", key, shardId));
+        auto end = std::chrono::high_resolution_clock::now();
+        double latency = std::chrono::duration<double, std::milli>(end - start).count();
+        this->perfMonitor.addSetStats(false, false, latency);
+        return { ResultType::Code::ERROR, "Failed to write: segment full", 0 };
+    }
 
     memset(entry.key, 0, sizeof(entry.key));
     size_t copySize = (key.size() < sizeof(entry.key) - 1) ? key.size() : sizeof(entry.key) - 1;
@@ -286,6 +294,12 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
         if (valid.func(key)) {
             ZestLog(LogLevel::DEBUG, std::format("Shard::setBy - match found: {}", key));
             IndexEntry newEntry = this->storageManager->append(value);
+
+            if (newEntry.segmentId == -1) {
+                ZestLog(LogLevel::ERROR, std::format("Shard::setBy - FAILED to write for key: {} - segment full", key));
+                continue;
+            }
+
             memset(newEntry.key, 0, sizeof(newEntry.key));
             size_t copySize = (key.size() < sizeof(newEntry.key) - 1) ? key.size() : sizeof(newEntry.key) - 1;
             memcpy(newEntry.key, key.c_str(), copySize);
