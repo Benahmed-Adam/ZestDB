@@ -458,14 +458,14 @@ ResultType ZestDB::execCmd(const std::string& command)
 
     std::string cmd = toLowerStr(std::string(words[0]));
 
-    if (cmd == "g" || cmd == "get") {
+    if (cmd == "g") {
         if (words.size() < 2) {
             result.message = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->get(key);
         }
-    } else if (cmd == "s" || cmd == "set") {
+    } else if (cmd == "s") {
         if (words.size() < 2) {
             result.message = Messages::MISSING_KEY;
         } else if (words.size() < 3) {
@@ -478,14 +478,14 @@ ResultType ZestDB::execCmd(const std::string& command)
 
             result = this->set(key, value);
         }
-    } else if (cmd == "d" || cmd == "del") {
+    } else if (cmd == "d") {
         if (words.size() < 2) {
             result.message = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->del(key);
         }
-    } else if (cmd == "gb" || cmd == "getby") {
+    } else if (cmd == "gb") {
         if (words.size() < 3) {
             result.message = Messages::MISSING_ARGUMENTS;
         } else {
@@ -505,7 +505,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 result = this->getBy(valid);
             }
         }
-    } else if (cmd == "sb" || cmd == "setby") {
+    } else if (cmd == "sb") {
         if (words.size() < 4) {
             result.message = Messages::MISSING_VALUE;
         } else {
@@ -539,7 +539,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 }
             }
         }
-    } else if (cmd == "db" || cmd == "delby") {
+    } else if (cmd == "db") {
         if (words.size() < 3) {
             result.message = Messages::MISSING_PATTERN;
         } else {
@@ -559,14 +559,14 @@ ResultType ZestDB::execCmd(const std::string& command)
                 result = this->delBy(valid);
             }
         }
-    } else if (cmd == "h" || cmd == "help") {
+    } else if (cmd == "h") {
         result.code = ResultType::Code::SUCCESS;
         result.message = this->help();
-    } else if (cmd == "f" || cmd == "flush") {
+    } else if (cmd == "f") {
         this->flush();
         result.code = ResultType::Code::SUCCESS;
         result.message = Messages::FLUSH_SUCCESSFUL;
-    } else if (cmd == "r" || cmd == "reload") {
+    } else if (cmd == "r") {
         result = this->reloadConfig();
     } else {
         result.message = Messages::CMD_NOT_FOUND;
