@@ -178,6 +178,7 @@ std::vector<IndexEntry> IndexManager::getAll(unsigned int limit)
 
 std::vector<IndexEntry> IndexManager::compact()
 {
+    ZestLog(LogLevel::DEBUG, "Starting index compaction...");
     std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
 
     std::vector<IndexEntry> entries = this->getAll();

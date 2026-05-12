@@ -150,7 +150,7 @@ ResultType Shard::get(const std::string& key)
         ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in cache for shard {}", shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
-        this->perfMonitor.addGetStats(true, false, latency);
+        this->perfMonitor.addGetStats(false, latency);
         return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
     }
 
@@ -167,14 +167,14 @@ ResultType Shard::get(const std::string& key)
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
-        this->perfMonitor.addGetStats(true, true, latency);
+        this->perfMonitor.addGetStats(true, latency);
         return { ResultType::Code::SUCCESS, value, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not found: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addGetStats(false, true, latency);
+    this->perfMonitor.addGetStats(true, latency);
     return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
@@ -191,7 +191,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
         ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} - segment full", key, shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
-        this->perfMonitor.addSetStats(false, false, latency);
+        this->perfMonitor.addSetStats(false, latency);
         return { ResultType::Code::ERROR, "Failed to write: segment full", 0 };
     }
 
@@ -207,7 +207,7 @@ ResultType Shard::set(const std::string& key, const std::string& value)
     ZestLog(LogLevel::DEBUG, std::format("Shard::set - successfully set key: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addSetStats(true, false, latency);
+    this->perfMonitor.addSetStats(false, latency);
     return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1 };
 }
 
@@ -229,14 +229,14 @@ ResultType Shard::del(const std::string& key)
         ZestLog(LogLevel::DEBUG, std::format("Shard::del - successfully deleted key: {} in shard {}", key, shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
-        this->perfMonitor.addDelStats(true, false, latency);
+        this->perfMonitor.addDelStats(false, latency);
         return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1 };
     }
 
     ZestLog(LogLevel::DEBUG, std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addDelStats(false, false, latency);
+    this->perfMonitor.addDelStats(false, latency);
     return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
@@ -268,7 +268,7 @@ ResultType Shard::getBy(ValidationRule valid)
 
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addGetByStats(matchCount > 0, false, latency);
+    this->perfMonitor.addGetByStats(false, latency);
 
     return { ResultType::Code::SUCCESS, oss.str(), matchCount };
 }
@@ -314,7 +314,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
 
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addSetByStats(matchCount > 0, false, latency);
+    this->perfMonitor.addSetByStats(false, latency);
 
     return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
 }
@@ -350,7 +350,7 @@ ResultType Shard::delBy(ValidationRule valid)
 
     auto end = std::chrono::high_resolution_clock::now();
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
-    this->perfMonitor.addDelByStats(matchCount > 0, false, latency);
+    this->perfMonitor.addDelByStats(false, latency);
 
     return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", matchCount), matchCount };
 }
@@ -409,13 +409,14 @@ void Shard::verifyIndexEntries()
     ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
 }
 
-void Shard::reloadSettings(Settings& set) {
-    fs::path shardPath = this->settings.DbPath / "shards" / std::to_string(shardId);
+void Shard::reloadSettings(Settings& set)
+{
+    fs::path shardPath = set.DbPath / "shards" / std::to_string(shardId);
     fs::path indexPath = shardPath / "INDEX";
     fs::path walPath = shardPath / "WAL";
 
     this->settings = set;
-    
+
     this->settings.DbPath = shardPath;
     this->settings.IndexPath = indexPath;
     this->settings.WalPath = walPath;

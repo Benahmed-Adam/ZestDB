@@ -50,22 +50,24 @@ ResultType ShardManager::getBy(ValidationRule valid)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(threadPool->enqueue([&]() {
-            return shard->getBy(valid);
+        Shard* rawShard = shard.get();
+
+        futures.push_back(threadPool->enqueue([rawShard, &valid]() {
+            return rawShard->getBy(valid);
         }));
     }
 
-    std::string results;
+    std::ostringstream results;
     long long totalMatches = 0;
     for (auto& f : futures) {
         ResultType r = f.get();
         if (r.code == ResultType::Code::SUCCESS) {
-            results += r.message;
+            results << r.message;
             totalMatches += r.affectedRows;
         }
     }
     threadPool->waitAll();
-    return { ResultType::Code::SUCCESS, results, totalMatches };
+    return { ResultType::Code::SUCCESS, results.str(), totalMatches };
 }
 
 ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
@@ -73,8 +75,10 @@ ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(threadPool->enqueue([&]() {
-            return shard->setBy(valid, value);
+        Shard* rawShard = shard.get();
+
+        futures.push_back(threadPool->enqueue([rawShard, &valid, &value]() {
+            return rawShard->setBy(valid, value);
         }));
     }
 
@@ -94,8 +98,10 @@ ResultType ShardManager::delBy(ValidationRule valid)
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
-        futures.push_back(threadPool->enqueue([&]() {
-            return shard->delBy(valid);
+        Shard* rawShard = shard.get();
+
+        futures.push_back(threadPool->enqueue([rawShard, &valid]() {
+            return rawShard->delBy(valid);
         }));
     }
 

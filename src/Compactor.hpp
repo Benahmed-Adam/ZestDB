@@ -12,5 +12,5 @@ public:
     void run(IndexManager& indexManager, StorageManager& storageManager, std::atomic<bool>& stopFlag);
 
 private:
-    unsigned int compactingInterval;
+    const Settings& settings;
 };

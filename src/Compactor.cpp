@@ -7,7 +7,7 @@
 #include "Logger.hpp"
 
 Compactor::Compactor(const Settings& set)
-    : compactingInterval(set.CompactingInterval)
+    : settings(set)
 {
 }
 
@@ -16,7 +16,7 @@ void Compactor::run(IndexManager& indexManager, StorageManager& storageManager, 
     ZestLog(LogLevel::INFO, "Starting the compactor...");
 
     while (!stopFlag.load()) {
-        std::this_thread::sleep_for(std::chrono::seconds(this->compactingInterval));
+        std::this_thread::sleep_for(std::chrono::seconds(this->settings.CompactingInterval));
 
         if (stopFlag.load()) {
             break;

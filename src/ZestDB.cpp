@@ -240,7 +240,7 @@ ResultType ZestDB::reloadConfig()
         this->settings = std::move(s);
         setLoggerDebugMode(this->settings.isDebug);
         this->shardManager->reloadSettings(this->settings);
-        
+
         return { ResultType::Code::SUCCESS, "Reload successful !" };
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
@@ -278,6 +278,24 @@ void ZestDB::setConfig()
     outFile.close();
 
     ZestLog(LogLevel::INFO, "Configuration saved to config.yaml");
+}
+
+std::string ZestDB::getConfig() const
+{
+    json j;
+    j["DbPath"] = this->settings.DbPath.string();
+    j["SegSize"] = this->settings.SegSize;
+    j["MaxKeySize"] = this->settings.MaxKeySize;
+    j["MaxValueSize"] = this->settings.MaxValueSize;
+    j["CacheSize"] = this->settings.CacheSize;
+    j["CompactingInterval"] = this->settings.CompactingInterval;
+    j["FlushInterval"] = this->settings.FlushInterval;
+    j["isDebug"] = this->settings.isDebug;
+    j["isJson"] = this->settings.jsonOnly;
+    j["readOnly"] = this->settings.readOnly;
+    j["DBPort"] = this->settings.DBPort;
+    j["WebPort"] = this->settings.WebPort;
+    return j.dump();
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -742,6 +760,9 @@ ResultType ZestDB::execCmd(const std::string& command)
             this->setConfig();
             this->shardManager->reloadSettings(this->settings);
         }
+    } else if (cmd == "gcfg") {
+        result.code = ResultType::Code::SUCCESS;
+        result.message = this->getConfig();
     } else {
         result.message = Messages::CMD_NOT_FOUND;
     }

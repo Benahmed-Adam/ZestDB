@@ -56,7 +56,8 @@ private:
     Settings loadConfig();
     ResultType reloadConfig();
     void setConfig();
-    
+    std::string getConfig() const;
+
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;
 
