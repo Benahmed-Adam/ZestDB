@@ -239,7 +239,8 @@ ResultType ZestDB::reloadConfig()
 
         this->settings = std::move(s);
         setLoggerDebugMode(this->settings.isDebug);
-
+        this->shardManager->reloadSettings(this->settings);
+        
         return { ResultType::Code::SUCCESS, "Reload successful !" };
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
@@ -739,6 +740,7 @@ ResultType ZestDB::execCmd(const std::string& command)
             result.code = ResultType::Code::SUCCESS;
             result.message = Messages::UPDATE_SUCCESSFUL;
             this->setConfig();
+            this->shardManager->reloadSettings(this->settings);
         }
     } else {
         result.message = Messages::CMD_NOT_FOUND;

@@ -164,3 +164,11 @@ void ShardManager::appendToWAL(const std::string& key, const std::string& comman
     auto& shard = this->getShards()[static_cast<size_t>(shardId)];
     shard->getWAL().append(command);
 }
+
+void ShardManager::reloadSettings(Settings& set) {
+    this->settings = set;
+
+    for (auto& shard : this->shards) {
+        shard->reloadSettings(set);
+    }
+}

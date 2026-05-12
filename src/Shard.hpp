@@ -33,8 +33,10 @@ public:
     WAL& getWAL() { return *this->wal; };
     StorageManager& getStorageManager() { return *this->storageManager; }
 
+    void reloadSettings(Settings& set);
+
     std::unique_ptr<IndexManager> indexManager;
-    Settings& settings;
+    Settings settings;
     int shardId;
     PerfMonitoring perfMonitor;
 

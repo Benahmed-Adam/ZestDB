@@ -70,13 +70,12 @@ void Shard::boot()
 
     this->wal = std::make_unique<WAL>(walPath);
 
-    Settings shardSettings = this->settings;
-    shardSettings.DbPath = shardPath;
-    shardSettings.IndexPath = indexPath;
-    shardSettings.WalPath = walPath;
+    this->settings.DbPath = shardPath;
+    this->settings.IndexPath = indexPath;
+    this->settings.WalPath = walPath;
 
-    this->indexManager = std::make_unique<IndexManager>(shardSettings);
-    this->storageManager = std::make_unique<StorageManager>(shardSettings);
+    this->indexManager = std::make_unique<IndexManager>(this->settings);
+    this->storageManager = std::make_unique<StorageManager>(this->settings);
 
     this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
     this->compactor = std::make_unique<Compactor>(this->settings);
@@ -408,4 +407,16 @@ void Shard::verifyIndexEntries()
     }
 
     ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
+}
+
+void Shard::reloadSettings(Settings& set) {
+    fs::path shardPath = this->settings.DbPath / "shards" / std::to_string(shardId);
+    fs::path indexPath = shardPath / "INDEX";
+    fs::path walPath = shardPath / "WAL";
+
+    this->settings = set;
+    
+    this->settings.DbPath = shardPath;
+    this->settings.IndexPath = indexPath;
+    this->settings.WalPath = walPath;
 }

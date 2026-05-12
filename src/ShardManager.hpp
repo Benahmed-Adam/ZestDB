@@ -26,13 +26,15 @@ public:
     void clearAllWAL();
     void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
     void appendToWAL(const std::string& key, const std::string& command);
-
+    
+    void reloadSettings(Settings& set);
+    
     const std::vector<std::unique_ptr<Shard>>& getShards() const { return this->shards; }
 
 private:
     int getShardId(const std::string& key) const;
 
-    Settings& settings;
+    Settings settings;
     int numShards;
     std::vector<std::unique_ptr<Shard>> shards;
     std::unique_ptr<ThreadPool> threadPool;
