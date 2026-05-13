@@ -45,8 +45,11 @@ ResultType ShardManager::del(const std::string& key)
     return this->shards[static_cast<size_t>(shardId)]->del(key);
 }
 
-ResultType ShardManager::getBy(ValidationRule valid)
+ResultType ShardManager::getBy(ValidationRule& valid)
 {
+    std::atomic<unsigned int> globalCount(0);
+    valid.globalMatchCount = &globalCount;
+
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
@@ -67,11 +70,15 @@ ResultType ShardManager::getBy(ValidationRule valid)
         }
     }
     threadPool->waitAll();
+    valid.globalMatchCount = nullptr;
     return { ResultType::Code::SUCCESS, results.str(), totalMatches };
 }
 
-ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
+ResultType ShardManager::setBy(ValidationRule& valid, const std::string& value)
 {
+    std::atomic<unsigned int> globalCount(0);
+    valid.globalMatchCount = &globalCount;
+
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
@@ -90,11 +97,15 @@ ResultType ShardManager::setBy(ValidationRule valid, const std::string& value)
         }
     }
     threadPool->waitAll();
+    valid.globalMatchCount = nullptr;
     return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
 }
 
-ResultType ShardManager::delBy(ValidationRule valid)
+ResultType ShardManager::delBy(ValidationRule& valid)
 {
+    std::atomic<unsigned int> globalCount(0);
+    valid.globalMatchCount = &globalCount;
+
     std::vector<std::future<ResultType>> futures;
 
     for (auto& shard : this->shards) {
@@ -113,6 +124,7 @@ ResultType ShardManager::delBy(ValidationRule valid)
         }
     }
     threadPool->waitAll();
+    valid.globalMatchCount = nullptr;
     return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
 }
 
@@ -171,7 +183,8 @@ void ShardManager::appendToWAL(const std::string& key, const std::string& comman
     shard->getWAL().append(command);
 }
 
-void ShardManager::reloadSettings(Settings& set) {
+void ShardManager::reloadSettings(Settings& set)
+{
     this->settings = set;
 
     for (auto& shard : this->shards) {

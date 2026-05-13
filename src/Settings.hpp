@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <climits>
 #include <filesystem>
 #include <functional>
@@ -9,6 +10,7 @@
 struct ValidationRule {
     std::function<bool(const std::string&)> func;
     unsigned int limit = UINT_MAX;
+    std::atomic<unsigned int>* globalMatchCount = nullptr;
 };
 
 struct ResultType {

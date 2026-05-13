@@ -240,7 +240,7 @@ ResultType Shard::del(const std::string& key)
     return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
 }
 
-ResultType Shard::getBy(ValidationRule valid)
+ResultType Shard::getBy(ValidationRule& valid)
 {
     auto start = std::chrono::high_resolution_clock::now();
     std::shared_lock<std::shared_mutex> lock(this->readMtx);
@@ -251,7 +251,7 @@ ResultType Shard::getBy(ValidationRule valid)
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
-        if (valid.limit != UINT_MAX && static_cast<unsigned int>(matchCount) >= valid.limit)
+        if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
             break;
 
         if (entry.isTombstone || entry.segmentId == -1) {
@@ -263,6 +263,11 @@ ResultType Shard::getBy(ValidationRule valid)
             std::string value = this->storageManager->read(entry);
             oss << key << ":" << value << ";";
             matchCount++;
+            if (valid.globalMatchCount) {
+                valid.globalMatchCount->fetch_add(1);
+            }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
+                break;
         }
     }
 
@@ -273,7 +278,7 @@ ResultType Shard::getBy(ValidationRule valid)
     return { ResultType::Code::SUCCESS, oss.str(), matchCount };
 }
 
-ResultType Shard::setBy(ValidationRule valid, const std::string& value)
+ResultType Shard::setBy(ValidationRule& valid, const std::string& value)
 {
     auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
@@ -283,7 +288,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
-        if (valid.limit != UINT_MAX && static_cast<unsigned int>(matchCount) >= valid.limit)
+        if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
             break;
 
         if (entry.isTombstone || entry.segmentId == -1) {
@@ -309,6 +314,11 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
             this->cache->put(newEntry, value);
 
             matchCount++;
+            if (valid.globalMatchCount) {
+                valid.globalMatchCount->fetch_add(1);
+            }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
+                break;
         }
     }
 
@@ -319,7 +329,7 @@ ResultType Shard::setBy(ValidationRule valid, const std::string& value)
     return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
 }
 
-ResultType Shard::delBy(ValidationRule valid)
+ResultType Shard::delBy(ValidationRule& valid)
 {
     auto start = std::chrono::high_resolution_clock::now();
     std::unique_lock<std::shared_mutex> lock(this->readMtx);
@@ -329,7 +339,7 @@ ResultType Shard::delBy(ValidationRule valid)
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
-        if (valid.limit != UINT_MAX && static_cast<unsigned int>(matchCount) >= valid.limit)
+        if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
             break;
 
         if (entry.isTombstone || entry.segmentId == -1) {
@@ -345,6 +355,11 @@ ResultType Shard::delBy(ValidationRule valid)
             this->cache->remove(key);
 
             matchCount++;
+            if (valid.globalMatchCount) {
+                valid.globalMatchCount->fetch_add(1);
+            }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
+                break;
         }
     }
 

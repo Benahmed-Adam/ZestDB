@@ -28,9 +28,9 @@ public:
     ResultType set(const std::string& key, const std::string& value);
     ResultType del(const std::string& key);
 
-    ResultType getBy(ValidationRule valid);
-    ResultType setBy(ValidationRule valid, const std::string& value);
-    ResultType delBy(ValidationRule valid);
+    ResultType getBy(ValidationRule& valid);
+    ResultType setBy(ValidationRule& valid, const std::string& value);
+    ResultType delBy(ValidationRule& valid);
 
     ResultType execCmd(const std::string& command);
     bool validateToken(const std::string& username, const std::string& token) const;
@@ -66,6 +66,7 @@ private:
     std::atomic<bool> isFlushing;
 
     std::unordered_map<std::string, std::string> users;
+    std::vector<std::string> trustedIPs;
 };
 
 std::string sha256(const std::string& str);

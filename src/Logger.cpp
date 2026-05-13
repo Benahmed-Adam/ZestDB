@@ -4,7 +4,7 @@
 
 #include "Logger.hpp"
 
-static bool isDebug = false;
+static bool isDebug = true;
 
 void setLoggerDebugMode(bool enabled)
 {

@@ -20,9 +20,9 @@ public:
     ResultType set(const std::string& key, const std::string& value);
     ResultType del(const std::string& key);
 
-    ResultType getBy(ValidationRule valid);
-    ResultType setBy(ValidationRule valid, const std::string& value);
-    ResultType delBy(ValidationRule valid);
+    ResultType getBy(ValidationRule& valid);
+    ResultType setBy(ValidationRule& valid, const std::string& value);
+    ResultType delBy(ValidationRule& valid);
 
     void flush();
     void stop();

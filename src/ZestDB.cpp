@@ -136,6 +136,9 @@ Settings ZestDB::loadConfig()
 {
     Settings result;
 
+    this->users.clear();
+    this->trustedIPs.clear();
+
     const fs::path current_path = fs::current_path().string();
     const std::string configName = "config.yaml";
 
@@ -190,14 +193,27 @@ Settings ZestDB::loadConfig()
         }
 
         if (node.contains("users") && node["users"].is_sequence()) {
-            for (auto& user_node : node["users"]) {
+            for (const auto& user_node : node["users"]) {
                 std::string username = user_node["user"].get_value<std::string>();
                 std::string password = user_node["password"].get_value<std::string>();
 
                 this->users[username] = sha256(username + password);
                 ZestLog(LogLevel::DEBUG, std::format("Loaded user: {} with token: {}", username, this->users[username]));
             }
+        } else {
+            ZestLog(LogLevel::DEBUG, "No users found in config");
         }
+
+        if (node.contains("trustedIPs") && node["trustedIPs"].is_sequence()) {
+            for (const auto& ip_node : node["trustedIPs"]) {
+                std::string ip = ip_node.get_value<std::string>();
+                this->trustedIPs.push_back(ip);
+                ZestLog(LogLevel::DEBUG, std::format("Loaded a trusted IP address : {}", ip));
+            }
+        } else {
+            ZestLog(LogLevel::DEBUG, "No trustedIPs found in config");
+        }
+        ZestLog(LogLevel::INFO, std::format("loadConfig completed - users: {}, trustedIPs: {}", this->users.size(), this->trustedIPs.size()));
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         throw std::runtime_error("Failed to parse config: " + std::string(e.what()));
@@ -392,12 +408,12 @@ ResultType ZestDB::del(const std::string& key)
     return this->shardManager->del(key);
 }
 
-ResultType ZestDB::getBy(ValidationRule valid)
+ResultType ZestDB::getBy(ValidationRule& valid)
 {
     return this->shardManager->getBy(valid);
 }
 
-ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
+ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value)
 {
     if (this->settings.readOnly) {
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -420,7 +436,7 @@ ResultType ZestDB::setBy(ValidationRule valid, const std::string& value)
     return this->shardManager->setBy(valid, value);
 }
 
-ResultType ZestDB::delBy(ValidationRule valid)
+ResultType ZestDB::delBy(ValidationRule& valid)
 {
     if (this->settings.readOnly) {
         return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
