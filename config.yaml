@@ -22,8 +22,3 @@ SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absol
 users:
   - user: bob
     password: bob
-
-trustedIPs:
-  - 1.1.1.1
-  - 2.2.2.2
-  - 3.3.3.3

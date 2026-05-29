@@ -66,7 +66,6 @@ private:
     std::atomic<bool> isFlushing;
 
     std::unordered_map<std::string, std::string> users;
-    std::vector<std::string> trustedIPs;
 };
 
 std::string sha256(const std::string& str);

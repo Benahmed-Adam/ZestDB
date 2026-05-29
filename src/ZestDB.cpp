@@ -137,7 +137,6 @@ Settings ZestDB::loadConfig()
     Settings result;
 
     this->users.clear();
-    this->trustedIPs.clear();
 
     const fs::path current_path = fs::current_path().string();
     const std::string configName = "config.yaml";
@@ -203,17 +202,6 @@ Settings ZestDB::loadConfig()
         } else {
             ZestLog(LogLevel::DEBUG, "No users found in config");
         }
-
-        if (node.contains("trustedIPs") && node["trustedIPs"].is_sequence()) {
-            for (const auto& ip_node : node["trustedIPs"]) {
-                std::string ip = ip_node.get_value<std::string>();
-                this->trustedIPs.push_back(ip);
-                ZestLog(LogLevel::DEBUG, std::format("Loaded a trusted IP address : {}", ip));
-            }
-        } else {
-            ZestLog(LogLevel::DEBUG, "No trustedIPs found in config");
-        }
-        ZestLog(LogLevel::INFO, std::format("loadConfig completed - users: {}, trustedIPs: {}", this->users.size(), this->trustedIPs.size()));
     } catch (const std::exception& e) {
         ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
         throw std::runtime_error("Failed to parse config: " + std::string(e.what()));
