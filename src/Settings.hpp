@@ -19,7 +19,7 @@ struct ResultType {
         ERROR
     };
     Code code;
-    std::string message;
+    std::string response;
     long long affectedRows = 0;
 };
 

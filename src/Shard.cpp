@@ -11,6 +11,7 @@
 
 #include "Logger.hpp"
 #include "Shard.hpp"
+#include "lib/json.hpp"
 
 namespace fs = std::filesystem;
 
@@ -247,7 +248,7 @@ ResultType Shard::getBy(ValidationRule& valid)
     std::vector<IndexEntry> entries;
     entries = this->indexManager->getAll(valid.limit);
 
-    std::ostringstream oss;
+    nlohmann::json resultArray = nlohmann::json::array();
     int matchCount = 0;
 
     for (const IndexEntry& entry : entries) {
@@ -261,7 +262,7 @@ ResultType Shard::getBy(ValidationRule& valid)
         if (valid.func(key)) {
             ZestLog(LogLevel::DEBUG, std::format("Shard::getBy - match found: {}", key));
             std::string value = this->storageManager->read(entry);
-            oss << key << ":" << value << ";";
+            resultArray.push_back(nlohmann::json::object({ { key, value } }));
             matchCount++;
             if (valid.globalMatchCount) {
                 valid.globalMatchCount->fetch_add(1);
@@ -275,7 +276,7 @@ ResultType Shard::getBy(ValidationRule& valid)
     double latency = std::chrono::duration<double, std::milli>(end - start).count();
     this->perfMonitor.addGetByStats(false, latency);
 
-    return { ResultType::Code::SUCCESS, oss.str(), matchCount };
+    return { ResultType::Code::SUCCESS, resultArray.dump(), matchCount };
 }
 
 ResultType Shard::setBy(ValidationRule& valid, const std::string& value)

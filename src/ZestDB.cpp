@@ -27,7 +27,11 @@ std::string ZestDB::responseToJson(const ResultType& resp)
 {
     json j;
     j["code"] = static_cast<unsigned int>(resp.code);
-    j["message"] = resp.message;
+    if (!resp.response.empty() && (resp.response.front() == '[' || resp.response.front() == '{')) {
+        j["response"] = json::parse(resp.response);
+    } else {
+        j["response"] = resp.response;
+    }
     j["affectedRows"] = resp.affectedRows;
     return j.dump();
 }
@@ -516,16 +520,16 @@ ResultType ZestDB::execCmd(const std::string& command)
 
     if (cmd == "g") {
         if (words.size() < 2) {
-            result.message = Messages::MISSING_KEY;
+            result.response = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->get(key);
         }
     } else if (cmd == "s") {
         if (words.size() < 2) {
-            result.message = Messages::MISSING_KEY;
+            result.response = Messages::MISSING_KEY;
         } else if (words.size() < 3) {
-            result.message = Messages::MISSING_VALUE;
+            result.response = Messages::MISSING_VALUE;
         } else {
             std::string key(words[1]);
             size_t keyPos = command.find(words[1]);
@@ -536,14 +540,14 @@ ResultType ZestDB::execCmd(const std::string& command)
         }
     } else if (cmd == "d") {
         if (words.size() < 2) {
-            result.message = Messages::MISSING_KEY;
+            result.response = Messages::MISSING_KEY;
         } else {
             std::string key(words[1]);
             result = this->del(key);
         }
     } else if (cmd == "gb") {
         if (words.size() < 3) {
-            result.message = Messages::MISSING_ARGUMENTS;
+            result.response = Messages::MISSING_ARGUMENTS;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -555,7 +559,7 @@ ResultType ZestDB::execCmd(const std::string& command)
             }
             auto [valid, validMode] = this->createValidationRule(mode, pattern);
             if (!validMode) {
-                result.message = Messages::INVALID_REGEX;
+                result.response = Messages::INVALID_REGEX;
             } else {
                 valid.limit = limit;
                 result = this->getBy(valid);
@@ -563,7 +567,7 @@ ResultType ZestDB::execCmd(const std::string& command)
         }
     } else if (cmd == "sb") {
         if (words.size() < 4) {
-            result.message = Messages::MISSING_VALUE;
+            result.response = Messages::MISSING_VALUE;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -581,14 +585,14 @@ ResultType ZestDB::execCmd(const std::string& command)
             }
 
             if (valStartIdx >= words.size()) {
-                result.message = Messages::MISSING_VALUE;
+                result.response = Messages::MISSING_VALUE;
             } else {
                 size_t valPosInCmd = command.find(words[valStartIdx]);
                 std::string value = command.substr(valPosInCmd);
 
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
                 if (!validMode) {
-                    result.message = Messages::INVALID_REGEX;
+                    result.response = Messages::INVALID_REGEX;
                 } else {
                     valid.limit = limit;
                     result = this->setBy(valid, value);
@@ -597,7 +601,7 @@ ResultType ZestDB::execCmd(const std::string& command)
         }
     } else if (cmd == "db") {
         if (words.size() < 3) {
-            result.message = Messages::MISSING_PATTERN;
+            result.response = Messages::MISSING_PATTERN;
         } else {
             std::string mode = toLowerStr(std::string(words[1]));
             std::string pattern(words[2]);
@@ -609,7 +613,7 @@ ResultType ZestDB::execCmd(const std::string& command)
             }
             auto [valid, validMode] = this->createValidationRule(mode, pattern);
             if (!validMode) {
-                result.message = Messages::INVALID_MODE;
+                result.response = Messages::INVALID_MODE;
             } else {
                 valid.limit = limit;
                 result = this->delBy(valid);
@@ -617,16 +621,16 @@ ResultType ZestDB::execCmd(const std::string& command)
         }
     } else if (cmd == "h") {
         result.code = ResultType::Code::SUCCESS;
-        result.message = this->help();
+        result.response = this->help();
     } else if (cmd == "f") {
         this->flush();
         result.code = ResultType::Code::SUCCESS;
-        result.message = Messages::FLUSH_SUCCESSFUL;
+        result.response = Messages::FLUSH_SUCCESSFUL;
     } else if (cmd == "r") {
         result = this->reloadConfig();
     } else if (cmd == "scfg") {
         if (words.size() < 3) {
-            result.message = Messages::MISSING_ARGUMENTS;
+            result.response = Messages::MISSING_ARGUMENTS;
             return result;
         }
 
@@ -639,39 +643,39 @@ ResultType ZestDB::execCmd(const std::string& command)
             try {
                 unsigned long val = std::stoul(valueStr);
                 if (val <= this->settings.MaxValueSize) {
-                    result.message = "SegSize must be greater than MaxValueSize";
+                    result.response = "SegSize must be greater than MaxValueSize";
                     return result;
                 }
                 this->settings.SegSize = val;
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid SegSize value";
+                result.response = "Invalid SegSize value";
                 return result;
             }
         } else if (param == "maxkeysize") {
             try {
                 unsigned int val = std::stoul(valueStr);
                 if (val > MAX_KEY_SIZE) {
-                    result.message = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
+                    result.response = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
                     return result;
                 }
                 this->settings.MaxKeySize = val;
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid MaxKeySize value";
+                result.response = "Invalid MaxKeySize value";
                 return result;
             }
         } else if (param == "maxvaluesize") {
             try {
                 unsigned int val = std::stoul(valueStr);
                 if (val >= this->settings.SegSize) {
-                    result.message = "MaxValueSize must be less than SegSize";
+                    result.response = "MaxValueSize must be less than SegSize";
                     return result;
                 }
                 this->settings.MaxValueSize = val;
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid MaxValueSize value";
+                result.response = "Invalid MaxValueSize value";
                 return result;
             }
         } else if (param == "cachesize") {
@@ -679,7 +683,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.CacheSize = std::stoul(valueStr);
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid CacheSize value";
+                result.response = "Invalid CacheSize value";
                 return result;
             }
         } else if (param == "compactinginterval") {
@@ -687,7 +691,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.CompactingInterval = std::stoul(valueStr);
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid CompactingInterval value";
+                result.response = "Invalid CompactingInterval value";
                 return result;
             }
         } else if (param == "flushinterval") {
@@ -695,7 +699,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.FlushInterval = std::stoul(valueStr);
                 valueSet = true;
             } catch (...) {
-                result.message = "Invalid FlushInterval value";
+                result.response = "Invalid FlushInterval value";
                 return result;
             }
         } else if (param == "networkvalidationstr") {
@@ -705,7 +709,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.NetworkValidation = std::move(testRegex);
                 valueSet = true;
             } catch (const std::regex_error& e) {
-                result.message = std::format("Invalid regex: {}", e.what());
+                result.response = std::format("Invalid regex: {}", e.what());
                 return result;
             }
         } else if (param == "isdebug") {
@@ -716,7 +720,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.isDebug = false;
                 valueSet = true;
             } else {
-                result.message = "Invalid isDebug value (use true/false or 0/1)";
+                result.response = "Invalid isDebug value (use true/false or 0/1)";
                 return result;
             }
             setLoggerDebugMode(this->settings.isDebug);
@@ -728,7 +732,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.useSSL = false;
                 valueSet = true;
             } else {
-                result.message = "Invalid useSSL value (use true/false or 0/1)";
+                result.response = "Invalid useSSL value (use true/false or 0/1)";
                 return result;
             }
         } else if (param == "jsononly") {
@@ -739,7 +743,7 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.jsonOnly = false;
                 valueSet = true;
             } else {
-                result.message = "Invalid jsonOnly value (use true/false or 0/1)";
+                result.response = "Invalid jsonOnly value (use true/false or 0/1)";
                 return result;
             }
         } else if (param == "readonly") {
@@ -750,25 +754,25 @@ ResultType ZestDB::execCmd(const std::string& command)
                 this->settings.readOnly = false;
                 valueSet = true;
             } else {
-                result.message = "Invalid readOnly value (use true/false or 0/1)";
+                result.response = "Invalid readOnly value (use true/false or 0/1)";
                 return result;
             }
         } else {
-            result.message = "Unknown parameter: " + param;
+            result.response = "Unknown parameter: " + param;
             return result;
         }
 
         if (valueSet) {
             result.code = ResultType::Code::SUCCESS;
-            result.message = Messages::UPDATE_SUCCESSFUL;
+            result.response = Messages::UPDATE_SUCCESSFUL;
             this->setConfig();
             this->shardManager->reloadSettings(this->settings);
         }
     } else if (cmd == "gcfg") {
         result.code = ResultType::Code::SUCCESS;
-        result.message = this->getConfig();
+        result.response = this->getConfig();
     } else {
-        result.message = Messages::CMD_NOT_FOUND;
+        result.response = Messages::CMD_NOT_FOUND;
     }
 
     if (!this->replaying.load()) {

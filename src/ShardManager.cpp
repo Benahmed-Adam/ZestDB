@@ -1,5 +1,6 @@
 #include "ShardManager.hpp"
 #include "Logger.hpp"
+#include "lib/json.hpp"
 #include <algorithm>
 #include <format>
 #include <future>
@@ -60,18 +61,21 @@ ResultType ShardManager::getBy(ValidationRule& valid)
         }));
     }
 
-    std::ostringstream results;
+    nlohmann::json mergedArray = nlohmann::json::array();
     long long totalMatches = 0;
     for (auto& f : futures) {
         ResultType r = f.get();
         if (r.code == ResultType::Code::SUCCESS) {
-            results << r.message;
+            nlohmann::json shardArray = nlohmann::json::parse(r.response);
+            for (auto& item : shardArray) {
+                mergedArray.push_back(std::move(item));
+            }
             totalMatches += r.affectedRows;
         }
     }
     threadPool->waitAll();
     valid.globalMatchCount = nullptr;
-    return { ResultType::Code::SUCCESS, results.str(), totalMatches };
+    return { ResultType::Code::SUCCESS, mergedArray.dump(), totalMatches };
 }
 
 ResultType ShardManager::setBy(ValidationRule& valid, const std::string& value)
