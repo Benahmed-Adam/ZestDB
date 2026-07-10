@@ -3,7 +3,7 @@ CXX = g++
 BASE_CXXFLAGS = -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -Wnon-virtual-dtor -std=c++20 -I$(SRCDIR) -Wno-deprecated-declarations
 
 SANFLAGS =
-COMMON_LDFLAGS = -lcrypto -lssl
+COMMON_LDFLAGS = -lcrypto -lssl -lzippp_static -lzip -lz -lbz2 -llzma -lzstd
 
 ifeq ($(DEBUG), 1)
     SANFLAGS = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer

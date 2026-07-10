@@ -10,8 +10,8 @@
 #include <string>
 #include <thread>
 #include <unordered_set>
-
 #include <string_view>
+#include <libzippp/libzippp.h>
 
 #include "IndexManager.hpp"
 #include "Logger.hpp"
@@ -119,6 +119,7 @@ void ZestDB::boot()
     setLoggerDebugMode(this->settings.isDebug);
 
     ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
+    ZestLog(LogLevel::DEBUG, std::format("Archive storage path : {}", this->settings.ArchiveStoragePath.string()));
     ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
     ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
@@ -181,6 +182,8 @@ Settings ZestDB::loadConfig()
         result.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
         result.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
 
+        result.ArchiveStoragePath = node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
+
         if (result.useSSL && (result.SSLCertPath == "" || result.SSLKeyPath == "")) {
             ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
             throw std::runtime_error("SSL with no cert or key");
@@ -240,7 +243,7 @@ ResultType ZestDB::reloadConfig()
         Settings oldSettings = this->settings;
         Settings s = this->loadConfig();
 
-        if (s.DbPath != oldSettings.DbPath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
+        if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
             ZestLog(LogLevel::ERROR, "Cannot change path settings during hot-reload. Paths are immutable.");
             return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are immutable. Restart the database to apply changes" };
         }
@@ -292,6 +295,7 @@ std::string ZestDB::getConfig() const
 {
     json j;
     j["DbPath"] = this->settings.DbPath.string();
+    j["ArchiveStoragePath"] = this->settings.ArchiveStoragePath.string();
     j["SegSize"] = this->settings.SegSize;
     j["MaxKeySize"] = this->settings.MaxKeySize;
     j["MaxValueSize"] = this->settings.MaxValueSize;
@@ -304,6 +308,55 @@ std::string ZestDB::getConfig() const
     j["DBPort"] = this->settings.DBPort;
     j["WebPort"] = this->settings.WebPort;
     return j.dump();
+}
+
+bool ZestDB::createArchive() {
+    std::string folder_to_zip = this->settings.DbPath.string();
+
+    if (!fs::exists(folder_to_zip) || !fs::is_directory(folder_to_zip)) {
+        ZestLog(LogLevel::ERROR, std::format("Source folder does not exist : {}", folder_to_zip));
+        return false;
+    }
+
+    try {
+        fs::create_directories(this->settings.ArchiveStoragePath);
+    } catch (const std::exception& e) {
+        ZestLog(LogLevel::ERROR, std::format("Error while creating archives folder : {}", e.what()););
+        return false;
+    }
+
+    auto now = std::chrono::system_clock::now();
+    fs::path archive_full_path = this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
+
+    libzippp::ZipArchive archive(archive_full_path.string());
+    if (!archive.open(libzippp::ZipArchive::New)) {
+        ZestLog(LogLevel::ERROR, std::format("Impossible to create the archive : {}", archive_full_path.string()));
+        return false;
+    }
+
+    for (const auto& entry : fs::recursive_directory_iterator(folder_to_zip)) {
+        if (fs::is_regular_file(entry.path())) {
+            fs::path relative_path = fs::relative(entry.path(), folder_to_zip);
+
+            std::string zip_entry_name = relative_path.generic_string();
+
+            if (!archive.addFile(zip_entry_name, entry.path().string())) {
+                ZestLog(LogLevel::ERROR, std::format("Error while adding : {}", relative_path));
+                archive.close();
+                return false;
+            }
+
+            ZestLog(LogLevel::DEBUG, std::format("Added a file to the archive : {}", zip_entry_name));
+        }
+    }
+
+    int close_result = archive.close();
+    if (close_result != LIBZIPPP_OK) {
+        ZestLog(LogLevel::ERROR, std::format("Error while saving the archive : Error code : {}", close_result));
+        return false;
+    }
+
+    return true;
 }
 
 bool ZestDB::validateToken(const std::string& username, const std::string& token) const
@@ -623,6 +676,7 @@ ResultType ZestDB::execCmd(const std::string& command)
         result.code = ResultType::Code::SUCCESS;
         result.response = this->help();
     } else if (cmd == "f") {
+        ZestLog(LogLevel::CRITICAL, this->createArchive() ? "true" : "false");
         this->flush();
         result.code = ResultType::Code::SUCCESS;
         result.response = Messages::FLUSH_SUCCESSFUL;
@@ -816,7 +870,7 @@ std::string ZestDB::help() const
     oss << "help                                   - Show this help" << "\n";
     oss << "\n";
     oss << "Config Parameters:" << "\n";
-    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), useSSL(bool), jsonOnly(bool), readOnly(bool), NetworkValidationStr(string), SSLCertPath(string), SSLKeyPath(string)" << "\n";
+    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), useSSL(bool), jsonOnly(bool), readOnly(bool), NetworkValidationStr(string)" << "\n";
     oss << "\n";
     oss << "Modes:" << "\n";
     oss << "  re  - regex" << "\n";

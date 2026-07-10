@@ -58,6 +58,8 @@ private:
     void setConfig();
     std::string getConfig() const;
 
+    bool createArchive();
+
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;
 

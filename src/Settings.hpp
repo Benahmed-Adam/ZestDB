@@ -62,6 +62,7 @@ struct Settings {
     std::filesystem::path WalPath;
     std::filesystem::path SSLCertPath;
     std::filesystem::path SSLKeyPath;
+    std::filesystem::path ArchiveStoragePath;
 
     unsigned long SegSize;
     unsigned int MaxKeySize;
