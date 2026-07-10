@@ -321,7 +321,7 @@ bool ZestDB::createArchive() {
     try {
         fs::create_directories(this->settings.ArchiveStoragePath);
     } catch (const std::exception& e) {
-        ZestLog(LogLevel::ERROR, std::format("Error while creating archives folder : {}", e.what()););
+        ZestLog(LogLevel::ERROR, std::format("Error while creating archives folder : {}", e.what()));
         return false;
     }
 
@@ -341,7 +341,7 @@ bool ZestDB::createArchive() {
             std::string zip_entry_name = relative_path.generic_string();
 
             if (!archive.addFile(zip_entry_name, entry.path().string())) {
-                ZestLog(LogLevel::ERROR, std::format("Error while adding : {}", relative_path));
+                ZestLog(LogLevel::ERROR, std::format("Error while adding : {}", relative_path.string()));
                 archive.close();
                 return false;
             }
