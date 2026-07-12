@@ -5,6 +5,8 @@
 #include <memory>
 #include <shared_mutex>
 #include <unordered_map>
+#include <thread>
+#include <condition_variable>
 
 #include "Server.hpp"
 #include "Settings.hpp"
@@ -63,11 +65,18 @@ private:
     std::unique_ptr<ShardManager> shardManager;
     std::unique_ptr<Server> socket;
 
-    std::atomic<bool> initialized;
     std::atomic<bool> replaying;
     std::atomic<bool> isFlushing;
 
     std::unordered_map<std::string, std::string> users;
+
+    std::jthread flushThread;
+    std::mutex flushThreadMtx;
+
+    std::jthread saveThread;
+    std::mutex saveThreadMtx;
+
+    std::condition_variable_any threadCV;
 };
 
 std::string sha256(const std::string& str);

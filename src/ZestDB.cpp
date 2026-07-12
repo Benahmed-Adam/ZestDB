@@ -57,8 +57,7 @@ std::string sha256(const std::string& str)
 }
 
 ZestDB::ZestDB()
-    : initialized(false)
-    , replaying(false)
+    : replaying(false)
 {
     ZestLog(LogLevel::INFO, "Initializing ZestDB...");
     this->boot();
@@ -70,15 +69,43 @@ ZestDB::ZestDB()
 
     ZestLog(LogLevel::INFO, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
-    this->initialized.store(true);
+    this->flushThread = std::jthread([this](std::stop_token stopToken) {
+        std::unique_lock<std::mutex> lock(this->flushThreadMtx);
 
-    std::thread flushThread = std::thread([this]() {
-        while (this->settings.isRunning && !this->isFlushing.load()) {
-            std::this_thread::sleep_for(std::chrono::seconds(this->settings.FlushInterval));
+        while (this->settings.isRunning && !stopToken.stop_requested()) {
+            
+            this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.FlushInterval), [this, stopToken] {
+                return stopToken.stop_requested() || !this->settings.isRunning;
+            });
+
+            if (stopToken.stop_requested() || !this->settings.isRunning) {
+                break;
+            }
+
+            lock.unlock();
             this->flush();
+            lock.lock();
         }
     });
-    flushThread.detach();
+
+    this->saveThread = std::jthread([this](std::stop_token stopToken) {
+        std::unique_lock<std::mutex> lock(this->saveThreadMtx);
+
+        while (this->settings.isRunning && !stopToken.stop_requested()) {
+            
+            this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(3), [this, stopToken] {
+                return stopToken.stop_requested() || !this->settings.isRunning;
+            });
+
+            if (stopToken.stop_requested() || !this->settings.isRunning) {
+                break;
+            }
+
+            lock.unlock();
+            ZestLog(LogLevel::DEBUG, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
+            lock.lock();
+        }
+    });
 
     if (this->settings.useSSL) {
         this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(), this->settings.SSLKeyPath.string().c_str());
@@ -109,8 +136,22 @@ ZestDB::ZestDB()
 
 ZestDB::~ZestDB()
 {
-    if (this->settings.isRunning)
-        this->stop();
+    if (this->settings.isRunning) this->stop();
+}
+
+void ZestDB::stop()
+{
+    ZestLog(LogLevel::INFO, "Exiting ZestDB...");
+
+    this->settings.isRunning = false;
+
+    this->ioCtx.stop();
+    if (this->srv)
+        this->srv->stop();
+
+    this->shardManager->stop();
+
+    this->threadCV.notify_all();
 }
 
 void ZestDB::boot()
@@ -850,19 +891,6 @@ ResultType ZestDB::execCmd(const std::string& command)
     }
 
     return result;
-}
-
-void ZestDB::stop()
-{
-    ZestLog(LogLevel::INFO, "Exiting ZestDB...");
-
-    this->settings.isRunning = false;
-
-    this->ioCtx.stop();
-    if (this->srv)
-        this->srv->stop();
-
-    this->shardManager->stop();
 }
 
 std::string ZestDB::help() const
