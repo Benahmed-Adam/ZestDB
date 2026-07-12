@@ -11,7 +11,7 @@ WebPort: 1237
 
 NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
 
-isDebug: false # Degug mode for the logger
+isDebug: true # Degug mode for the logger
 jsonOnly: false
 readOnly: false
 
@@ -20,6 +20,8 @@ SSLCertPath: ./cert.pem # Path to the generated certification file, can be relat
 SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 
 ArchiveStoragePath: /home/test/DBArchives
+ArchiveCreationDelay: 10 # In seconds
+AutoArchiveSaving: true
 
 users:
   - user: bob

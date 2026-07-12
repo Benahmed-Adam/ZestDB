@@ -76,6 +76,9 @@ struct Settings {
     std::regex NetworkValidation;
     std::string NetworkValidationStr;
 
+    unsigned int ArchiveCreationDelay;
+
+    bool AutoArchiveSaving;
     bool isDebug;
     bool useSSL;
     bool isRunning = true;

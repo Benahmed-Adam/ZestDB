@@ -93,7 +93,7 @@ ZestDB::ZestDB()
 
         while (this->settings.isRunning && !stopToken.stop_requested()) {
             
-            this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(3), [this, stopToken] {
+            this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] {
                 return stopToken.stop_requested() || !this->settings.isRunning;
             });
 
@@ -101,9 +101,11 @@ ZestDB::ZestDB()
                 break;
             }
 
-            lock.unlock();
-            ZestLog(LogLevel::DEBUG, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
-            lock.lock();
+            if (this->settings.AutoArchiveSaving) {
+                lock.unlock();
+                ZestLog(LogLevel::INFO, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
+                lock.lock();
+            }
         }
     });
 
@@ -161,6 +163,8 @@ void ZestDB::boot()
 
     ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
     ZestLog(LogLevel::DEBUG, std::format("Archive storage path : {}", this->settings.ArchiveStoragePath.string()));
+    ZestLog(LogLevel::DEBUG, std::format("ArchiveCreationDelay : {}", this->settings.ArchiveCreationDelay));
+    ZestLog(LogLevel::DEBUG, std::format("AutoArchiveSaving : {}", this->settings.AutoArchiveSaving));
     ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
     ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
     ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
@@ -224,6 +228,8 @@ Settings ZestDB::loadConfig()
         result.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
 
         result.ArchiveStoragePath = node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
+        result.ArchiveCreationDelay = node["ArchiveCreationDelay"].get_value_or<unsigned int>(3600);
+        result.AutoArchiveSaving = node["AutoArchiveSaving"].get_value_or<bool>(true);
 
         if (result.useSSL && (result.SSLCertPath == "" || result.SSLKeyPath == "")) {
             ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
@@ -297,6 +303,7 @@ ResultType ZestDB::reloadConfig()
         this->settings = std::move(s);
         setLoggerDebugMode(this->settings.isDebug);
         this->shardManager->reloadSettings(this->settings);
+        this->threadCV.notify_all();
 
         return { ResultType::Code::SUCCESS, "Reload successful !" };
     } catch (const std::exception& e) {
@@ -329,6 +336,8 @@ void ZestDB::setConfig()
     node["isDebug"] = this->settings.isDebug;
     node["jsonOnly"] = this->settings.jsonOnly;
     node["readOnly"] = this->settings.readOnly;
+    node["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
+    node["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
 
     std::ofstream outFile(configPath);
     outFile << node;
@@ -349,8 +358,10 @@ std::string ZestDB::getConfig() const
     j["CompactingInterval"] = this->settings.CompactingInterval;
     j["FlushInterval"] = this->settings.FlushInterval;
     j["isDebug"] = this->settings.isDebug;
-    j["isJson"] = this->settings.jsonOnly;
+    j["jsonOnly"] = this->settings.jsonOnly;
     j["readOnly"] = this->settings.readOnly;
+    j["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
+    j["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
     j["DBPort"] = this->settings.DBPort;
     j["WebPort"] = this->settings.WebPort;
     return j.dump();
@@ -856,6 +867,25 @@ ResultType ZestDB::execCmd(const std::string& command)
                 result.response = "Invalid readOnly value (use true/false or 0/1)";
                 return result;
             }
+        } else if (param == "archivecreationdelay") {
+            try {
+                this->settings.ArchiveCreationDelay = std::stoul(valueStr);
+                valueSet = true;
+            } catch (...) {
+                result.response = "Invalid ArchiveCreationDelay value";
+                return result;
+            }
+        } else if (param == "autoarchivesaving") {
+            if (valueStr == "true" || valueStr == "1") {
+                this->settings.AutoArchiveSaving = true;
+                valueSet = true;
+            } else if (valueStr == "false" || valueStr == "0") {
+                this->settings.AutoArchiveSaving = false;
+                valueSet = true;
+            } else {
+                result.response = "Invalid AutoArchiveSaving value (use true/false or 0/1)";
+                return result;
+            }
         } else {
             result.response = "Unknown parameter: " + param;
             return result;
@@ -910,7 +940,7 @@ std::string ZestDB::help() const
     oss << "help                                   - Show this help" << "\n";
     oss << "\n";
     oss << "Config Parameters:" << "\n";
-    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), NetworkValidationStr(string)" << "\n";
+    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), NetworkValidationStr(string), ArchiveCreationDelay(int), AutoArchiveSaving(bool)" << "\n";
     oss << "\n";
     oss << "Modes:" << "\n";
     oss << "  re  - regex" << "\n";
