@@ -50,7 +50,6 @@ private:
     std::unique_ptr<Compactor> compactor;
     std::unique_ptr<WAL> wal;
 
-    std::atomic<bool> initialized;
     std::atomic<bool> replaying;
     std::atomic<bool> stopRequested;
     std::atomic<bool> stopped;

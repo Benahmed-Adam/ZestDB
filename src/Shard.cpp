@@ -18,7 +18,6 @@ namespace fs = std::filesystem;
 Shard::Shard(Settings& baseSettings, int shardIdNum)
     : settings(baseSettings)
     , shardId(shardIdNum)
-    , initialized(false)
     , replaying(false)
     , stopRequested(false)
     , stopped(false)
@@ -97,7 +96,6 @@ void Shard::boot()
         this->compactor->run(*this->indexManager, *this->storageManager, this->stopRequested);
     });
 
-    this->initialized.store(true);
     cacheFuture.wait();
     cacheThread.detach();
     compactorThread.detach();
@@ -105,11 +103,6 @@ void Shard::boot()
 
 void Shard::fillCache()
 {
-    while (!this->initialized.load()) {
-        ZestLog(LogLevel::WARNING, std::format("Shard::fillCache - shard {} not initialized yet, waiting...", shardId));
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
     ZestLog(LogLevel::INFO, std::format("Filling up the cache for shard {}...", shardId));
 
     std::vector<IndexEntry> entries = this->indexManager->getAll();
