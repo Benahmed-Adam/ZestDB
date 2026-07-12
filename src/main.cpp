@@ -76,7 +76,7 @@ int main(int argc, char** argv)
         t.detach();
     }
 
-    std::thread t(cmd, &db, &work);
+    std::thread cmdThread(cmd, &db, &work);
 
     std::thread ioThread([&db]() {
         db.ioCtx.run();
@@ -84,7 +84,7 @@ int main(int argc, char** argv)
 
     db.srv->listen("0.0.0.0", db.settings.WebPort);
 
-    t.join();
+    cmdThread.join();
     ioThread.join();
 
     return 0;

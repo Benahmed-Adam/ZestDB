@@ -30,19 +30,19 @@ int ShardManager::getShardId(const std::string& key) const
 
 ResultType ShardManager::get(const std::string& key)
 {
-    auto shardId = this->getShardId(key);
+    int shardId = this->getShardId(key);
     return this->shards[static_cast<size_t>(shardId)]->get(key);
 }
 
 ResultType ShardManager::set(const std::string& key, const std::string& value)
 {
-    auto shardId = this->getShardId(key);
+    int shardId = this->getShardId(key);
     return this->shards[static_cast<size_t>(shardId)]->set(key, value);
 }
 
 ResultType ShardManager::del(const std::string& key)
 {
-    auto shardId = this->getShardId(key);
+    int shardId = this->getShardId(key);
     return this->shards[static_cast<size_t>(shardId)]->del(key);
 }
 

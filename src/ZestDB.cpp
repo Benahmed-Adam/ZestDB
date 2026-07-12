@@ -245,7 +245,12 @@ ResultType ZestDB::reloadConfig()
 
         if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
             ZestLog(LogLevel::ERROR, "Cannot change path settings during hot-reload. Paths are immutable.");
-            return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are immutable. Restart the database to apply changes" };
+            return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are immutable. Restart the database to apply changes." };
+        }
+
+        if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort) {
+            ZestLog(LogLevel::ERROR, "Cannot change the ports during hot-reload.");
+            return { ResultType::Code::ERROR, "Cannot change the ports settongs during hot-reload. Restart the database to apply changes." };
         }
 
         this->settings = std::move(s);
@@ -676,7 +681,6 @@ ResultType ZestDB::execCmd(const std::string& command)
         result.code = ResultType::Code::SUCCESS;
         result.response = this->help();
     } else if (cmd == "f") {
-        ZestLog(LogLevel::CRITICAL, this->createArchive() ? "true" : "false");
         this->flush();
         result.code = ResultType::Code::SUCCESS;
         result.response = Messages::FLUSH_SUCCESSFUL;
@@ -825,6 +829,14 @@ ResultType ZestDB::execCmd(const std::string& command)
     } else if (cmd == "gcfg") {
         result.code = ResultType::Code::SUCCESS;
         result.response = this->getConfig();
+    } else if (cmd == "save"){
+        if (this->createArchive()) {
+            result.code = ResultType::Code::SUCCESS;
+            result.response = "Archive successfully created.";
+        } else {
+            result.response = "Failed to create the archive";
+            return result;
+        }
     } else {
         result.response = Messages::CMD_NOT_FOUND;
     }
@@ -870,7 +882,7 @@ std::string ZestDB::help() const
     oss << "help                                   - Show this help" << "\n";
     oss << "\n";
     oss << "Config Parameters:" << "\n";
-    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), useSSL(bool), jsonOnly(bool), readOnly(bool), NetworkValidationStr(string)" << "\n";
+    oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), NetworkValidationStr(string)" << "\n";
     oss << "\n";
     oss << "Modes:" << "\n";
     oss << "  re  - regex" << "\n";
