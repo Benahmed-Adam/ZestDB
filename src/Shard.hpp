@@ -11,6 +11,8 @@
 #include "StorageManager.hpp"
 #include "WAL.hpp"
 
+namespace Zest {
+
 class Shard {
 public:
     Shard(Settings& baseSettings, int shardIdNum);
@@ -55,3 +57,5 @@ private:
     std::atomic<bool> stopped;
     std::shared_mutex readMtx;
 };
+
+} // namespace Zest

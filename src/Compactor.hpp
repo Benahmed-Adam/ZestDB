@@ -5,6 +5,8 @@
 #include "IndexManager.hpp"
 #include "StorageManager.hpp"
 
+namespace Zest {
+
 class Compactor {
 public:
     Compactor(const Settings& set);
@@ -14,3 +16,5 @@ public:
 private:
     const Settings& settings;
 };
+
+} // namespace Zest

@@ -9,6 +9,8 @@
 #include <variant>
 #include <vector>
 
+namespace Zest {
+
 using asio::ip::tcp;
 
 class ZestDB;
@@ -49,3 +51,5 @@ private:
     tcp::acceptor acceptor_;
     ZestDB& db_;
 };
+
+} // namespace Zest

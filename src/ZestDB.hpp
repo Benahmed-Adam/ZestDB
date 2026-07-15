@@ -16,6 +16,8 @@
 
 #define NUM_SHARDS 32
 
+namespace Zest {
+
 struct CreationValidationRuleResult {
     ValidationRule rule;
     bool result;
@@ -80,3 +82,5 @@ private:
 };
 
 std::string sha256(const std::string& str);
+
+} // namespace Zest

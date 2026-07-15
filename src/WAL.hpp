@@ -8,6 +8,8 @@
 
 #include "Settings.hpp"
 
+namespace Zest {
+
 struct WalEntry {
     std::string cmd;
     std::chrono::milliseconds timestamp;
@@ -26,3 +28,5 @@ private:
     std::mutex mtx;
     bool canClear;
 };
+
+} // namespace Zest

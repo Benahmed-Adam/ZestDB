@@ -10,6 +10,8 @@
 
 #include "Settings.hpp"
 
+namespace Zest {
+
 static constexpr size_t MAX_KEY_SIZE = 256;
 
 struct IndexEntry {
@@ -45,3 +47,5 @@ private:
 
     void loadIndexIntoMemory();
 };
+
+} // namespace Zest

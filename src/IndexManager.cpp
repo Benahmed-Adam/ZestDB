@@ -3,6 +3,8 @@
 #include <chrono>
 #include <format>
 
+namespace Zest {
+
 IndexManager::IndexManager(Settings& set)
     : settings(set)
     , canFlush(false)
@@ -241,3 +243,5 @@ void IndexManager::flush()
 
     ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing skipped, the index is not ready to be flushed");
 }
+
+} // namespace Zest

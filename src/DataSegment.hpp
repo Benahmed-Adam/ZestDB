@@ -7,6 +7,8 @@
 
 #include "Settings.hpp"
 
+namespace Zest {
+
 class DataSegment {
 public:
     DataSegment(Settings& set, int segmentId);
@@ -29,3 +31,5 @@ private:
 
     bool canFlush;
 };
+
+} // namespace Zest

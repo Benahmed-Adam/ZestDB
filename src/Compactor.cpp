@@ -6,6 +6,8 @@
 #include "Compactor.hpp"
 #include "Logger.hpp"
 
+namespace Zest {
+
 Compactor::Compactor(const Settings& set)
     : settings(set)
 {
@@ -50,3 +52,5 @@ void Compactor::run(IndexManager& indexManager, StorageManager& storageManager, 
     }
     ZestLog(LogLevel::INFO, "Stopping the compactor...");
 }
+
+} // namespace Zest

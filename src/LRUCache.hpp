@@ -7,6 +7,8 @@
 
 #include "IndexManager.hpp"
 
+namespace Zest {
+
 struct CacheEntry {
     IndexEntry index;
     std::string value;
@@ -29,3 +31,6 @@ private:
     std::unordered_map<std::string, std::pair<CacheEntry, MapIter>> map;
     std::mutex mtx;
 };
+
+} // namespace Zest
+

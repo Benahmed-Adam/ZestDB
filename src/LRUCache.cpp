@@ -2,6 +2,8 @@
 #include "Logger.hpp"
 #include <format>
 
+namespace Zest {
+
 LRUCache::LRUCache(unsigned int cap)
     : capacity(cap)
 {
@@ -69,3 +71,5 @@ void LRUCache::remove(const std::string& key)
         ZestLog(LogLevel::DEBUG, "LRUCache::remove - key removed");
     }
 }
+
+} // namespace Zest

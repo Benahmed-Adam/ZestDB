@@ -4,6 +4,8 @@
 #include "Logger.hpp"
 #include "ThreadPool.hpp"
 
+namespace Zest {
+
 ThreadPool::ThreadPool(size_t numThreads)
     : stopFlag(false)
     , activeTasks(0)
@@ -69,3 +71,5 @@ ThreadPool::~ThreadPool()
         worker.join();
     }
 }
+
+} // namespace Zest

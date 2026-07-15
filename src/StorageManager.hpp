@@ -11,6 +11,8 @@
 #include "IndexManager.hpp"
 #include "Settings.hpp"
 
+namespace Zest {
+    
 class StorageManager {
 public:
     StorageManager(Settings& set);
@@ -27,3 +29,5 @@ private:
     std::mutex mtx;
     Settings& settings;
 };
+
+} // namespace Zest

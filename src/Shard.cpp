@@ -13,6 +13,8 @@
 #include "Shard.hpp"
 #include "lib/json.hpp"
 
+namespace Zest {
+
 namespace fs = std::filesystem;
 
 Shard::Shard(Settings& baseSettings, int shardIdNum)
@@ -430,3 +432,5 @@ void Shard::reloadSettings(Settings& set)
     this->settings.IndexPath = indexPath;
     this->settings.WalPath = walPath;
 }
+
+} // namespace Zest

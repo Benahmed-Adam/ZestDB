@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 
+namespace Zest {
+    
 class ThreadPool {
 public:
     explicit ThreadPool(size_t numThreads);
@@ -49,3 +51,5 @@ std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F&& task)
     this->condition.notify_one();
     return result;
 }
+
+} // namespace Zest

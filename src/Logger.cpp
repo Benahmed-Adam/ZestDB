@@ -4,6 +4,8 @@
 
 #include "Logger.hpp"
 
+namespace Zest {
+
 static bool isDebug = true;
 
 void setLoggerDebugMode(bool enabled)
@@ -65,3 +67,5 @@ void ZestLog(LogLevel level, const std::string& message)
 
     std::cout << logEntry.str();
 }
+
+} // namespace Zest

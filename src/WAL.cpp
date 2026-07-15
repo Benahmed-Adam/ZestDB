@@ -4,6 +4,8 @@
 #include <format>
 #include <iostream>
 
+namespace Zest {
+
 WAL::WAL(const std::filesystem::path& walPath)
     : canClear(true)
 {
@@ -97,3 +99,5 @@ std::vector<WalEntry> WAL::getCmds()
     this->wal.seekg(0, std::ios::end);
     return res;
 }
+
+} // namespace Zest

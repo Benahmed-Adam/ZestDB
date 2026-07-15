@@ -1,5 +1,7 @@
 #include "PerfMonitoring.hpp"
 
+namespace Zest {
+
 void Stats::computeAverages()
 {
     if (this->nbRequests > 0) {
@@ -101,3 +103,6 @@ void PerfMonitoring::addDelByStats(bool isCacheMiss, double latency)
         this->dbStats.nbCacheMisses++;
     }
 }
+
+} // namespace Zest
+

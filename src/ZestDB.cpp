@@ -19,6 +19,8 @@
 #include "lib/json.hpp"
 #include "lib/node.hpp"
 
+namespace Zest {
+
 namespace fs = std::filesystem;
 
 using json = nlohmann::json;
@@ -90,12 +92,21 @@ ZestDB::ZestDB()
 
     this->saveThread = std::jthread([this](std::stop_token stopToken) {
         std::unique_lock<std::mutex> lock(this->saveThreadMtx);
+        // check le dernier fichier zip crée et récupérer sa date de création
+        // bool a = true;
+        // unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
+        // this->settings.ArchiveCreationDelay = archiveCreationDelay - le temps depuis le dernier zip créé
 
         while (this->settings.isRunning && !stopToken.stop_requested()) {
-            
+
             this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] {
                 return stopToken.stop_requested() || !this->settings.isRunning;
             });
+
+            // if (a) {
+            //     this->settings.ArchiveCreationDelay = archiveCreationDelay;
+            //     a = false;
+            // }
 
             if (stopToken.stop_requested() || !this->settings.isRunning) {
                 break;
@@ -978,3 +989,5 @@ void ZestDB::replayWAL()
     });
     this->replaying.store(false);
 }
+
+} // namespace Zest

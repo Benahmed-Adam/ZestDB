@@ -6,6 +6,8 @@
 #include "Logger.hpp"
 #include "StorageManager.hpp"
 
+namespace Zest {
+
 StorageManager::StorageManager(Settings& set)
     : settings(set)
 {
@@ -130,3 +132,5 @@ void StorageManager::flush()
     }
     ZestLog(LogLevel::DEBUG, "Storagemanager::flush - DataSegments successfully flushed");
 }
+
+} // namespace Zest

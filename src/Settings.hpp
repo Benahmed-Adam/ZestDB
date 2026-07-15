@@ -7,6 +7,8 @@
 #include <regex>
 #include <string>
 
+namespace Zest {
+
 struct ValidationRule {
     std::function<bool(const std::string&)> func;
     unsigned int limit = UINT_MAX;
@@ -85,3 +87,5 @@ struct Settings {
     bool jsonOnly;
     bool readOnly;
 };
+
+} // namespace Zest

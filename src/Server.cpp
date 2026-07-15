@@ -5,6 +5,8 @@
 #include <format>
 #include <istream>
 
+namespace Zest {
+
 Session::Session(ZestStream stream, ZestDB& db)
     : stream_(std::move(stream))
     , db_(db)
@@ -212,3 +214,5 @@ void Server::do_accept()
         this->do_accept();
     });
 }
+
+} // namespace Zest

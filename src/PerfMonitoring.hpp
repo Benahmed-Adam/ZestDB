@@ -2,6 +2,8 @@
 
 #include "lib/json.hpp"
 
+namespace Zest {
+
 using json = nlohmann::json;
 
 struct Stats {
@@ -34,3 +36,5 @@ private:
     Stats sbStats;
     Stats dbStats;
 };
+
+} // namespace Zest

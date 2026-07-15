@@ -8,7 +8,7 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
-void populate(ZestDB* db)
+void populate(Zest::ZestDB* db)
 {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -22,10 +22,10 @@ void populate(ZestDB* db)
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
 
-    ZestLog(LogLevel::INFO, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
+    Zest::ZestLog(Zest::LogLevel::INFO, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
-void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard)
+void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard)
 {
     std::string line;
     while (db->settings.isRunning) {
@@ -49,14 +49,14 @@ void cmd(ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>*
             break;
         } else {
             auto resp = db->execCmd(line);
-            std::cout << ZestDB::responseToJson(resp) << std::endl;
+            std::cout << Zest::ZestDB::responseToJson(resp) << std::endl;
         }
     }
 }
 
 int main(int argc, char** argv)
 {
-    ZestDB db;
+    Zest::ZestDB db;
 
     auto work = asio::make_work_guard(db.ioCtx);
 
@@ -64,10 +64,10 @@ int main(int argc, char** argv)
 
     signals.async_wait([&](const asio::error_code& error, int) {
         if (!error) {
-            ZestLog(LogLevel::WARNING, "Interrupt signal detected, exiting...");
+            Zest::ZestLog(Zest::LogLevel::WARNING, "Interrupt signal detected, exiting...");
             work.reset();
             db.stop();
-            ZestLog(LogLevel::WARNING, "Press Enter to quit");
+            Zest::ZestLog(Zest::LogLevel::WARNING, "Press Enter to quit");
         }
     });
 

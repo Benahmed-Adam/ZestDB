@@ -8,6 +8,8 @@
 #include "Shard.hpp"
 #include "ThreadPool.hpp"
 
+namespace Zest {
+
 class ShardManager {
 public:
     ShardManager(Settings& baseSettings, int numShardsCount);
@@ -41,3 +43,5 @@ private:
 
     static constexpr auto hashFunction = std::hash<std::string> {};
 };
+
+} // namespace Zest

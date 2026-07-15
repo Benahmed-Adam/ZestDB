@@ -2,6 +2,8 @@
 
 #include <string>
 
+namespace Zest {
+
 enum class LogLevel {
     INFO,
     DEBUG,
@@ -15,3 +17,5 @@ std::string levelToString(LogLevel level);
 
 void ZestLog(LogLevel level, const std::string& message);
 void setLoggerDebugMode(bool enabled);
+
+} // namespace Zest

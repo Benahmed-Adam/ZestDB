@@ -7,6 +7,8 @@
 #include <regex>
 #include <thread>
 
+namespace Zest {
+
 ShardManager::ShardManager(Settings& baseSettings, int numShardsCount)
     : settings(baseSettings)
     , numShards(numShardsCount)
@@ -195,3 +197,5 @@ void ShardManager::reloadSettings(Settings& set)
         shard->reloadSettings(set);
     }
 }
+
+} // namespace Zest

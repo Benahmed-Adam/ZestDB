@@ -3,6 +3,8 @@
 #include <chrono>
 #include <format>
 
+namespace Zest {
+
 DataSegment::DataSegment(Settings& set, int id)
     : segmentId(id)
     , currentOffset(0)
@@ -147,3 +149,5 @@ void DataSegment::flush()
 
     ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing skipped, the segment is not ready to be flushed");
 }
+
+} // namespace Zest
