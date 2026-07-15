@@ -14,7 +14,8 @@ namespace Zest {
 
     static constexpr size_t MAX_KEY_SIZE = 256;
 
-    struct IndexEntry {
+    struct IndexEntry
+    {
         char key[MAX_KEY_SIZE];
         int segmentId;
         unsigned long offset;
@@ -22,14 +23,15 @@ namespace Zest {
         bool isTombstone;
     };
 
-    class IndexManager {
+    class IndexManager
+    {
     public:
-        IndexManager(Settings& set);
+        IndexManager(Settings &set);
         ~IndexManager();
 
-        IndexEntry search(const std::string& key);
-        void update(const std::string& key, const IndexEntry& entry);
-        void insert(const IndexEntry& entry);
+        IndexEntry search(const std::string &key);
+        void update(const std::string &key, const IndexEntry &entry);
+        void insert(const IndexEntry &entry);
         std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX);
         std::vector<IndexEntry> compact();
         void flush();
@@ -38,7 +40,7 @@ namespace Zest {
         std::filesystem::path indexPath;
         std::fstream index;
         std::shared_mutex mtx;
-        Settings& settings;
+        Settings &settings;
 
         std::unordered_map<std::string, std::streamoff> memoryTree;
         std::vector<std::streamoff> tombstoneOffsets;

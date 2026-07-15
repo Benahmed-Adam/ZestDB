@@ -1,19 +1,20 @@
+#include "Compactor.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <format>
 #include <thread>
 
-#include "Compactor.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
 
-    Compactor::Compactor(const Settings& set)
+    Compactor::Compactor(const Settings &set)
         : settings(set)
     {
     }
 
-    void Compactor::run(IndexManager& indexManager, StorageManager& storageManager, std::atomic<bool>& stopFlag)
+    void Compactor::run(IndexManager &indexManager, StorageManager &storageManager, std::atomic<bool> &stopFlag)
     {
         ZestLog(LogLevel::INFO, "Starting the compactor...");
 
@@ -36,9 +37,10 @@ namespace Zest {
             }
 
             std::vector<int> usedSegmentIds;
-            for (const auto& entry : entries) {
+            for (const auto &entry : entries) {
                 if (!entry.isTombstone && entry.segmentId != -1) {
-                    if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) == usedSegmentIds.end()) {
+                    if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) ==
+                        usedSegmentIds.end()) {
                         usedSegmentIds.push_back(entry.segmentId);
                     }
                 }

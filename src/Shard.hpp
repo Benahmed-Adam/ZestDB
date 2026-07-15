@@ -13,29 +13,30 @@
 
 namespace Zest {
 
-    class Shard {
+    class Shard
+    {
     public:
-        Shard(Settings& baseSettings, int shardIdNum);
+        Shard(Settings &baseSettings, int shardIdNum);
         ~Shard();
 
-        ResultType get(const std::string& key);
-        ResultType set(const std::string& key, const std::string& value);
-        ResultType del(const std::string& key);
+        ResultType get(const std::string &key);
+        ResultType set(const std::string &key, const std::string &value);
+        ResultType del(const std::string &key);
 
-        ResultType getBy(ValidationRule& valid);
-        ResultType setBy(ValidationRule& valid, const std::string& value);
-        ResultType delBy(ValidationRule& valid);
+        ResultType getBy(ValidationRule &valid);
+        ResultType setBy(ValidationRule &valid, const std::string &value);
+        ResultType delBy(ValidationRule &valid);
 
         void flush();
         void stop();
 
         int getShardId() const { return this->shardId; }
 
-        PerfMonitoring& getPerfMonitoring() { return this->perfMonitor; }
-        WAL& getWAL() { return *this->wal; };
-        StorageManager& getStorageManager() { return *this->storageManager; }
+        PerfMonitoring &getPerfMonitoring() { return this->perfMonitor; }
+        WAL &getWAL() { return *this->wal; };
+        StorageManager &getStorageManager() { return *this->storageManager; }
 
-        void reloadSettings(Settings& set);
+        void reloadSettings(Settings &set);
 
         std::unique_ptr<IndexManager> indexManager;
         Settings settings;

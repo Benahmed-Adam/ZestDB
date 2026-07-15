@@ -10,16 +10,18 @@
 
 namespace Zest {
 
-    struct WalEntry {
+    struct WalEntry
+    {
         std::string cmd;
         std::chrono::milliseconds timestamp;
     };
 
-    class WAL {
+    class WAL
+    {
     public:
-        WAL(const std::filesystem::path& walPath);
+        WAL(const std::filesystem::path &walPath);
         void clear();
-        void append(const std::string& cmd);
+        void append(const std::string &cmd);
         std::vector<WalEntry> getCmds();
 
     private:

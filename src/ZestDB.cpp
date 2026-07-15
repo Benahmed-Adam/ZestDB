@@ -1,3 +1,5 @@
+#include "ZestDB.hpp"
+
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -15,7 +17,6 @@
 
 #include "IndexManager.hpp"
 #include "Logger.hpp"
-#include "ZestDB.hpp"
 #include "lib/json.hpp"
 #include "lib/node.hpp"
 
@@ -25,7 +26,7 @@ namespace Zest {
 
     using json = nlohmann::json;
 
-    std::string ZestDB::responseToJson(const ResultType& resp)
+    std::string ZestDB::responseToJson(const ResultType &resp)
     {
         json j;
         j["code"] = static_cast<unsigned int>(resp.code);
@@ -38,10 +39,10 @@ namespace Zest {
         return j.dump();
     }
 
-    std::string sha256(const std::string& str)
+    std::string sha256(const std::string &str)
     {
-        EVP_MD_CTX* context = EVP_MD_CTX_new();
-        const EVP_MD* md = EVP_sha256();
+        EVP_MD_CTX *context = EVP_MD_CTX_new();
+        const EVP_MD *md = EVP_sha256();
         unsigned char hash[EVP_MAX_MD_SIZE];
         unsigned int lengthOfHash = 0;
 
@@ -76,9 +77,9 @@ namespace Zest {
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.FlushInterval), [this, stopToken] {
-                    return stopToken.stop_requested() || !this->settings.isRunning;
-                });
+                this->threadCV.wait_for(
+                    lock, stopToken, std::chrono::seconds(this->settings.FlushInterval),
+                    [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
@@ -92,20 +93,21 @@ namespace Zest {
 
         this->saveThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->saveThreadMtx);
-            // check le dernier fichier zip crée et récupérer sa date de création
-            // bool a = true;
-            // unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
-            // this->settings.ArchiveCreationDelay = archiveCreationDelay - le temps depuis le dernier zip créé
+            // check le dernier fichier zip crée et récupérer sa date de
+            // création bool a = true; unsigned int archiveCreationDelay =
+            // this->settings.ArchiveCreationDelay;
+            // this->settings.ArchiveCreationDelay = archiveCreationDelay - le
+            // temps depuis le dernier zip créé
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] {
-                    return stopToken.stop_requested() || !this->settings.isRunning;
-                });
+                this->threadCV.wait_for(
+                    lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay),
+                    [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 // if (a) {
-                //     this->settings.ArchiveCreationDelay = archiveCreationDelay;
-                //     a = false;
+                //     this->settings.ArchiveCreationDelay =
+                //     archiveCreationDelay; a = false;
                 // }
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
@@ -114,34 +116,36 @@ namespace Zest {
 
                 if (this->settings.AutoArchiveSaving) {
                     lock.unlock();
-                    ZestLog(LogLevel::INFO, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
+                    ZestLog(LogLevel::INFO,
+                            this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
                     lock.lock();
                 }
             }
         });
 
         if (this->settings.useSSL) {
-            this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(), this->settings.SSLKeyPath.string().c_str());
+            this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(),
+                                                             this->settings.SSLKeyPath.string().c_str());
             ZestLog(LogLevel::INFO, "Server mode: Encrypted");
         } else {
             this->srv = std::make_unique<httplib::Server>();
             ZestLog(LogLevel::INFO, "Server mode: Plain");
         }
 
-        this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
+        this->srv->Get("/", [this](const httplib::Request &, httplib::Response &res) {
             try {
                 res.status = 200;
 
                 json result = json::object();
 
-                const auto& shards = this->shardManager->getShards();
+                const auto &shards = this->shardManager->getShards();
                 for (size_t i = 0; i < shards.size(); ++i) {
                     std::string shardKey = "shard" + std::to_string(i);
                     result["stats"][shardKey] = shards[i]->getPerfMonitoring().getPerformances();
                 }
 
                 res.set_content(result.dump(), "application/json");
-            } catch (const std::exception& e) {
+            } catch (const std::exception &e) {
                 ZestLog(LogLevel::CRITICAL, e.what());
             }
         });
@@ -239,7 +243,8 @@ namespace Zest {
             result.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
             result.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
 
-            result.ArchiveStoragePath = node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
+            result.ArchiveStoragePath =
+                node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
             result.ArchiveCreationDelay = node["ArchiveCreationDelay"].get_value_or<unsigned int>(3600);
             result.AutoArchiveSaving = node["AutoArchiveSaving"].get_value_or<bool>(true);
 
@@ -251,35 +256,39 @@ namespace Zest {
             if (!result.NetworkValidationStr.empty()) {
                 try {
                     result.NetworkValidation = std::regex(result.NetworkValidationStr);
-                } catch (const std::regex_error& e) {
+                } catch (const std::regex_error &e) {
                     ZestLog(LogLevel::CRITICAL, "Invalid NetworkValidation regex: " + std::string(e.what()));
                     throw std::runtime_error("Invalid NetworkValidation regex");
                 }
             }
 
             if (node.contains("users") && node["users"].is_sequence()) {
-                for (const auto& user_node : node["users"]) {
+                for (const auto &user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
                     std::string password = user_node["password"].get_value<std::string>();
 
                     this->users[username] = sha256(username + password);
-                    ZestLog(LogLevel::DEBUG, std::format("Loaded user: {} with token: {}", username, this->users[username]));
+                    ZestLog(LogLevel::DEBUG,
+                            std::format("Loaded user: {} with token: {}", username, this->users[username]));
                 }
             } else {
                 ZestLog(LogLevel::DEBUG, "No users found in config");
             }
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
             throw std::runtime_error("Failed to parse config: " + std::string(e.what()));
         }
 
         if (result.MaxValueSize >= result.SegSize) {
-            ZestLog(LogLevel::CRITICAL, std::format("MaxValueSize is higher than SegSize ! MaxValueSize : {} | SegSize : {}", result.MaxValueSize, result.SegSize));
+            ZestLog(LogLevel::CRITICAL, std::format("MaxValueSize is higher than SegSize ! "
+                                                    "MaxValueSize : {} | SegSize : {}",
+                                                    result.MaxValueSize, result.SegSize));
             throw std::runtime_error("MaxValueSize >= SegSize");
         }
 
         if (result.MaxKeySize > MAX_KEY_SIZE) {
-            ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", result.MaxKeySize, MAX_KEY_SIZE));
+            ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...",
+                                                   result.MaxKeySize, MAX_KEY_SIZE));
             result.MaxKeySize = MAX_KEY_SIZE;
         }
 
@@ -302,14 +311,19 @@ namespace Zest {
             Settings oldSettings = this->settings;
             Settings s = this->loadConfig();
 
-            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
-                ZestLog(LogLevel::ERROR, "Cannot change path settings during hot-reload. Paths are immutable.");
-                return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are immutable. Restart the database to apply changes." };
+            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath ||
+                s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath ||
+                s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
+                ZestLog(LogLevel::ERROR, "Cannot change path settings during "
+                                         "hot-reload. Paths are immutable.");
+                return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are "
+                                                  "immutable. Restart the database to apply changes." };
             }
 
             if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort) {
                 ZestLog(LogLevel::ERROR, "Cannot change the ports during hot-reload.");
-                return { ResultType::Code::ERROR, "Cannot change the ports settongs during hot-reload. Restart the database to apply changes." };
+                return { ResultType::Code::ERROR, "Cannot change the ports settongs during hot-reload. "
+                                                  "Restart the database to apply changes." };
             }
 
             this->settings = std::move(s);
@@ -318,8 +332,10 @@ namespace Zest {
             this->threadCV.notify_all();
 
             return { ResultType::Code::SUCCESS, "Reload successful !" };
-        } catch (const std::exception& e) {
-            ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the configuration : {}. Aborting...", e.what()));
+        } catch (const std::exception &e) {
+            ZestLog(LogLevel::ERROR, std::format("An error occured during the reload of the "
+                                                 "configuration : {}. Aborting...",
+                                                 e.what()));
         }
         return { ResultType::Code::ERROR, "Reload failed !" };
     }
@@ -390,13 +406,14 @@ namespace Zest {
 
         try {
             fs::create_directories(this->settings.ArchiveStoragePath);
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             ZestLog(LogLevel::ERROR, std::format("Error while creating archives folder : {}", e.what()));
             return false;
         }
 
         auto now = std::chrono::system_clock::now();
-        fs::path archive_full_path = this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
+        fs::path archive_full_path =
+            this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
 
         libzippp::ZipArchive archive(archive_full_path.string());
         if (!archive.open(libzippp::ZipArchive::New)) {
@@ -404,7 +421,7 @@ namespace Zest {
             return false;
         }
 
-        for (const auto& entry : fs::recursive_directory_iterator(folder_to_zip)) {
+        for (const auto &entry : fs::recursive_directory_iterator(folder_to_zip)) {
             if (fs::is_regular_file(entry.path())) {
                 fs::path relative_path = fs::relative(entry.path(), folder_to_zip);
 
@@ -429,7 +446,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateToken(const std::string& username, const std::string& token) const
+    bool ZestDB::validateToken(const std::string &username, const std::string &token) const
     {
         if (this->users.find(username) == this->users.end()) {
             ZestLog(LogLevel::DEBUG, std::format("ZestDB::validateToken - user not found: {}", username));
@@ -445,30 +462,29 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateKey(const std::string& key) const
+    bool ZestDB::validateKey(const std::string &key) const
     {
         if (key.size() > this->settings.MaxKeySize) {
-            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG, this->settings.MaxKeySize));
+            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG,
+                                                 this->settings.MaxKeySize));
             return false;
         }
         return true;
     }
 
-    bool ZestDB::validateValue(const std::string& value) const
+    bool ZestDB::validateValue(const std::string &value) const
     {
         if (value.size() > this->settings.MaxValueSize) {
-            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}", Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
+            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}",
+                                                 Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
             return false;
         }
         return true;
     }
 
-    bool ZestDB::isJsonValid(const std::string& value) const
-    {
-        return nlohmann::json::accept(value);
-    }
+    bool ZestDB::isJsonValid(const std::string &value) const { return nlohmann::json::accept(value); }
 
-    ResultType ZestDB::get(const std::string& key)
+    ResultType ZestDB::get(const std::string &key)
     {
         if (!this->validateKey(key)) {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
@@ -479,7 +495,7 @@ namespace Zest {
         return this->shardManager->get(key);
     }
 
-    ResultType ZestDB::set(const std::string& key, const std::string& value)
+    ResultType ZestDB::set(const std::string &key, const std::string &value)
     {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -508,7 +524,7 @@ namespace Zest {
         return this->shardManager->set(key, value);
     }
 
-    ResultType ZestDB::del(const std::string& key)
+    ResultType ZestDB::del(const std::string &key)
     {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -523,12 +539,9 @@ namespace Zest {
         return this->shardManager->del(key);
     }
 
-    ResultType ZestDB::getBy(ValidationRule& valid)
-    {
-        return this->shardManager->getBy(valid);
-    }
+    ResultType ZestDB::getBy(ValidationRule &valid) { return this->shardManager->getBy(valid); }
 
-    ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value)
+    ResultType ZestDB::setBy(ValidationRule &valid, const std::string &value)
     {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -551,7 +564,7 @@ namespace Zest {
         return this->shardManager->setBy(valid, value);
     }
 
-    ResultType ZestDB::delBy(ValidationRule& valid)
+    ResultType ZestDB::delBy(ValidationRule &valid)
     {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
@@ -560,7 +573,7 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
-    CreationValidationRuleResult ZestDB::createValidationRule(const std::string& mode, const std::string& pattern) const
+    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode, const std::string &pattern) const
     {
         ValidationRule valid;
         bool validMode = true;
@@ -568,22 +581,16 @@ namespace Zest {
         if (mode == "re") {
             try {
                 std::regex keyRegex(pattern);
-                valid.func = [reg = std::move(keyRegex)](const std::string& key) {
-                    return std::regex_match(key, reg);
-                };
-            } catch (const std::regex_error&) {
+                valid.func = [reg = std::move(keyRegex)](const std::string &key) { return std::regex_match(key, reg); };
+            } catch (const std::regex_error &) {
                 validMode = false;
             }
         } else if (mode == "sw") {
-            valid.func = [pattern](const std::string& key) {
-                return key.find(pattern) == 0;
-            };
+            valid.func = [pattern](const std::string &key) { return key.find(pattern) == 0; };
         } else if (mode == "ct") {
-            valid.func = [pattern](const std::string& key) {
-                return key.find(pattern) != std::string::npos;
-            };
+            valid.func = [pattern](const std::string &key) { return key.find(pattern) != std::string::npos; };
         } else if (mode == "ew") {
-            valid.func = [pattern](const std::string& key) {
+            valid.func = [pattern](const std::string &key) {
                 if (key.size() >= pattern.size()) {
                     return key.compare(key.size() - pattern.size(), pattern.size(), pattern) == 0;
                 }
@@ -596,7 +603,7 @@ namespace Zest {
         return { valid, validMode };
     }
 
-    void ZestDB::appendToWAL(const std::string& key, const std::string& command)
+    void ZestDB::appendToWAL(const std::string &key, const std::string &command)
     {
         if (this->replaying.load()) {
             return;
@@ -605,14 +612,14 @@ namespace Zest {
         this->shardManager->appendToWAL(key, command);
     }
 
-    std::string toLowerStr(const std::string& str)
+    std::string toLowerStr(const std::string &str)
     {
         std::string result = str;
         std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
         return result;
     }
 
-    ResultType ZestDB::execCmd(const std::string& command)
+    ResultType ZestDB::execCmd(const std::string &command)
     {
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
@@ -831,7 +838,7 @@ namespace Zest {
                     this->settings.NetworkValidationStr = valueStr;
                     this->settings.NetworkValidation = std::move(testRegex);
                     valueSet = true;
-                } catch (const std::regex_error& e) {
+                } catch (const std::regex_error &e) {
                     result.response = std::format("Invalid regex: {}", e.what());
                     return result;
                 }
@@ -896,7 +903,8 @@ namespace Zest {
                     this->settings.AutoArchiveSaving = false;
                     valueSet = true;
                 } else {
-                    result.response = "Invalid AutoArchiveSaving value (use true/false or 0/1)";
+                    result.response = "Invalid AutoArchiveSaving value (use "
+                                      "true/false or 0/1)";
                     return result;
                 }
             } else {
@@ -941,19 +949,40 @@ namespace Zest {
         std::ostringstream oss;
         oss << "ZestDB Commands:" << "\n";
         oss << "---------------" << "\n";
-        oss << "get <key>                              - Get value by key" << "\n";
-        oss << "set <key> <value>                      - Set key-value pair" << "\n";
+        oss << "get <key>                              - Get value by key"
+            << "\n";
+        oss << "set <key> <value>                      - Set key-value pair"
+            << "\n";
         oss << "del <key>                              - Delete key" << "\n";
-        oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching pattern" << "\n";
-        oss << "setby <mode> <pattern> <val> [lim <n>] - Set value for keys matching pattern" << "\n";
-        oss << "delby <mode> <pattern> [lim <n>]       - Delete keys matching pattern" << "\n";
-        oss << "flush                                  - Flush all data in memory to the disk" << "\n";
-        oss << "reload                                 - Reload configuration from config.yaml" << "\n";
-        oss << "scfg <param> <value>                   - Set config parameter" << "\n";
-        oss << "help                                   - Show this help" << "\n";
+        oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching "
+               "pattern"
+            << "\n";
+        oss << "setby <mode> <pattern> <val> [lim <n>] - Set value for keys "
+               "matching pattern"
+            << "\n";
+        oss << "delby <mode> <pattern> [lim <n>]       - Delete keys matching "
+               "pattern"
+            << "\n";
+        oss << "flush                                  - Flush all data in "
+               "memory "
+               "to the disk"
+            << "\n";
+        oss << "reload                                 - Reload configuration "
+               "from "
+               "config.yaml"
+            << "\n";
+        oss << "scfg <param> <value>                   - Set config parameter"
+            << "\n";
+        oss << "help                                   - Show this help"
+            << "\n";
         oss << "\n";
         oss << "Config Parameters:" << "\n";
-        oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), CacheSize(int), CompactingInterval(int), FlushInterval(int), isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), NetworkValidationStr(string), ArchiveCreationDelay(int), AutoArchiveSaving(bool)" << "\n";
+        oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), "
+               "CacheSize(int), CompactingInterval(int), FlushInterval(int), "
+               "isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), "
+               "NetworkValidationStr(string), ArchiveCreationDelay(int), "
+               "AutoArchiveSaving(bool)"
+            << "\n";
         oss << "\n";
         oss << "Modes:" << "\n";
         oss << "  re  - regex" << "\n";
@@ -963,12 +992,26 @@ namespace Zest {
         oss << "  lim - limit (optional)" << "\n";
         oss << "\n";
         oss << "Examples:" << "\n";
-        oss << "  gb re .* lim 10                      - Get keys matching regex '.*' with limit 10" << "\n";
-        oss << "  gb sw ca lim 20                      - Get keys starting with 'ca' with limit 20" << "\n";
-        oss << "  gb ct ac lim 1                       - Get keys containing 'ac' with limit 1" << "\n";
-        oss << "  gb ew ca                             - Get keys ending with 'ca' (no limit)" << "\n";
+        oss << "  gb re .* lim 10                      - Get keys matching "
+               "regex "
+               "'.*' with limit 10"
+            << "\n";
+        oss << "  gb sw ca lim 20                      - Get keys starting "
+               "with "
+               "'ca' with limit 20"
+            << "\n";
+        oss << "  gb ct ac lim 1                       - Get keys containing "
+               "'ac' "
+               "with limit 1"
+            << "\n";
+        oss << "  gb ew ca                             - Get keys ending with "
+               "'ca' "
+               "(no limit)"
+            << "\n";
         oss << "\n";
-        oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, f=flush, r=reload, scfg=setconfig, h=help" << "\n";
+        oss << "Shortcuts: g=get, s=set, d=del, gb=getby, sb=setby, db=delby, "
+               "f=flush, r=reload, scfg=setconfig, h=help"
+            << "\n";
         return oss.str();
     }
 
@@ -985,7 +1028,7 @@ namespace Zest {
     {
         ZestLog(LogLevel::INFO, "Replaying WAL...");
         this->replaying.store(true);
-        this->shardManager->replayAllWAL([this](const std::string& cmd) {
+        this->shardManager->replayAllWAL([this](const std::string &cmd) {
             auto resp = this->execCmd(cmd);
             return responseToJson(resp);
         });

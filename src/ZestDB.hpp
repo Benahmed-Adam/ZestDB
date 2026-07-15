@@ -18,44 +18,46 @@
 
 namespace Zest {
 
-    struct CreationValidationRuleResult {
+    struct CreationValidationRuleResult
+    {
         ValidationRule rule;
         bool result;
     };
 
-    class ZestDB {
+    class ZestDB
+    {
     public:
         ZestDB();
         ~ZestDB();
 
-        ResultType get(const std::string& key);
-        ResultType set(const std::string& key, const std::string& value);
-        ResultType del(const std::string& key);
+        ResultType get(const std::string &key);
+        ResultType set(const std::string &key, const std::string &value);
+        ResultType del(const std::string &key);
 
-        ResultType getBy(ValidationRule& valid);
-        ResultType setBy(ValidationRule& valid, const std::string& value);
-        ResultType delBy(ValidationRule& valid);
+        ResultType getBy(ValidationRule &valid);
+        ResultType setBy(ValidationRule &valid, const std::string &value);
+        ResultType delBy(ValidationRule &valid);
 
-        ResultType execCmd(const std::string& command);
-        bool validateToken(const std::string& username, const std::string& token) const;
+        ResultType execCmd(const std::string &command);
+        bool validateToken(const std::string &username, const std::string &token) const;
         void stop();
 
         Settings settings;
         asio::io_context ioCtx;
         std::unique_ptr<httplib::Server> srv;
 
-        static std::string responseToJson(const ResultType& resp);
+        static std::string responseToJson(const ResultType &resp);
 
     private:
         void boot();
-        bool validateKey(const std::string& key) const;
-        bool validateValue(const std::string& value) const;
-        bool isJsonValid(const std::string& value) const;
+        bool validateKey(const std::string &key) const;
+        bool validateValue(const std::string &value) const;
+        bool isJsonValid(const std::string &value) const;
         void flush();
         void replayWAL();
         std::string help() const;
-        CreationValidationRuleResult createValidationRule(const std::string& mode, const std::string& pattern) const;
-        void appendToWAL(const std::string& key, const std::string& command);
+        CreationValidationRuleResult createValidationRule(const std::string &mode, const std::string &pattern) const;
+        void appendToWAL(const std::string &key, const std::string &command);
 
         Settings loadConfig();
         ResultType reloadConfig();
@@ -81,6 +83,6 @@ namespace Zest {
         std::condition_variable_any threadCV;
     };
 
-    std::string sha256(const std::string& str);
+    std::string sha256(const std::string &str);
 
 } // namespace Zest

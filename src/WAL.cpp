@@ -1,13 +1,14 @@
+#include "WAL.hpp"
+
 #include <algorithm>
 #include <format>
 #include <iostream>
 
-#include "WAL.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
 
-    WAL::WAL(const std::filesystem::path& walPath)
+    WAL::WAL(const std::filesystem::path &walPath)
         : canClear(true)
     {
         ZestLog(LogLevel::INFO, "Opening WAL file...");
@@ -34,7 +35,7 @@ namespace Zest {
         }
     }
 
-    void WAL::append(const std::string& cmd)
+    void WAL::append(const std::string &cmd)
     {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->wal.is_open()) {
@@ -42,11 +43,12 @@ namespace Zest {
             return;
         }
         size_t size = cmd.size();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch());
 
-        this->wal.write(reinterpret_cast<const char*>(&size), sizeof(size));
+        this->wal.write(reinterpret_cast<const char *>(&size), sizeof(size));
         this->wal.write(cmd.c_str(), static_cast<long int>(size));
-        this->wal.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+        this->wal.write(reinterpret_cast<const char *>(&timestamp), sizeof(timestamp));
         this->wal.put('\n');
         this->wal.flush();
         // this->wal.fsync();
@@ -71,14 +73,14 @@ namespace Zest {
 
         size_t size;
         std::chrono::milliseconds timestamp;
-        while (this->wal.read(reinterpret_cast<char*>(&size), sizeof(size))) {
+        while (this->wal.read(reinterpret_cast<char *>(&size), sizeof(size))) {
             if (size > 1000000) {
                 ZestLog(LogLevel::WARNING, "WAL::getCmds - Invalid size, stopping");
                 break;
             }
             std::string cmd(size, '\0');
             if (this->wal.read(&cmd[0], static_cast<long int>(size))) {
-                if (this->wal.read(reinterpret_cast<char*>(&timestamp), sizeof(timestamp))) {
+                if (this->wal.read(reinterpret_cast<char *>(&timestamp), sizeof(timestamp))) {
                     res.push_back({ std::move(cmd), timestamp });
                 } else {
                     break;
@@ -92,9 +94,8 @@ namespace Zest {
             }
         }
 
-        std::sort(res.begin(), res.end(), [](const WalEntry& a, const WalEntry& b) {
-            return a.timestamp < b.timestamp;
-        });
+        std::sort(res.begin(), res.end(),
+                  [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
 
         this->wal.clear();
         this->wal.seekg(0, std::ios::end);

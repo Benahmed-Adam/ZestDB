@@ -1,14 +1,15 @@
+#include "IndexManager.hpp"
+
 #include <chrono>
 #include <format>
 
-#include "IndexManager.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
 
-    IndexManager::IndexManager(Settings& set)
-        : settings(set)
-        , canFlush(false)
+    IndexManager::IndexManager(Settings &set)
+        : settings(set),
+          canFlush(false)
     {
         ZestLog(LogLevel::INFO, "Opening INDEX file...");
         this->indexPath = set.IndexPath;
@@ -50,7 +51,7 @@ namespace Zest {
 
         while (position < fsize) {
             this->index.seekg(position, std::ios::beg);
-            if (!this->index.read((char*)&entry, sizeof(entry)))
+            if (!this->index.read((char *)&entry, sizeof(entry)))
                 break;
 
             std::string entryKey(entry.key);
@@ -64,7 +65,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
     }
 
-    IndexEntry IndexManager::search(const std::string& key)
+    IndexEntry IndexManager::search(const std::string &key)
     {
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - searching for key: {}", key));
         std::shared_lock<std::shared_mutex> lock(this->mtx);
@@ -76,7 +77,7 @@ namespace Zest {
             this->index.seekg(offset, std::ios::beg);
             IndexEntry entry;
 
-            if (this->index.read((char*)&entry, sizeof(entry)) && !entry.isTombstone) {
+            if (this->index.read((char *)&entry, sizeof(entry)) && !entry.isTombstone) {
                 ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - found key: {}", key));
                 return entry;
             }
@@ -86,7 +87,7 @@ namespace Zest {
         return { "", -1, 0, 0, false };
     }
 
-    void IndexManager::update(const std::string& key, const IndexEntry& entry)
+    void IndexManager::update(const std::string &key, const IndexEntry &entry)
     {
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - updating key: {}", key));
         std::unique_lock<std::shared_mutex> lock(this->mtx);
@@ -96,7 +97,7 @@ namespace Zest {
             std::streamoff offset = it->second;
 
             this->index.seekp(offset, std::ios::beg);
-            this->index.write((const char*)&entry, sizeof(entry));
+            this->index.write((const char *)&entry, sizeof(entry));
             this->canFlush = true;
             if (entry.isTombstone) {
                 this->memoryTree.erase(it);
@@ -109,7 +110,7 @@ namespace Zest {
         }
     }
 
-    void IndexManager::insert(const IndexEntry& entry)
+    void IndexManager::insert(const IndexEntry &entry)
     {
         std::string keyStr(entry.key);
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::insert - inserting key: {}", keyStr));
@@ -117,21 +118,22 @@ namespace Zest {
 
         auto it = this->memoryTree.find(keyStr);
         if (it != this->memoryTree.end()) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, marking old entry as tombstone");
+            ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, marking "
+                                     "old entry as tombstone");
 
             std::streamoff oldOffset = it->second;
             IndexEntry oldEntry;
             this->index.seekg(oldOffset, std::ios::beg);
-            if (this->index.read((char*)&oldEntry, sizeof(oldEntry))) {
+            if (this->index.read((char *)&oldEntry, sizeof(oldEntry))) {
                 oldEntry.isTombstone = true;
                 this->index.seekp(oldOffset, std::ios::beg);
-                this->index.write((const char*)&oldEntry, sizeof(oldEntry));
+                this->index.write((const char *)&oldEntry, sizeof(oldEntry));
                 this->tombstoneOffsets.push_back(oldOffset);
             }
 
             this->index.seekp(0, std::ios::end);
             std::streamoff newOffset = this->index.tellp();
-            this->index.write((const char*)&entry, sizeof(entry));
+            this->index.write((const char *)&entry, sizeof(entry));
             this->canFlush = true;
             this->memoryTree[keyStr] = newOffset;
             return;
@@ -149,7 +151,7 @@ namespace Zest {
         }
 
         this->index.seekp(insertPosition, std::ios::beg);
-        this->index.write((const char*)&entry, sizeof(entry));
+        this->index.write((const char *)&entry, sizeof(entry));
         this->canFlush = true;
         this->memoryTree[keyStr] = insertPosition;
     }
@@ -162,16 +164,18 @@ namespace Zest {
         res.reserve(this->memoryTree.size());
 
         IndexEntry e;
-        for (auto const& [key, offset] : this->memoryTree) {
+        for (auto const &[key, offset] : this->memoryTree) {
             if (res.size() >= limit)
                 break;
 
             this->index.seekg(offset, std::ios::beg);
 
-            if (this->index.read((char*)&e, sizeof(IndexEntry))) {
+            if (this->index.read((char *)&e, sizeof(IndexEntry))) {
                 res.push_back(e);
             } else {
-                ZestLog(LogLevel::ERROR, std::format("IndexManager::getAll - Failed to read entry at offset: {}", offset));
+                ZestLog(LogLevel::ERROR, std::format("IndexManager::getAll - Failed to read "
+                                                     "entry at offset: {}",
+                                                     offset));
                 this->index.clear();
             }
         }
@@ -182,7 +186,8 @@ namespace Zest {
     std::vector<IndexEntry> IndexManager::compact()
     {
         ZestLog(LogLevel::DEBUG, "Starting index compaction...");
-        std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp",
+                                   std::filesystem::copy_options::overwrite_existing);
 
         std::vector<IndexEntry> entries = this->getAll();
         std::vector<IndexEntry> validEntries = entries;
@@ -202,17 +207,18 @@ namespace Zest {
 
         std::vector<IndexEntry> result;
 
-        for (const auto& entry : entries) {
+        for (const auto &entry : entries) {
             if (entry.isTombstone || entry.segmentId == -1) {
                 continue;
             }
             std::streamoff newPos = this->index.tellp();
 
-            if (this->index.write((const char*)&entry, sizeof(IndexEntry))) {
+            if (this->index.write((const char *)&entry, sizeof(IndexEntry))) {
                 this->memoryTree[std::string(entry.key)] = newPos;
                 result.push_back(entry);
             } else {
-                ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
+                ZestLog(LogLevel::ERROR,
+                        std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
             }
         }
 
@@ -242,7 +248,8 @@ namespace Zest {
             return;
         }
 
-        ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing skipped, the index is not ready to be flushed");
+        ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing skipped, the "
+                                 "index is not ready to be flushed");
     }
 
 } // namespace Zest

@@ -1,17 +1,14 @@
+#include "Logger.hpp"
+
 #include <ctime>
 #include <iostream>
 #include <sstream>
-
-#include "Logger.hpp"
 
 namespace Zest {
 
     static bool isDebug = true;
 
-    void setLoggerDebugMode(bool enabled)
-    {
-        isDebug = enabled;
-    }
+    void setLoggerDebugMode(bool enabled) { isDebug = enabled; }
 
     std::string levelToString(LogLevel level)
     {
@@ -47,23 +44,19 @@ namespace Zest {
         }
     }
 
-    void ZestLog(LogLevel level, const std::string& message)
+    void ZestLog(LogLevel level, const std::string &message)
     {
         if (!isDebug && level == LogLevel::DEBUG)
             return;
 
         time_t now = time(0);
-        tm* timeinfo = localtime(&now);
+        tm *timeinfo = localtime(&now);
         char timestamp[20];
-        strftime(timestamp, sizeof(timestamp),
-            "%Y-%m-%d %H:%M:%S", timeinfo);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
 
         std::ostringstream logEntry;
-        logEntry << levelToColorCode(level)
-                << "[" << timestamp << "] "
-                << levelToString(level) << ": " << message
-                << "\x1b[0m"
-                << std::endl;
+        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message
+                 << "\x1b[0m" << std::endl;
 
         std::cout << logEntry.str();
     }

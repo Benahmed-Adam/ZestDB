@@ -1,6 +1,7 @@
+#include "LRUCache.hpp"
+
 #include <format>
 
-#include "LRUCache.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
@@ -11,7 +12,7 @@ namespace Zest {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::LRUCache - created cache with capacity: {}", cap));
     }
 
-    CacheEntry LRUCache::get(const std::string& key)
+    CacheEntry LRUCache::get(const std::string &key)
     {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::get - looking for key: {}", key));
 
@@ -32,7 +33,7 @@ namespace Zest {
         return it->second.first;
     }
 
-    void LRUCache::put(const IndexEntry& entry, const std::string& value)
+    void LRUCache::put(const IndexEntry &entry, const std::string &value)
     {
         std::string key(entry.key);
 
@@ -58,7 +59,7 @@ namespace Zest {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::put - key inserted, cache size: {}", this->map.size()));
     }
 
-    void LRUCache::remove(const std::string& key)
+    void LRUCache::remove(const std::string &key)
     {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::remove - removing key: {}", key));
 

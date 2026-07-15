@@ -7,14 +7,15 @@
 
 namespace Zest {
 
-    class Compactor {
+    class Compactor
+    {
     public:
-        Compactor(const Settings& set);
-        void compactIndex(IndexManager& indexManager);
-        void run(IndexManager& indexManager, StorageManager& storageManager, std::atomic<bool>& stopFlag);
+        Compactor(const Settings &set);
+        void compactIndex(IndexManager &indexManager);
+        void run(IndexManager &indexManager, StorageManager &storageManager, std::atomic<bool> &stopFlag);
 
     private:
-        const Settings& settings;
+        const Settings &settings;
     };
 
 } // namespace Zest

@@ -9,18 +9,20 @@
 
 namespace Zest {
 
-    struct CacheEntry {
+    struct CacheEntry
+    {
         IndexEntry index;
         std::string value;
     };
 
-    class LRUCache {
+    class LRUCache
+    {
     public:
         LRUCache(unsigned int cap);
 
-        CacheEntry get(const std::string& key);
-        void put(const IndexEntry& entry, const std::string& value);
-        void remove(const std::string& key);
+        CacheEntry get(const std::string &key);
+        void put(const IndexEntry &entry, const std::string &value);
+        void remove(const std::string &key);
 
     private:
         unsigned int capacity;

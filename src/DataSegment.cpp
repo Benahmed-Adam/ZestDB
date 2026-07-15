@@ -1,16 +1,17 @@
+#include "DataSegment.hpp"
+
 #include <chrono>
 #include <format>
 
-#include "DataSegment.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
 
-    DataSegment::DataSegment(Settings& set, int id)
-        : segmentId(id)
-        , currentOffset(0)
-        , settings(set)
-        , canFlush(false)
+    DataSegment::DataSegment(Settings &set, int id)
+        : segmentId(id),
+          currentOffset(0),
+          settings(set),
+          canFlush(false)
     {
         ZestLog(LogLevel::DEBUG, std::format("DataSegment::DataSegment - creating segment: {}", id));
         this->openSegment();
@@ -39,7 +40,8 @@ namespace Zest {
         }
 
         if (!this->segment.is_open()) {
-            ZestLog(LogLevel::ERROR, std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
+            ZestLog(LogLevel::ERROR,
+                    std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
         }
     }
 
@@ -52,19 +54,17 @@ namespace Zest {
         this->currentOffset = static_cast<unsigned long>(pos);
     }
 
-    unsigned long DataSegment::getWritePosition() const
-    {
-        return this->currentOffset.load();
-    }
+    unsigned long DataSegment::getWritePosition() const { return this->currentOffset.load(); }
 
-    unsigned long DataSegment::write(const std::string& value)
+    unsigned long DataSegment::write(const std::string &value)
     {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         unsigned long startOffset = this->currentOffset.load();
 
         if (startOffset + value.size() > this->settings.SegSize) {
-            ZestLog(LogLevel::DEBUG, std::format("DataSegment::write - segment {} would exceed capacity", this->segmentId));
+            ZestLog(LogLevel::DEBUG,
+                    std::format("DataSegment::write - segment {} would exceed capacity", this->segmentId));
             return this->settings.SegSize + 1;
         }
 
@@ -90,7 +90,8 @@ namespace Zest {
             ZestLog(LogLevel::DEBUG, std::format("DataSegment::write - segment {} is now full", this->segmentId));
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("DataSegment::write - wrote {} bytes at offset: {}", value.size(), startOffset));
+        ZestLog(LogLevel::DEBUG,
+                std::format("DataSegment::write - wrote {} bytes at offset: {}", value.size(), startOffset));
         return startOffset;
     }
 
@@ -120,15 +121,9 @@ namespace Zest {
         return res;
     }
 
-    bool DataSegment::isFull() const
-    {
-        return this->currentOffset.load() >= this->settings.SegSize;
-    }
+    bool DataSegment::isFull() const { return this->currentOffset.load() >= this->settings.SegSize; }
 
-    int DataSegment::getSegmentId() const
-    {
-        return this->segmentId;
-    }
+    int DataSegment::getSegmentId() const { return this->segmentId; }
 
     void DataSegment::flush()
     {
@@ -148,7 +143,8 @@ namespace Zest {
             return;
         }
 
-        ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing skipped, the segment is not ready to be flushed");
+        ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing skipped, the "
+                                 "segment is not ready to be flushed");
     }
 
 } // namespace Zest
