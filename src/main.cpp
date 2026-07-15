@@ -8,8 +8,7 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
-void populate(Zest::ZestDB *db)
-{
+void populate(Zest::ZestDB *db) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < 1000000; ++i) {
@@ -25,8 +24,7 @@ void populate(Zest::ZestDB *db)
     Zest::ZestLog(Zest::LogLevel::INFO, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
-void cmd(Zest::ZestDB *db, asio::executor_work_guard<asio::io_context::executor_type> *workGuard)
-{
+void cmd(Zest::ZestDB *db, asio::executor_work_guard<asio::io_context::executor_type> *workGuard) {
     std::string line;
     while (db->settings.isRunning) {
         std::cout << "zestdb> ";
@@ -54,8 +52,7 @@ void cmd(Zest::ZestDB *db, asio::executor_work_guard<asio::io_context::executor_
     }
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     Zest::ZestDB db;
 
     auto work = asio::make_work_guard(db.ioCtx);

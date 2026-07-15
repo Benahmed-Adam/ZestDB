@@ -10,14 +10,12 @@
 
 namespace Zest {
 
-    struct WalEntry
-    {
+    struct WalEntry {
         std::string cmd;
         std::chrono::milliseconds timestamp;
     };
 
-    class WAL
-    {
+    class WAL {
     public:
         WAL(const std::filesystem::path &walPath);
         void clear();

@@ -9,8 +9,7 @@ namespace Zest {
 
     ThreadPool::ThreadPool(size_t numThreads)
         : stopFlag(false),
-          activeTasks(0)
-    {
+          activeTasks(0) {
         this->workers.reserve(numThreads);
         for (size_t i = 0; i < numThreads; ++i) {
             this->workers.emplace_back([this] {
@@ -53,14 +52,12 @@ namespace Zest {
         }
     }
 
-    void ThreadPool::waitAll()
-    {
+    void ThreadPool::waitAll() {
         std::unique_lock<std::mutex> lock(this->queueMutex);
         this->completionCondition.wait(lock, [this] { return this->tasks.empty() && this->activeTasks == 0; });
     }
 
-    ThreadPool::~ThreadPool()
-    {
+    ThreadPool::~ThreadPool() {
         {
             std::lock_guard<std::mutex> lock(this->queueMutex);
             this->stopFlag = true;

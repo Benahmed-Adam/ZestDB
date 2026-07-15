@@ -9,23 +9,20 @@
 
 namespace Zest {
 
-    struct ValidationRule
-    {
+    struct ValidationRule {
         std::function<bool(const std::string &)> func;
         unsigned int limit = UINT_MAX;
         std::atomic<unsigned int> *globalMatchCount = nullptr;
     };
 
-    struct ResultType
-    {
+    struct ResultType {
         enum class Code { SUCCESS, ERROR };
         Code code;
         std::string response;
         long long affectedRows = 0;
     };
 
-    struct Messages
-    {
+    struct Messages {
         static constexpr const char *KEY_TOO_LONG = "The key is too long !";
         static constexpr const char *KEY_NOT_FOUND = "Key not found";
         static constexpr const char *VALUE_TOO_LONG = "The value is too long !";
@@ -58,8 +55,7 @@ namespace Zest {
         static constexpr const char *INVALID_MODE = "Invalid mode ! Use a mode between re, sw, ct, ew";
     };
 
-    struct Settings
-    {
+    struct Settings {
         std::filesystem::path DbPath;
         std::filesystem::path IndexPath;
         std::filesystem::path WalPath;

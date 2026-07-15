@@ -10,8 +10,7 @@ namespace Zest {
 
     void setLoggerDebugMode(bool enabled) { isDebug = enabled; }
 
-    std::string levelToString(LogLevel level)
-    {
+    std::string levelToString(LogLevel level) {
         switch (level) {
         case LogLevel::INFO:
             return "INFO";
@@ -28,8 +27,7 @@ namespace Zest {
         }
     }
 
-    std::string levelToColorCode(LogLevel level)
-    {
+    std::string levelToColorCode(LogLevel level) {
         switch (level) {
         case LogLevel::DEBUG:
             return "\x1b[36m";
@@ -44,8 +42,7 @@ namespace Zest {
         }
     }
 
-    void ZestLog(LogLevel level, const std::string &message)
-    {
+    void ZestLog(LogLevel level, const std::string &message) {
         if (!isDebug && level == LogLevel::DEBUG)
             return;
 

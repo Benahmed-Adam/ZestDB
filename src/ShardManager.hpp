@@ -10,8 +10,7 @@
 
 namespace Zest {
 
-    class ShardManager
-    {
+    class ShardManager {
     public:
         ShardManager(Settings &baseSettings, int numShardsCount);
         ~ShardManager();

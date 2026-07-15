@@ -26,8 +26,7 @@ namespace Zest {
 
     using json = nlohmann::json;
 
-    std::string ZestDB::responseToJson(const ResultType &resp)
-    {
+    std::string ZestDB::responseToJson(const ResultType &resp) {
         json j;
         j["code"] = static_cast<unsigned int>(resp.code);
         if (!resp.response.empty() && (resp.response.front() == '[' || resp.response.front() == '{')) {
@@ -39,8 +38,7 @@ namespace Zest {
         return j.dump();
     }
 
-    std::string sha256(const std::string &str)
-    {
+    std::string sha256(const std::string &str) {
         EVP_MD_CTX *context = EVP_MD_CTX_new();
         const EVP_MD *md = EVP_sha256();
         unsigned char hash[EVP_MAX_MD_SIZE];
@@ -60,8 +58,7 @@ namespace Zest {
     }
 
     ZestDB::ZestDB()
-        : replaying(false)
-    {
+        : replaying(false) {
         ZestLog(LogLevel::INFO, "Initializing ZestDB...");
         this->boot();
 
@@ -151,14 +148,12 @@ namespace Zest {
         });
     }
 
-    ZestDB::~ZestDB()
-    {
+    ZestDB::~ZestDB() {
         if (this->settings.isRunning)
             this->stop();
     }
 
-    void ZestDB::stop()
-    {
+    void ZestDB::stop() {
         ZestLog(LogLevel::INFO, "Exiting ZestDB...");
 
         this->settings.isRunning = false;
@@ -172,8 +167,7 @@ namespace Zest {
         this->threadCV.notify_all();
     }
 
-    void ZestDB::boot()
-    {
+    void ZestDB::boot() {
         this->settings = std::move(this->loadConfig());
         setLoggerDebugMode(this->settings.isDebug);
 
@@ -198,8 +192,7 @@ namespace Zest {
         }
     }
 
-    Settings ZestDB::loadConfig()
-    {
+    Settings ZestDB::loadConfig() {
         Settings result;
 
         this->users.clear();
@@ -305,8 +298,7 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::reloadConfig()
-    {
+    ResultType ZestDB::reloadConfig() {
         try {
             Settings oldSettings = this->settings;
             Settings s = this->loadConfig();
@@ -340,8 +332,7 @@ namespace Zest {
         return { ResultType::Code::ERROR, "Reload failed !" };
     }
 
-    void ZestDB::setConfig()
-    {
+    void ZestDB::setConfig() {
         const fs::path current_path = fs::current_path();
         const std::string configName = "config.yaml";
         fs::path configPath = current_path / configName;
@@ -374,8 +365,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, "Configuration saved to config.yaml");
     }
 
-    std::string ZestDB::getConfig() const
-    {
+    std::string ZestDB::getConfig() const {
         json j;
         j["DbPath"] = this->settings.DbPath.string();
         j["ArchiveStoragePath"] = this->settings.ArchiveStoragePath.string();
@@ -395,8 +385,7 @@ namespace Zest {
         return j.dump();
     }
 
-    bool ZestDB::createArchive()
-    {
+    bool ZestDB::createArchive() {
         std::string folder_to_zip = this->settings.DbPath.string();
 
         if (!fs::exists(folder_to_zip) || !fs::is_directory(folder_to_zip)) {
@@ -446,8 +435,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateToken(const std::string &username, const std::string &token) const
-    {
+    bool ZestDB::validateToken(const std::string &username, const std::string &token) const {
         if (this->users.find(username) == this->users.end()) {
             ZestLog(LogLevel::DEBUG, std::format("ZestDB::validateToken - user not found: {}", username));
             return false;
@@ -462,8 +450,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateKey(const std::string &key) const
-    {
+    bool ZestDB::validateKey(const std::string &key) const {
         if (key.size() > this->settings.MaxKeySize) {
             ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG,
                                                  this->settings.MaxKeySize));
@@ -472,8 +459,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateValue(const std::string &value) const
-    {
+    bool ZestDB::validateValue(const std::string &value) const {
         if (value.size() > this->settings.MaxValueSize) {
             ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}",
                                                  Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
@@ -484,8 +470,7 @@ namespace Zest {
 
     bool ZestDB::isJsonValid(const std::string &value) const { return nlohmann::json::accept(value); }
 
-    ResultType ZestDB::get(const std::string &key)
-    {
+    ResultType ZestDB::get(const std::string &key) {
         if (!this->validateKey(key)) {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
         }
@@ -495,8 +480,7 @@ namespace Zest {
         return this->shardManager->get(key);
     }
 
-    ResultType ZestDB::set(const std::string &key, const std::string &value)
-    {
+    ResultType ZestDB::set(const std::string &key, const std::string &value) {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
@@ -524,8 +508,7 @@ namespace Zest {
         return this->shardManager->set(key, value);
     }
 
-    ResultType ZestDB::del(const std::string &key)
-    {
+    ResultType ZestDB::del(const std::string &key) {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
@@ -541,8 +524,7 @@ namespace Zest {
 
     ResultType ZestDB::getBy(ValidationRule &valid) { return this->shardManager->getBy(valid); }
 
-    ResultType ZestDB::setBy(ValidationRule &valid, const std::string &value)
-    {
+    ResultType ZestDB::setBy(ValidationRule &valid, const std::string &value) {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
@@ -564,8 +546,7 @@ namespace Zest {
         return this->shardManager->setBy(valid, value);
     }
 
-    ResultType ZestDB::delBy(ValidationRule &valid)
-    {
+    ResultType ZestDB::delBy(ValidationRule &valid) {
         if (this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
@@ -573,8 +554,8 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
-    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode, const std::string &pattern) const
-    {
+    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode,
+                                                              const std::string &pattern) const {
         ValidationRule valid;
         bool validMode = true;
 
@@ -603,8 +584,7 @@ namespace Zest {
         return { valid, validMode };
     }
 
-    void ZestDB::appendToWAL(const std::string &key, const std::string &command)
-    {
+    void ZestDB::appendToWAL(const std::string &key, const std::string &command) {
         if (this->replaying.load()) {
             return;
         }
@@ -612,15 +592,13 @@ namespace Zest {
         this->shardManager->appendToWAL(key, command);
     }
 
-    std::string toLowerStr(const std::string &str)
-    {
+    std::string toLowerStr(const std::string &str) {
         std::string result = str;
         std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
         return result;
     }
 
-    ResultType ZestDB::execCmd(const std::string &command)
-    {
+    ResultType ZestDB::execCmd(const std::string &command) {
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
         if (start == std::string_view::npos) {
@@ -944,8 +922,7 @@ namespace Zest {
         return result;
     }
 
-    std::string ZestDB::help() const
-    {
+    std::string ZestDB::help() const {
         std::ostringstream oss;
         oss << "ZestDB Commands:" << "\n";
         oss << "---------------" << "\n";
@@ -1015,8 +992,7 @@ namespace Zest {
         return oss.str();
     }
 
-    void ZestDB::flush()
-    {
+    void ZestDB::flush() {
         ZestLog(LogLevel::DEBUG, "Flushing all shards...");
         this->isFlushing.store(true);
         this->shardManager->flush();
@@ -1024,8 +1000,7 @@ namespace Zest {
         this->isFlushing.store(false);
     }
 
-    void ZestDB::replayWAL()
-    {
+    void ZestDB::replayWAL() {
         ZestLog(LogLevel::INFO, "Replaying WAL...");
         this->replaying.store(true);
         this->shardManager->replayAllWAL([this](const std::string &cmd) {

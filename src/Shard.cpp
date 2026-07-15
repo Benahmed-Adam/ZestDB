@@ -23,15 +23,13 @@ namespace Zest {
           shardId(shardIdNum),
           replaying(false),
           stopRequested(false),
-          stopped(false)
-    {
+          stopped(false) {
         this->boot();
     }
 
     Shard::~Shard() { this->stop(); }
 
-    void Shard::boot()
-    {
+    void Shard::boot() {
         fs::path shardPath = this->settings.DbPath / "shards" / std::to_string(shardId);
         fs::path indexPath = shardPath / "INDEX";
         fs::path walPath = shardPath / "WAL";
@@ -101,8 +99,7 @@ namespace Zest {
         compactorThread.detach();
     }
 
-    void Shard::fillCache()
-    {
+    void Shard::fillCache() {
         ZestLog(LogLevel::INFO, std::format("Filling up the cache for shard {}...", shardId));
 
         std::vector<IndexEntry> entries = this->indexManager->getAll();
@@ -130,8 +127,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, std::format("Shard {} cache filled with {} keys", shardId, numKeysInserted));
     }
 
-    ResultType Shard::get(const std::string &key)
-    {
+    ResultType Shard::get(const std::string &key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         ZestLog(LogLevel::DEBUG, std::format("Shard::get - shard {} looking for key: {}", shardId, key));
@@ -172,8 +168,7 @@ namespace Zest {
         return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
     }
 
-    ResultType Shard::set(const std::string &key, const std::string &value)
-    {
+    ResultType Shard::set(const std::string &key, const std::string &value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         ZestLog(LogLevel::DEBUG,
@@ -209,8 +204,7 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1 };
     }
 
-    ResultType Shard::del(const std::string &key)
-    {
+    ResultType Shard::del(const std::string &key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         ZestLog(LogLevel::DEBUG, std::format("Shard::del - shard {} deleting key: {}", shardId, key));
@@ -240,8 +234,7 @@ namespace Zest {
         return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
     }
 
-    ResultType Shard::getBy(ValidationRule &valid)
-    {
+    ResultType Shard::getBy(ValidationRule &valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
@@ -278,8 +271,7 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, resultArray.dump(), matchCount };
     }
 
-    ResultType Shard::setBy(ValidationRule &valid, const std::string &value)
-    {
+    ResultType Shard::setBy(ValidationRule &valid, const std::string &value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
@@ -332,8 +324,7 @@ namespace Zest {
                  matchCount };
     }
 
-    ResultType Shard::delBy(ValidationRule &valid)
-    {
+    ResultType Shard::delBy(ValidationRule &valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
@@ -373,16 +364,14 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", matchCount), matchCount };
     }
 
-    void Shard::flush()
-    {
+    void Shard::flush() {
         ZestLog(LogLevel::DEBUG, std::format("Flushing shard {}...", shardId));
         this->indexManager->flush();
         this->storageManager->flush();
         this->wal->clear();
     }
 
-    void Shard::stop()
-    {
+    void Shard::stop() {
         bool expected = false;
         if (!this->stopped.compare_exchange_strong(expected, true)) {
             return;
@@ -395,8 +384,7 @@ namespace Zest {
         this->flush();
     }
 
-    void Shard::verifyIndexEntries()
-    {
+    void Shard::verifyIndexEntries() {
         ZestLog(LogLevel::INFO, std::format("Shard {} - Verifying index entries...", this->shardId));
 
         std::vector<IndexEntry> entries = this->indexManager->getAll();
@@ -429,8 +417,7 @@ namespace Zest {
                                             this->shardId, verifiedCount, removedCount));
     }
 
-    void Shard::reloadSettings(Settings &set)
-    {
+    void Shard::reloadSettings(Settings &set) {
         fs::path shardPath = set.DbPath / "shards" / std::to_string(shardId);
         fs::path indexPath = shardPath / "INDEX";
         fs::path walPath = shardPath / "WAL";

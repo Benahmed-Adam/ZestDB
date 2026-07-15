@@ -13,8 +13,7 @@
 
 namespace Zest {
 
-    class StorageManager
-    {
+    class StorageManager {
     public:
         StorageManager(Settings &set);
         IndexEntry append(const std::string &value);

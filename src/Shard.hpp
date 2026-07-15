@@ -13,8 +13,7 @@
 
 namespace Zest {
 
-    class Shard
-    {
+    class Shard {
     public:
         Shard(Settings &baseSettings, int shardIdNum);
         ~Shard();

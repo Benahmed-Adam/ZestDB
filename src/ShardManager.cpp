@@ -14,8 +14,7 @@ namespace Zest {
     ShardManager::ShardManager(Settings &baseSettings, int numShardsCount)
         : settings(baseSettings),
           numShards(numShardsCount),
-          threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency()))
-    {
+          threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency())) {
         for (int i = 0; i < this->numShards; ++i) {
             this->shards.push_back(std::make_unique<Shard>(baseSettings, i));
         }
@@ -23,32 +22,27 @@ namespace Zest {
 
     ShardManager::~ShardManager() { this->stop(); }
 
-    int ShardManager::getShardId(const std::string &key) const
-    {
+    int ShardManager::getShardId(const std::string &key) const {
         auto hash = this->hashFunction(key);
         return static_cast<int>(hash % static_cast<unsigned int>(this->numShards));
     }
 
-    ResultType ShardManager::get(const std::string &key)
-    {
+    ResultType ShardManager::get(const std::string &key) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->get(key);
     }
 
-    ResultType ShardManager::set(const std::string &key, const std::string &value)
-    {
+    ResultType ShardManager::set(const std::string &key, const std::string &value) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->set(key, value);
     }
 
-    ResultType ShardManager::del(const std::string &key)
-    {
+    ResultType ShardManager::del(const std::string &key) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->del(key);
     }
 
-    ResultType ShardManager::getBy(ValidationRule &valid)
-    {
+    ResultType ShardManager::getBy(ValidationRule &valid) {
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -77,8 +71,7 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, mergedArray.dump(), totalMatches };
     }
 
-    ResultType ShardManager::setBy(ValidationRule &valid, const std::string &value)
-    {
+    ResultType ShardManager::setBy(ValidationRule &valid, const std::string &value) {
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -104,8 +97,7 @@ namespace Zest {
                  totalUpdated };
     }
 
-    ResultType ShardManager::delBy(ValidationRule &valid)
-    {
+    ResultType ShardManager::delBy(ValidationRule &valid) {
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -130,29 +122,25 @@ namespace Zest {
                  totalDeleted };
     }
 
-    void ShardManager::flush()
-    {
+    void ShardManager::flush() {
         for (auto &shard : this->shards) {
             shard->flush();
         }
     }
 
-    void ShardManager::stop()
-    {
+    void ShardManager::stop() {
         for (auto &shard : this->shards) {
             shard->stop();
         }
     }
 
-    void ShardManager::clearAllWAL()
-    {
+    void ShardManager::clearAllWAL() {
         for (auto &shard : this->shards) {
             shard->getWAL().clear();
         }
     }
 
-    void ShardManager::replayAllWAL(const std::function<std::string(const std::string &)> &execCmdFunc)
-    {
+    void ShardManager::replayAllWAL(const std::function<std::string(const std::string &)> &execCmdFunc) {
 
         std::vector<WalEntry> allWalEntries;
 
@@ -177,15 +165,13 @@ namespace Zest {
         this->clearAllWAL();
     }
 
-    void ShardManager::appendToWAL(const std::string &key, const std::string &command)
-    {
+    void ShardManager::appendToWAL(const std::string &key, const std::string &command) {
         int shardId = this->getShardId(key);
         auto &shard = this->getShards()[static_cast<size_t>(shardId)];
         shard->getWAL().append(command);
     }
 
-    void ShardManager::reloadSettings(Settings &set)
-    {
+    void ShardManager::reloadSettings(Settings &set) {
         this->settings = set;
 
         for (auto &shard : this->shards) {

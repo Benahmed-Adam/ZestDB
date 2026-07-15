@@ -14,8 +14,7 @@ namespace Zest {
 
     static constexpr size_t MAX_KEY_SIZE = 256;
 
-    struct IndexEntry
-    {
+    struct IndexEntry {
         char key[MAX_KEY_SIZE];
         int segmentId;
         unsigned long offset;
@@ -23,8 +22,7 @@ namespace Zest {
         bool isTombstone;
     };
 
-    class IndexManager
-    {
+    class IndexManager {
     public:
         IndexManager(Settings &set);
         ~IndexManager();

@@ -10,8 +10,7 @@
 
 namespace Zest {
 
-    class ThreadPool
-    {
+    class ThreadPool {
     public:
         explicit ThreadPool(size_t numThreads);
         ~ThreadPool();
@@ -35,8 +34,7 @@ namespace Zest {
         size_t activeTasks;
     };
 
-    template <typename F> std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F &&task)
-    {
+    template <typename F> std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F &&task) {
         using returnType = typename std::result_of<F()>::type;
 
         auto taskPtr = std::make_shared<std::packaged_task<returnType()>>(std::forward<F>(task));

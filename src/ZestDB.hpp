@@ -18,14 +18,12 @@
 
 namespace Zest {
 
-    struct CreationValidationRuleResult
-    {
+    struct CreationValidationRuleResult {
         ValidationRule rule;
         bool result;
     };
 
-    class ZestDB
-    {
+    class ZestDB {
     public:
         ZestDB();
         ~ZestDB();

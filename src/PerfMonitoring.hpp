@@ -6,8 +6,7 @@ namespace Zest {
 
     using json = nlohmann::json;
 
-    struct Stats
-    {
+    struct Stats {
         unsigned int nbRequests = 0;
         unsigned int nbCacheMisses = 0;
 
@@ -19,8 +18,7 @@ namespace Zest {
         void computeAverages();
     };
 
-    class PerfMonitoring
-    {
+    class PerfMonitoring {
     public:
         json getPerformances() const;
         void addGetStats(bool isCacheMiss, double latency);

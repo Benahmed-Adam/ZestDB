@@ -10,12 +10,9 @@
 namespace Zest {
 
     Compactor::Compactor(const Settings &set)
-        : settings(set)
-    {
-    }
+        : settings(set) {}
 
-    void Compactor::run(IndexManager &indexManager, StorageManager &storageManager, std::atomic<bool> &stopFlag)
-    {
+    void Compactor::run(IndexManager &indexManager, StorageManager &storageManager, std::atomic<bool> &stopFlag) {
         ZestLog(LogLevel::INFO, "Starting the compactor...");
 
         while (!stopFlag.load()) {

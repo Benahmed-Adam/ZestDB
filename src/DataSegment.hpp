@@ -9,8 +9,7 @@
 
 namespace Zest {
 
-    class DataSegment
-    {
+    class DataSegment {
     public:
         DataSegment(Settings &set, int segmentId);
         ~DataSegment();

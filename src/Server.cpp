@@ -11,12 +11,9 @@ namespace Zest {
 
     Session::Session(ZestStream stream, ZestDB &db)
         : stream_(std::move(stream)),
-          db_(db)
-    {
-    }
+          db_(db) {}
 
-    void Session::start()
-    {
+    void Session::start() {
         std::string remote_ip =
             std::visit([](auto &s) { return s.lowest_layer().remote_endpoint().address().to_string(); }, stream_);
 
@@ -43,8 +40,7 @@ namespace Zest {
         }
     }
 
-    void Session::do_read_size()
-    {
+    void Session::do_read_size() {
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto &stream) {
@@ -64,8 +60,7 @@ namespace Zest {
             stream_);
     }
 
-    void Session::do_read_command(uint32_t payload_size)
-    {
+    void Session::do_read_command(uint32_t payload_size) {
         auto self(this->shared_from_this());
         std::visit(
             [this, self, payload_size](auto &stream) {
@@ -151,8 +146,7 @@ namespace Zest {
             stream_);
     }
 
-    void Session::queue_write(const std::string &message, bool closeAfter)
-    {
+    void Session::queue_write(const std::string &message, bool closeAfter) {
         bool write_in_progress = !write_queue_.empty();
         write_queue_.push_back(message);
         closing_ = closeAfter;
@@ -162,8 +156,7 @@ namespace Zest {
         }
     }
 
-    void Session::do_write()
-    {
+    void Session::do_write() {
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto &stream) {
@@ -184,8 +177,7 @@ namespace Zest {
             stream_);
     }
 
-    void Session::close_stream()
-    {
+    void Session::close_stream() {
         ZestLog(LogLevel::DEBUG, "Session: closing connection");
 
         std::visit(
@@ -199,8 +191,7 @@ namespace Zest {
     Server::Server(asio::io_context &io_context, short port, ZestDB &db)
         : ssl_context_(asio::ssl::context::sslv23),
           acceptor_(io_context, tcp::endpoint(tcp::v4(), static_cast<asio::ip::port_type>(port))),
-          db_(db)
-    {
+          db_(db) {
         ZestLog(LogLevel::INFO, std::format("Server: listening on port {}", port));
         if (db.settings.useSSL) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
@@ -210,8 +201,7 @@ namespace Zest {
         this->do_accept();
     }
 
-    void Server::do_accept()
-    {
+    void Server::do_accept() {
         this->acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
             if (!ec) {
                 if (this->db_.settings.useSSL) {

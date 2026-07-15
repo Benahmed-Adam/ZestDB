@@ -2,16 +2,14 @@
 
 namespace Zest {
 
-    void Stats::computeAverages()
-    {
+    void Stats::computeAverages() {
         if (this->nbRequests > 0) {
             this->AvgLatency = this->totalLatency / this->nbRequests;
             this->AvgCacheMiss = (static_cast<double>(this->nbCacheMisses) / this->nbRequests) * 100.0;
         }
     }
 
-    json PerfMonitoring::getPerformances() const
-    {
+    json PerfMonitoring::getPerformances() const {
         Stats allStats[] = { this->gStats, this->sStats, this->dStats, this->gbStats, this->sbStats, this->dbStats };
 
         json result = json::object();
@@ -48,8 +46,7 @@ namespace Zest {
         return result;
     }
 
-    void PerfMonitoring::addGetStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addGetStats(bool isCacheMiss, double latency) {
         this->gStats.nbRequests++;
         this->gStats.totalLatency += latency;
 
@@ -58,8 +55,7 @@ namespace Zest {
         }
     }
 
-    void PerfMonitoring::addSetStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addSetStats(bool isCacheMiss, double latency) {
         this->sStats.nbRequests++;
         this->sStats.totalLatency += latency;
 
@@ -68,8 +64,7 @@ namespace Zest {
         }
     }
 
-    void PerfMonitoring::addDelStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addDelStats(bool isCacheMiss, double latency) {
         this->dStats.nbRequests++;
         this->dStats.totalLatency += latency;
 
@@ -78,8 +73,7 @@ namespace Zest {
         }
     }
 
-    void PerfMonitoring::addGetByStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addGetByStats(bool isCacheMiss, double latency) {
         this->gbStats.nbRequests++;
         this->gbStats.totalLatency += latency;
 
@@ -88,8 +82,7 @@ namespace Zest {
         }
     }
 
-    void PerfMonitoring::addSetByStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addSetByStats(bool isCacheMiss, double latency) {
         this->sbStats.nbRequests++;
         this->sbStats.totalLatency += latency;
 
@@ -98,8 +91,7 @@ namespace Zest {
         }
     }
 
-    void PerfMonitoring::addDelByStats(bool isCacheMiss, double latency)
-    {
+    void PerfMonitoring::addDelByStats(bool isCacheMiss, double latency) {
         this->dbStats.nbRequests++;
         this->dbStats.totalLatency += latency;
 

@@ -7,13 +7,11 @@
 namespace Zest {
 
     LRUCache::LRUCache(unsigned int cap)
-        : capacity(cap)
-    {
+        : capacity(cap) {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::LRUCache - created cache with capacity: {}", cap));
     }
 
-    CacheEntry LRUCache::get(const std::string &key)
-    {
+    CacheEntry LRUCache::get(const std::string &key) {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::get - looking for key: {}", key));
 
         std::lock_guard<std::mutex> lock(this->mtx);
@@ -33,8 +31,7 @@ namespace Zest {
         return it->second.first;
     }
 
-    void LRUCache::put(const IndexEntry &entry, const std::string &value)
-    {
+    void LRUCache::put(const IndexEntry &entry, const std::string &value) {
         std::string key(entry.key);
 
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::put - putting key: {} with value: {}", key, value));
@@ -59,8 +56,7 @@ namespace Zest {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::put - key inserted, cache size: {}", this->map.size()));
     }
 
-    void LRUCache::remove(const std::string &key)
-    {
+    void LRUCache::remove(const std::string &key) {
         ZestLog(LogLevel::DEBUG, std::format("LRUCache::remove - removing key: {}", key));
 
         std::lock_guard<std::mutex> lock(this->mtx);

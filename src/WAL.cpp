@@ -9,8 +9,7 @@
 namespace Zest {
 
     WAL::WAL(const std::filesystem::path &walPath)
-        : canClear(true)
-    {
+        : canClear(true) {
         ZestLog(LogLevel::INFO, "Opening WAL file...");
         this->WalPath = walPath;
 
@@ -22,8 +21,7 @@ namespace Zest {
         }
     }
 
-    void WAL::clear()
-    {
+    void WAL::clear() {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (this->canClear) {
             ZestLog(LogLevel::DEBUG, "WAL::clean - Cleaning the WAL...");
@@ -35,8 +33,7 @@ namespace Zest {
         }
     }
 
-    void WAL::append(const std::string &cmd)
-    {
+    void WAL::append(const std::string &cmd) {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->wal.is_open()) {
             ZestLog(LogLevel::ERROR, "WAL::append - WAL not open");
@@ -58,8 +55,7 @@ namespace Zest {
         this->canClear = true;
     }
 
-    std::vector<WalEntry> WAL::getCmds()
-    {
+    std::vector<WalEntry> WAL::getCmds() {
         std::lock_guard<std::mutex> lock(this->mtx);
         std::vector<WalEntry> res;
 

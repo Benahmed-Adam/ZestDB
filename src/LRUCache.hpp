@@ -9,14 +9,12 @@
 
 namespace Zest {
 
-    struct CacheEntry
-    {
+    struct CacheEntry {
         IndexEntry index;
         std::string value;
     };
 
-    class LRUCache
-    {
+    class LRUCache {
     public:
         LRUCache(unsigned int cap);
 

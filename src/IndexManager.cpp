@@ -9,8 +9,7 @@ namespace Zest {
 
     IndexManager::IndexManager(Settings &set)
         : settings(set),
-          canFlush(false)
-    {
+          canFlush(false) {
         ZestLog(LogLevel::INFO, "Opening INDEX file...");
         this->indexPath = set.IndexPath;
 
@@ -33,15 +32,13 @@ namespace Zest {
         this->compact();
     }
 
-    IndexManager::~IndexManager()
-    {
+    IndexManager::~IndexManager() {
         if (this->index.is_open()) {
             this->index.close();
         }
     }
 
-    void IndexManager::loadIndexIntoMemory()
-    {
+    void IndexManager::loadIndexIntoMemory() {
         std::unique_lock<std::shared_mutex> lock(this->mtx);
         this->index.seekg(0, std::ios::end);
         std::streamoff fsize = this->index.tellg();
@@ -65,8 +62,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
     }
 
-    IndexEntry IndexManager::search(const std::string &key)
-    {
+    IndexEntry IndexManager::search(const std::string &key) {
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - searching for key: {}", key));
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
@@ -87,8 +83,7 @@ namespace Zest {
         return { "", -1, 0, 0, false };
     }
 
-    void IndexManager::update(const std::string &key, const IndexEntry &entry)
-    {
+    void IndexManager::update(const std::string &key, const IndexEntry &entry) {
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - updating key: {}", key));
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
@@ -110,8 +105,7 @@ namespace Zest {
         }
     }
 
-    void IndexManager::insert(const IndexEntry &entry)
-    {
+    void IndexManager::insert(const IndexEntry &entry) {
         std::string keyStr(entry.key);
         ZestLog(LogLevel::DEBUG, std::format("IndexManager::insert - inserting key: {}", keyStr));
         std::unique_lock<std::shared_mutex> lock(this->mtx);
@@ -156,8 +150,7 @@ namespace Zest {
         this->memoryTree[keyStr] = insertPosition;
     }
 
-    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit)
-    {
+    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit) {
         std::vector<IndexEntry> res;
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
@@ -183,8 +176,7 @@ namespace Zest {
         return res;
     }
 
-    std::vector<IndexEntry> IndexManager::compact()
-    {
+    std::vector<IndexEntry> IndexManager::compact() {
         ZestLog(LogLevel::DEBUG, "Starting index compaction...");
         std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp",
                                    std::filesystem::copy_options::overwrite_existing);
@@ -230,8 +222,7 @@ namespace Zest {
         return result;
     }
 
-    void IndexManager::flush()
-    {
+    void IndexManager::flush() {
         std::unique_lock<std::shared_mutex> lock(this->mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
             ZestLog(LogLevel::DEBUG, "IndexManager::flush - could not acquire lock, skipping");

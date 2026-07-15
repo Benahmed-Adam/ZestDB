@@ -7,8 +7,7 @@
 
 namespace Zest {
 
-    class Compactor
-    {
+    class Compactor {
     public:
         Compactor(const Settings &set);
         void compactIndex(IndexManager &indexManager);

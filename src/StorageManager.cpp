@@ -10,16 +10,14 @@
 namespace Zest {
 
     StorageManager::StorageManager(Settings &set)
-        : settings(set)
-    {
+        : settings(set) {
         ZestLog(LogLevel::DEBUG, "Initializing StorageManager...");
         this->latestSegmentId = 0;
         this->boot();
         ZestLog(LogLevel::DEBUG, "StorageManager initialized");
     }
 
-    void StorageManager::boot()
-    {
+    void StorageManager::boot() {
         ZestLog(LogLevel::DEBUG, "StorageManager::boot - scanning segments...");
         int nb = 0;
         for (auto &entry : std::filesystem::directory_iterator(this->settings.DbPath / "seg")) {
@@ -47,8 +45,7 @@ namespace Zest {
         }
     }
 
-    IndexEntry StorageManager::appendToSegment(DataSegment *seg, const std::string &value)
-    {
+    IndexEntry StorageManager::appendToSegment(DataSegment *seg, const std::string &value) {
         unsigned long pos = seg->write(value);
 
         if (pos == this->settings.SegSize + 1) {
@@ -62,8 +59,7 @@ namespace Zest {
         return { "", seg->getSegmentId(), pos, (unsigned int)value.size(), false };
     }
 
-    IndexEntry StorageManager::append(const std::string &value)
-    {
+    IndexEntry StorageManager::append(const std::string &value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         int currentId = this->latestSegmentId.load();
@@ -84,8 +80,7 @@ namespace Zest {
         return this->appendToSegment(seg, value);
     }
 
-    std::string StorageManager::read(const IndexEntry &entry)
-    {
+    std::string StorageManager::read(const IndexEntry &entry) {
         ZestLog(LogLevel::DEBUG, std::format("StorageManager::read - segment: {}, offset: {}, size: {}",
                                              entry.segmentId, entry.offset, entry.size));
 
@@ -98,8 +93,7 @@ namespace Zest {
         return "";
     }
 
-    void StorageManager::removeUnusedSegments(const std::vector<int> &usedSegmentIds)
-    {
+    void StorageManager::removeUnusedSegments(const std::vector<int> &usedSegmentIds) {
         std::lock_guard<std::mutex> lock(this->mtx);
         std::unordered_set<int> usedSet(usedSegmentIds.begin(), usedSegmentIds.end());
 
@@ -132,8 +126,7 @@ namespace Zest {
                 std::format("StorageManager - Remaining segments in memory: {}", this->segments.size()));
     }
 
-    void StorageManager::flush()
-    {
+    void StorageManager::flush() {
         ZestLog(LogLevel::DEBUG, "StorageManager::flush - Flushing each DataSegment");
         for (auto &[id, seg] : this->segments) {
             seg->flush();

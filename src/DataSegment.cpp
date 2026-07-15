@@ -11,22 +11,19 @@ namespace Zest {
         : segmentId(id),
           currentOffset(0),
           settings(set),
-          canFlush(false)
-    {
+          canFlush(false) {
         ZestLog(LogLevel::DEBUG, std::format("DataSegment::DataSegment - creating segment: {}", id));
         this->openSegment();
         this->refreshFullStatus();
     }
 
-    DataSegment::~DataSegment()
-    {
+    DataSegment::~DataSegment() {
         if (this->segment.is_open()) {
             this->segment.close();
         }
     }
 
-    void DataSegment::openSegment()
-    {
+    void DataSegment::openSegment() {
         std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", this->segmentId);
 
         bool fileExists = std::filesystem::exists(segPath);
@@ -45,8 +42,7 @@ namespace Zest {
         }
     }
 
-    void DataSegment::refreshFullStatus()
-    {
+    void DataSegment::refreshFullStatus() {
         this->segment.seekg(0, std::ios::end);
         std::streamoff pos = this->segment.tellg();
         this->segment.seekp(0, std::ios::end);
@@ -56,8 +52,7 @@ namespace Zest {
 
     unsigned long DataSegment::getWritePosition() const { return this->currentOffset.load(); }
 
-    unsigned long DataSegment::write(const std::string &value)
-    {
+    unsigned long DataSegment::write(const std::string &value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         unsigned long startOffset = this->currentOffset.load();
@@ -95,8 +90,7 @@ namespace Zest {
         return startOffset;
     }
 
-    std::string DataSegment::read(unsigned long offset, unsigned int size)
-    {
+    std::string DataSegment::read(unsigned long offset, unsigned int size) {
         std::lock_guard<std::mutex> lock(this->mtx);
         ZestLog(LogLevel::DEBUG, std::format("DataSegment::read - reading {} bytes from offset: {}", size, offset));
 
@@ -125,8 +119,7 @@ namespace Zest {
 
     int DataSegment::getSegmentId() const { return this->segmentId; }
 
-    void DataSegment::flush()
-    {
+    void DataSegment::flush() {
         std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
             ZestLog(LogLevel::DEBUG, "DataSegment::flush - could not acquire lock, skipping");

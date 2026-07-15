@@ -9,15 +9,16 @@ UseTab: Never
 AccessModifierOffset: -4
 
 NamespaceIndentation: All
+FixNamespaceComments: true
 Cpp11BracedListStyle: false
 
 BreakBeforeBraces: Custom
 BraceWrapping:
-  AfterClass: true
+  AfterClass: false
   AfterControlStatement: false
-  AfterFunction: true
+  AfterFunction: false
   AfterNamespace: false
-  AfterStruct: true
+  AfterStruct: false
   BeforeElse: false
 
 ConstructorInitializerAllOnOneLineOrOnePerLine: true

@@ -17,8 +17,7 @@ namespace Zest {
 
     using ZestStream = std::variant<tcp::socket, asio::ssl::stream<tcp::socket>>;
 
-    class Session : public std::enable_shared_from_this<Session>
-    {
+    class Session : public std::enable_shared_from_this<Session> {
     public:
         Session(ZestStream stream, ZestDB &db);
         void start();
@@ -41,8 +40,7 @@ namespace Zest {
         bool closing_ = false;
     };
 
-    class Server
-    {
+    class Server {
     public:
         Server(asio::io_context &io_context, short port, ZestDB &db);
 
