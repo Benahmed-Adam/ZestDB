@@ -41,4 +41,7 @@ clean:
 run: all
 	./$(OUTPUT)
 
-.PHONY: all clean run
+format:
+	find . -type d -name lib -prune -o -type f \( -name "*.cpp" -o -name "*.hpp" \) -exec clang-format -i {} +
+
+.PHONY: all clean run format

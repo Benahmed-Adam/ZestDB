@@ -90,11 +90,43 @@ namespace Zest {
 
         this->saveThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->saveThreadMtx);
-            // check le dernier fichier zip crée et récupérer sa date de
-            // création bool a = true; unsigned int archiveCreationDelay =
-            // this->settings.ArchiveCreationDelay;
-            // this->settings.ArchiveCreationDelay = archiveCreationDelay - le
-            // temps depuis le dernier zip créé
+
+            bool first_iteration = true;
+            unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
+            std::optional<fs::file_time_type> most_recent_time;
+
+            if (!fs::exists(this->settings.ArchiveStoragePath) ||
+                !fs::is_directory(this->settings.ArchiveStoragePath)) {
+                ZestLog(LogLevel::ERROR, "Archive storage path does not exist or is not a directory.");
+            }
+
+            for (const auto &entry : fs::directory_iterator(this->settings.ArchiveStoragePath)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".zip") {
+                    try {
+                        auto current_time = fs::last_write_time(entry.path());
+                        if (!most_recent_time.has_value() || current_time > *most_recent_time) {
+                            most_recent_time = current_time;
+                        }
+                    } catch (const fs::filesystem_error &) {
+                        ZestLog(LogLevel::WARNING, "Failed to get last write time for file: " + entry.path().string());
+                    }
+                }
+            }
+
+            if (most_recent_time.has_value()) {
+                auto most_recent_system = std::chrono::clock_cast<std::chrono::system_clock>(*most_recent_time);
+
+                auto now = std::chrono::system_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - most_recent_system).count();
+
+                if (elapsed >= 0 && static_cast<unsigned int>(elapsed) < archiveCreationDelay) {
+                    this->settings.ArchiveCreationDelay = archiveCreationDelay - static_cast<unsigned int>(elapsed);
+                } else {
+                    this->settings.ArchiveCreationDelay = 0;
+                }
+            } else {
+                this->settings.ArchiveCreationDelay = 0;
+            }
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
@@ -102,10 +134,10 @@ namespace Zest {
                     lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay),
                     [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
-                // if (a) {
-                //     this->settings.ArchiveCreationDelay =
-                //     archiveCreationDelay; a = false;
-                // }
+                if (first_iteration) {
+                    this->settings.ArchiveCreationDelay = archiveCreationDelay;
+                    first_iteration = false;
+                }
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
@@ -314,7 +346,7 @@ namespace Zest {
 
             if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort) {
                 ZestLog(LogLevel::ERROR, "Cannot change the ports during hot-reload.");
-                return { ResultType::Code::ERROR, "Cannot change the ports settongs during hot-reload. "
+                return { ResultType::Code::ERROR, "Cannot change the ports settings during hot-reload. "
                                                   "Restart the database to apply changes." };
             }
 
