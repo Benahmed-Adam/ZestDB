@@ -9,27 +9,27 @@
 
 namespace Zest {
 
-class DataSegment {
-public:
-    DataSegment(Settings& set, int segmentId);
-    ~DataSegment();
-    unsigned long write(const std::string& value);
-    std::string read(unsigned long offset, unsigned int size);
-    bool isFull() const;
-    int getSegmentId() const;
-    unsigned long getWritePosition() const;
-    void refreshFullStatus();
-    void flush();
+    class DataSegment {
+    public:
+        DataSegment(Settings& set, int segmentId);
+        ~DataSegment();
+        unsigned long write(const std::string& value);
+        std::string read(unsigned long offset, unsigned int size);
+        bool isFull() const;
+        int getSegmentId() const;
+        unsigned long getWritePosition() const;
+        void refreshFullStatus();
+        void flush();
 
-private:
-    void openSegment();
-    int segmentId;
-    std::atomic<unsigned long> currentOffset;
-    Settings& settings;
-    std::fstream segment;
-    std::mutex mtx;
+    private:
+        void openSegment();
+        int segmentId;
+        std::atomic<unsigned long> currentOffset;
+        Settings& settings;
+        std::fstream segment;
+        std::mutex mtx;
 
-    bool canFlush;
-};
+        bool canFlush;
+    };
 
 } // namespace Zest
