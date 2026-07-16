@@ -24,6 +24,7 @@ jobs:
           liblzma-dev \
           libzstd-dev \
           zlib1g-dev \
+          catch2 \
           cmake
     - name: install libzippp
       run: |
