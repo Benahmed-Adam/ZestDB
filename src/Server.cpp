@@ -178,8 +178,6 @@ namespace Zest {
     }
 
     void Session::close_stream() {
-        ZestLog(LogLevel::DEBUG, "Session: closing connection");
-
         std::visit(
             [](auto &s) {
                 std::error_code ec;

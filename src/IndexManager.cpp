@@ -63,7 +63,6 @@ namespace Zest {
     }
 
     IndexEntry IndexManager::search(const std::string &key) {
-        ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - searching for key: {}", key));
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
@@ -74,17 +73,14 @@ namespace Zest {
             IndexEntry entry;
 
             if (this->index.read((char *)&entry, sizeof(entry)) && !entry.isTombstone) {
-                ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - found key: {}", key));
                 return entry;
             }
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("IndexManager::search - key not found: {}", key));
         return { "", -1, 0, 0, false };
     }
 
     void IndexManager::update(const std::string &key, const IndexEntry &entry) {
-        ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - updating key: {}", key));
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
@@ -98,23 +94,15 @@ namespace Zest {
                 this->memoryTree.erase(it);
                 this->tombstoneOffsets.push_back(offset);
             }
-
-            ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - key updated at offset: {}", offset));
-        } else {
-            ZestLog(LogLevel::DEBUG, std::format("IndexManager::update - key not found for update: {}", key));
         }
     }
 
     void IndexManager::insert(const IndexEntry &entry) {
         std::string keyStr(entry.key);
-        ZestLog(LogLevel::DEBUG, std::format("IndexManager::insert - inserting key: {}", keyStr));
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(keyStr);
         if (it != this->memoryTree.end()) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::insert - key exists, marking "
-                                     "old entry as tombstone");
-
             std::streamoff oldOffset = it->second;
             IndexEntry oldEntry;
             this->index.seekg(oldOffset, std::ios::beg);
@@ -138,7 +126,6 @@ namespace Zest {
         if (!this->tombstoneOffsets.empty()) {
             insertPosition = this->tombstoneOffsets.back();
             this->tombstoneOffsets.pop_back();
-            ZestLog(LogLevel::DEBUG, "IndexManager::insert - reusing tombstone slot");
         } else {
             this->index.seekp(0, std::ios::end);
             insertPosition = this->index.tellp();
@@ -225,22 +212,14 @@ namespace Zest {
     void IndexManager::flush() {
         std::unique_lock<std::shared_mutex> lock(this->mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
-            ZestLog(LogLevel::DEBUG, "IndexManager::flush - could not acquire lock, skipping");
             return;
         }
-
-        ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing to disk...");
 
         if (this->canFlush) {
             this->index.flush();
             // this->index.fsync();
             this->canFlush = false;
-            ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing successful");
-            return;
         }
-
-        ZestLog(LogLevel::DEBUG, "IndexManager::flush - Flushing skipped, the "
-                                 "index is not ready to be flushed");
     }
 
 } // namespace Zest

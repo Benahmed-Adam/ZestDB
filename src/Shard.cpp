@@ -100,8 +100,6 @@ namespace Zest {
     }
 
     void Shard::fillCache() {
-        ZestLog(LogLevel::INFO, std::format("Filling up the cache for shard {}...", shardId));
-
         std::vector<IndexEntry> entries = this->indexManager->getAll();
         int numKeysInserted = 0;
 
@@ -119,7 +117,6 @@ namespace Zest {
             }
             seenKeys.insert(key);
 
-            ZestLog(LogLevel::DEBUG, std::format("Shard::fillCache - inserting key: {} in shard {}", key, shardId));
             std::string value = this->storageManager->read(entries[i]);
             this->cache->put(entries[i], value);
             numKeysInserted++;
@@ -130,27 +127,22 @@ namespace Zest {
     ResultType Shard::get(const std::string &key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
-        ZestLog(LogLevel::DEBUG, std::format("Shard::get - shard {} looking for key: {}", shardId, key));
 
         CacheEntry cacheEntry = this->cache->get(key);
 
         bool fromCache = (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone);
 
         if (fromCache) {
-            ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in cache for shard {}", shardId));
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addGetStats(false, latency);
             return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not in cache, searching index in shard {}", shardId));
-
         IndexEntry entry;
         entry = this->indexManager->search(key);
 
         if (entry.segmentId != -1 && !entry.isTombstone) {
-            ZestLog(LogLevel::DEBUG, std::format("Shard::get - found in segment: {}", entry.segmentId));
             std::string value = this->storageManager->read(entry);
 
             this->cache->put(entry, value);
@@ -161,7 +153,6 @@ namespace Zest {
             return { ResultType::Code::SUCCESS, value, 1 };
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("Shard::get - key not found: {} in shard {}", key, shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addGetStats(true, latency);
@@ -171,12 +162,8 @@ namespace Zest {
     ResultType Shard::set(const std::string &key, const std::string &value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
-        ZestLog(LogLevel::DEBUG,
-                std::format("Shard::set - shard {} key: {}, value size: {}", shardId, key, value.size()));
 
         IndexEntry entry = this->storageManager->append(value);
-        ZestLog(LogLevel::DEBUG,
-                std::format("Shard::set - appended to segment: {}, offset: {}", entry.segmentId, entry.offset));
 
         if (entry.segmentId == -1) {
             ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} "
@@ -197,7 +184,6 @@ namespace Zest {
 
         this->cache->put(entry, value);
 
-        ZestLog(LogLevel::DEBUG, std::format("Shard::set - successfully set key: {} in shard {}", key, shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetStats(false, latency);
@@ -207,7 +193,6 @@ namespace Zest {
     ResultType Shard::del(const std::string &key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
-        ZestLog(LogLevel::DEBUG, std::format("Shard::del - shard {} deleting key: {}", shardId, key));
 
         this->cache->remove(key);
         IndexEntry entry = this->indexManager->search(key);
@@ -218,16 +203,12 @@ namespace Zest {
             this->indexManager->update(key, entry);
             this->cache->remove(key);
 
-            ZestLog(LogLevel::DEBUG,
-                    std::format("Shard::del - successfully deleted key: {} in shard {}", key, shardId));
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addDelStats(false, latency);
             return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1 };
         }
 
-        ZestLog(LogLevel::DEBUG,
-                std::format("Shard::del - key not found or already deleted: {} in shard {}", key, shardId));
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(false, latency);
@@ -252,7 +233,6 @@ namespace Zest {
             }
             std::string key(entry.key);
             if (valid.func(key)) {
-                ZestLog(LogLevel::DEBUG, std::format("Shard::getBy - match found: {}", key));
                 std::string value = this->storageManager->read(entry);
                 resultArray.push_back(nlohmann::json::object({ { key, value } }));
                 matchCount++;
@@ -288,7 +268,6 @@ namespace Zest {
             }
             std::string key(entry.key);
             if (valid.func(key)) {
-                ZestLog(LogLevel::DEBUG, std::format("Shard::setBy - match found: {}", key));
                 IndexEntry newEntry = this->storageManager->append(value);
 
                 if (newEntry.segmentId == -1) {
@@ -341,7 +320,6 @@ namespace Zest {
             }
             std::string key(entry.key);
             if (valid.func(key)) {
-                ZestLog(LogLevel::DEBUG, std::format("Shard::delBy - match found: {}", key));
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
 
@@ -365,7 +343,6 @@ namespace Zest {
     }
 
     void Shard::flush() {
-        ZestLog(LogLevel::DEBUG, std::format("Flushing shard {}...", shardId));
         this->indexManager->flush();
         this->storageManager->flush();
         this->wal->clear();

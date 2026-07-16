@@ -204,21 +204,10 @@ namespace Zest {
         this->settings = std::move(this->loadConfig());
         setLoggerDebugMode(this->settings.isDebug);
 
-        ZestLog(LogLevel::DEBUG, std::format("Database path : {}", this->settings.DbPath.string()));
-        ZestLog(LogLevel::DEBUG, std::format("Archive storage path : {}", this->settings.ArchiveStoragePath.string()));
-        ZestLog(LogLevel::DEBUG, std::format("ArchiveCreationDelay : {}", this->settings.ArchiveCreationDelay));
-        ZestLog(LogLevel::DEBUG, std::format("AutoArchiveSaving : {}", this->settings.AutoArchiveSaving));
-        ZestLog(LogLevel::DEBUG, std::format("SegSize : {}", this->settings.SegSize));
-        ZestLog(LogLevel::DEBUG, std::format("MaxKeySize : {}", this->settings.MaxKeySize));
-        ZestLog(LogLevel::DEBUG, std::format("MaxValueSize : {}", this->settings.MaxValueSize));
-        ZestLog(LogLevel::DEBUG, std::format("CacheSize : {}", this->settings.CacheSize));
-        ZestLog(LogLevel::DEBUG, std::format("CompactingInterval : {}", this->settings.CompactingInterval));
-        ZestLog(LogLevel::DEBUG, std::format("FlushInterval : {}", this->settings.FlushInterval));
-        ZestLog(LogLevel::DEBUG, std::format("isDebug : {}", this->settings.isDebug));
-        ZestLog(LogLevel::DEBUG, std::format("isJson : {}", this->settings.jsonOnly));
-        ZestLog(LogLevel::DEBUG, std::format("readOnly : {}", this->settings.readOnly));
-        ZestLog(LogLevel::DEBUG, std::format("DBPort : {}", this->settings.DBPort));
-        ZestLog(LogLevel::DEBUG, std::format("WebPort : {}", this->settings.WebPort));
+        ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}",
+                                                 this->settings.DbPath.string(), this->settings.CacheSize,
+                                                 this->settings.SegSize, this->settings.DBPort,
+                                                 this->settings.WebPort));
 
         if (!fs::exists(this->settings.DbPath)) {
             fs::create_directories(this->settings.DbPath);
@@ -294,11 +283,8 @@ namespace Zest {
                     std::string password = user_node["password"].get_value<std::string>();
 
                     this->users[username] = sha256(username + password);
-                    ZestLog(LogLevel::DEBUG,
-                            std::format("Loaded user: {} with token: {}", username, this->users[username]));
                 }
             } else {
-                ZestLog(LogLevel::DEBUG, "No users found in config");
             }
         } catch (const std::exception &e) {
             ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
@@ -455,7 +441,7 @@ namespace Zest {
                     return false;
                 }
 
-                ZestLog(LogLevel::DEBUG, std::format("Added a file to the archive : {}", zip_entry_name));
+
             }
         }
 
@@ -470,16 +456,13 @@ namespace Zest {
 
     bool ZestDB::validateToken(const std::string &username, const std::string &token) const {
         if (this->users.find(username) == this->users.end()) {
-            ZestLog(LogLevel::DEBUG, std::format("ZestDB::validateToken - user not found: {}", username));
             return false;
         }
 
         if (this->users.at(username) != token) {
-            ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - token mismatch");
             return false;
         }
 
-        ZestLog(LogLevel::DEBUG, "ZestDB::validateToken - success");
         return true;
     }
 
@@ -508,8 +491,6 @@ namespace Zest {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("ZestDB::get - looking for key: {}", key));
-
         return this->shardManager->get(key);
     }
 
@@ -536,8 +517,6 @@ namespace Zest {
             }
         }
 
-        ZestLog(LogLevel::DEBUG, std::format("ZestDB::set - key: {}, value size: {}", key, value.size()));
-
         return this->shardManager->set(key, value);
     }
 
@@ -549,8 +528,6 @@ namespace Zest {
         if (!this->validateKey(key)) {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
         }
-
-        ZestLog(LogLevel::DEBUG, std::format("ZestDB::del - deleting key: {}", key));
 
         return this->shardManager->del(key);
     }

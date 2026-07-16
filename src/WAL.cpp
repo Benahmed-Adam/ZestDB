@@ -24,7 +24,6 @@ namespace Zest {
     void WAL::clear() {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (this->canClear) {
-            ZestLog(LogLevel::DEBUG, "WAL::clean - Cleaning the WAL...");
             this->wal.close();
             this->wal.open(this->WalPath, std::ios::out | std::ios::binary | std::ios::trunc);
             this->wal.close();

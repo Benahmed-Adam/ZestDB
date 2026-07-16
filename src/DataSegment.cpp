@@ -12,7 +12,6 @@ namespace Zest {
           currentOffset(0),
           settings(set),
           canFlush(false) {
-        ZestLog(LogLevel::DEBUG, std::format("DataSegment::DataSegment - creating segment: {}", id));
         this->openSegment();
         this->refreshFullStatus();
     }
@@ -58,8 +57,6 @@ namespace Zest {
         unsigned long startOffset = this->currentOffset.load();
 
         if (startOffset + value.size() > this->settings.SegSize) {
-            ZestLog(LogLevel::DEBUG,
-                    std::format("DataSegment::write - segment {} would exceed capacity", this->segmentId));
             return this->settings.SegSize + 1;
         }
 
@@ -81,18 +78,11 @@ namespace Zest {
         unsigned long newOffset = startOffset + value.size();
         this->currentOffset.store(newOffset);
 
-        if (newOffset >= this->settings.SegSize) {
-            ZestLog(LogLevel::DEBUG, std::format("DataSegment::write - segment {} is now full", this->segmentId));
-        }
-
-        ZestLog(LogLevel::DEBUG,
-                std::format("DataSegment::write - wrote {} bytes at offset: {}", value.size(), startOffset));
         return startOffset;
     }
 
     std::string DataSegment::read(unsigned long offset, unsigned int size) {
         std::lock_guard<std::mutex> lock(this->mtx);
-        ZestLog(LogLevel::DEBUG, std::format("DataSegment::read - reading {} bytes from offset: {}", size, offset));
 
         this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 
@@ -122,22 +112,14 @@ namespace Zest {
     void DataSegment::flush() {
         std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
         if (!lock.owns_lock()) {
-            ZestLog(LogLevel::DEBUG, "DataSegment::flush - could not acquire lock, skipping");
             return;
         }
-
-        ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing to disk...");
 
         if (this->canFlush) {
             this->segment.flush();
             // this->segment.fsync();
             this->canFlush = false;
-            ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing successful");
-            return;
         }
-
-        ZestLog(LogLevel::DEBUG, "DataSegment::flush - Flushing skipped, the "
-                                 "segment is not ready to be flushed");
     }
 
 } // namespace Zest
