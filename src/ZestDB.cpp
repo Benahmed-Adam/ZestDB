@@ -197,8 +197,7 @@ namespace Zest {
         this->settings = std::move(this->loadConfig());
         setLoggerDebugMode(this->settings.isDebug);
 
-        ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}", this->settings.DbPath.string(), this->settings.CacheSize, this->settings.SegSize, this->settings.DBPort,
-                                             this->settings.WebPort));
+        ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}", this->settings.DbPath.string(), this->settings.CacheSize, this->settings.SegSize, this->settings.DBPort, this->settings.WebPort));
 
         if (!fs::exists(this->settings.DbPath)) {
             fs::create_directories(this->settings.DbPath);
@@ -311,8 +310,8 @@ namespace Zest {
             Settings oldSettings = this->settings;
             Settings s = this->loadConfig();
 
-            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath ||
-                s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
+            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath ||
+                s.SSLKeyPath != oldSettings.SSLKeyPath) {
                 ZestLog(LogLevel::ERROR, "Cannot change path settings during "
                                          "hot-reload. Paths are immutable.");
                 return { ResultType::Code::ERROR, "Cannot change path settings during hot-reload. Paths are "
