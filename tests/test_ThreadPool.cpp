@@ -1,6 +1,7 @@
-#include <catch2/catch_all.hpp>
 #include <atomic>
+#include <catch2/catch_all.hpp>
 #include <vector>
+
 #include "ThreadPool.hpp"
 
 using namespace Zest;
@@ -24,7 +25,7 @@ TEST_CASE("ThreadPool multiple tasks", "[threadpool]") {
 
 TEST_CASE("ThreadPool waitAll blocks until complete", "[threadpool]") {
     ThreadPool pool(2);
-    std::atomic<int> counter{0};
+    std::atomic<int> counter{ 0 };
     for (int i = 0; i < 10; i++) {
         pool.enqueue([&counter]() { counter.fetch_add(1); });
     }

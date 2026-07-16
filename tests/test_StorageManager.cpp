@@ -1,7 +1,8 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
-#include "StorageManager.hpp"
+
 #include "Settings.hpp"
+#include "StorageManager.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -66,7 +67,7 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager removeUnusedSegments", "
     sm.append("a");
     sm.append("b");
     sm.flush();
-    std::vector<int> used = {1};
+    std::vector<int> used = { 1 };
     sm.removeUnusedSegments(used);
 }
 

@@ -1,6 +1,7 @@
-#include <catch2/catch_all.hpp>
 #include <asio.hpp>
+#include <catch2/catch_all.hpp>
 #include <cstring>
+
 #include "Server.hpp"
 #include "Settings.hpp"
 
@@ -46,8 +47,8 @@ TEST_CASE("Messages constants are defined", "[server]") {
 }
 
 TEST_CASE("ResultType SUCCESS and ERROR codes", "[server]") {
-    ResultType ok{ResultType::Code::SUCCESS, "ok", 0};
-    ResultType err{ResultType::Code::ERROR, "fail", 0};
+    ResultType ok{ ResultType::Code::SUCCESS, "ok", 0 };
+    ResultType err{ ResultType::Code::ERROR, "fail", 0 };
     REQUIRE(ok.code == ResultType::Code::SUCCESS);
     REQUIRE(err.code == ResultType::Code::ERROR);
 }

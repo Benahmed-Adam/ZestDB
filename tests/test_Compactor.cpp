@@ -1,6 +1,7 @@
-#include <catch2/catch_all.hpp>
 #include <atomic>
+#include <catch2/catch_all.hpp>
 #include <filesystem>
+
 #include "Compactor.hpp"
 #include "IndexManager.hpp"
 #include "StorageManager.hpp"
@@ -28,7 +29,7 @@ TEST_CASE_METHOD(CompactorFixture, "Compactor stop flag causes exit", "[compacto
     Compactor comp(settings);
     IndexManager im(settings);
     StorageManager sm(settings);
-    std::atomic<bool> stopFlag{true};
+    std::atomic<bool> stopFlag{ true };
     std::thread t([&]() { comp.run(im, sm, stopFlag); });
     t.join();
     SUCCEED();
@@ -38,7 +39,7 @@ TEST_CASE_METHOD(CompactorFixture, "Compactor runs one cycle then stops", "[comp
     Compactor comp(settings);
     IndexManager im(settings);
     StorageManager sm(settings);
-    std::atomic<bool> stopFlag{false};
+    std::atomic<bool> stopFlag{ false };
     std::thread t([&]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         stopFlag.store(true);

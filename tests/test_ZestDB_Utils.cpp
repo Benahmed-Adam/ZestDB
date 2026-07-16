@@ -1,4 +1,5 @@
 #include <catch2/catch_all.hpp>
+
 #include "ZestDB.hpp"
 
 using namespace Zest;
@@ -28,32 +29,32 @@ TEST_CASE("sha256 long string", "[sha256]") {
 }
 
 TEST_CASE("responseToJson plain string", "[utils]") {
-    ResultType r{ResultType::Code::SUCCESS, "hello", 0};
+    ResultType r{ ResultType::Code::SUCCESS, "hello", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"code\":0") != std::string::npos);
     REQUIRE(json.find("\"response\":\"hello\"") != std::string::npos);
 }
 
 TEST_CASE("responseToJson JSON array", "[utils]") {
-    ResultType r{ResultType::Code::SUCCESS, "[{\"k\":\"v\"}]", 1};
+    ResultType r{ ResultType::Code::SUCCESS, "[{\"k\":\"v\"}]", 1 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"affectedRows\":1") != std::string::npos);
 }
 
 TEST_CASE("responseToJson JSON object", "[utils]") {
-    ResultType r{ResultType::Code::SUCCESS, "{\"key\":\"val\"}", 0};
+    ResultType r{ ResultType::Code::SUCCESS, "{\"key\":\"val\"}", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"code\":0") != std::string::npos);
 }
 
 TEST_CASE("responseToJson empty response", "[utils]") {
-    ResultType r{ResultType::Code::ERROR, "", 0};
+    ResultType r{ ResultType::Code::ERROR, "", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"response\":\"\"") != std::string::npos);
 }
 
 TEST_CASE("responseToJson affectedRows", "[utils]") {
-    ResultType r{ResultType::Code::SUCCESS, "ok", 42};
+    ResultType r{ ResultType::Code::SUCCESS, "ok", 42 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"affectedRows\":42") != std::string::npos);
 }

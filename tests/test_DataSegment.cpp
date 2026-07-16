@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+
 #include "DataSegment.hpp"
 #include "Settings.hpp"
 

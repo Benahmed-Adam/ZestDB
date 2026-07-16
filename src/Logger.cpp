@@ -1,9 +1,9 @@
 #include "Logger.hpp"
 
 #include <chrono>
+#include <format>
 #include <iostream>
 #include <sstream>
-#include <format>
 
 namespace Zest {
 
@@ -53,7 +53,7 @@ namespace Zest {
 
         std::ostringstream logEntry;
         logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message
-                << "\x1b[0m" << std::endl;
+                 << "\x1b[0m" << std::endl;
 
         std::cout << logEntry.str();
     }

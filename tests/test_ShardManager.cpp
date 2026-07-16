@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+
 #include "ShardManager.hpp"
 
 using namespace Zest;
@@ -102,7 +103,10 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager replayAllWAL", "[shardmanage
     sm.set("key1", "val1");
     sm.flush();
     std::vector<std::string> replayed;
-    sm.replayAllWAL([&](const std::string &cmd) { replayed.push_back(cmd); return "ok"; });
+    sm.replayAllWAL([&](const std::string &cmd) {
+        replayed.push_back(cmd);
+        return "ok";
+    });
     sm.flush();
     SUCCEED();
 }
