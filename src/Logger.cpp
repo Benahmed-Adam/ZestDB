@@ -1,8 +1,9 @@
 #include "Logger.hpp"
 
-#include <ctime>
+#include <chrono>
 #include <iostream>
 #include <sstream>
+#include <format>
 
 namespace Zest {
 
@@ -46,14 +47,13 @@ namespace Zest {
         if (!isDebug && level == LogLevel::DEBUG)
             return;
 
-        time_t now = time(0);
-        tm *timeinfo = localtime(&now);
-        char timestamp[20];
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+        auto now = std::chrono::system_clock::now();
+
+        std::string timestamp = std::format("{:%F %T}", now);
 
         std::ostringstream logEntry;
         logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message
-                 << "\x1b[0m" << std::endl;
+                << "\x1b[0m" << std::endl;
 
         std::cout << logEntry.str();
     }

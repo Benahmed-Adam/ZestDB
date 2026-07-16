@@ -4,7 +4,6 @@ obj/
 *.o
 .vscode/
 DB/
-test*
 TODO*
 TEST.md
 cert.pem

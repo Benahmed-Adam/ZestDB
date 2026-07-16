@@ -98,6 +98,7 @@ namespace Zest {
             if (!fs::exists(this->settings.ArchiveStoragePath) ||
                 !fs::is_directory(this->settings.ArchiveStoragePath)) {
                 ZestLog(LogLevel::ERROR, "Archive storage path does not exist or is not a directory.");
+                fs::create_directories(this->settings.ArchiveStoragePath);
             }
 
             for (const auto &entry : fs::directory_iterator(this->settings.ArchiveStoragePath)) {
