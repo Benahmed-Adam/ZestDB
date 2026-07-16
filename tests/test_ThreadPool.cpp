@@ -17,8 +17,8 @@ TEST_CASE("ThreadPool multiple tasks", "[threadpool]") {
     for (int i = 0; i < 100; i++) {
         futures.push_back(pool.enqueue([i]() { return i * 2; }));
     }
-    for (int i = 0; i < 100; i++) {
-        REQUIRE(futures[i].get() == i * 2);
+    for (size_t i = 0; i < 100; i++) {
+        REQUIRE(futures[i].get() == static_cast<int>(i) * 2);
     }
 }
 

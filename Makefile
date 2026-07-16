@@ -27,8 +27,7 @@ OBJ_CXX = $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(SRC_CXX))
 TESTDIR = tests
 TESTBINDIR = test_bin
 
-TEST_CXXFLAGS = -Wall -Wextra -Wpedantic -std=c++20 -I$(SRCDIR) -Wno-deprecated-declarations -g -O0
-TEST_LDFLAGS = -lCatch2Main -lCatch2 $(COMMON_LDFLAGS) -lpthread
+TEST_LDFLAGS = -lCatch2Main -lCatch2 -lpthread
 
 TEST_SRC_CXX = $(filter-out $(SRCDIR)/main.cpp, $(SRC_CXX))
 TEST_OBJ_CXX = $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(TEST_SRC_CXX))
@@ -47,13 +46,9 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -c $< -o $@ $(CXXFLAGS)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) -c $< -o $@ $(TEST_CXXFLAGS)
-
 $(TESTBINDIR)/%: $(TESTDIR)/%.cpp $(TEST_OBJ_CXX)
 	@mkdir -p $(BINDIR) $(TESTBINDIR)
-	$(CXX) $(TEST_CXXFLAGS) $< $(TEST_OBJ_CXX) -o $@ $(TEST_LDFLAGS)
+	$(CXX) $(CXXFLAGS) $< $(TEST_OBJ_CXX) -o $@ $(LDFLAGS) $(TEST_LDFLAGS)
 
 tests: $(TEST_BINS)
 	@for test in $(TEST_BINS); do echo "=== Running $$test ===" && ./$$test && echo; done
