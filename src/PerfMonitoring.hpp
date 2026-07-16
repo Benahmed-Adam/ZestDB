@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "lib/json.hpp"
 
 namespace Zest {
@@ -7,15 +9,17 @@ namespace Zest {
     using json = nlohmann::json;
 
     struct Stats {
-        unsigned int nbRequests = 0;
-        unsigned int nbCacheMisses = 0;
+        std::atomic<unsigned int> nbRequests = 0;
+        std::atomic<unsigned int> nbCacheMisses = 0;
 
-        double totalLatency = 0.0;
+        std::atomic<double> totalLatency = 0.0;
 
-        double AvgLatency = 0.0;
-        double AvgCacheMiss = 0.0;
+        Stats(const Stats &) = delete;
+        Stats &operator=(const Stats &) = delete;
+        Stats() = default;
 
-        void computeAverages();
+        double avgLatency() const;
+        double avgCacheMissPercent() const;
     };
 
     class PerfMonitoring {

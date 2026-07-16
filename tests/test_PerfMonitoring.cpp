@@ -4,21 +4,19 @@
 
 using namespace Zest;
 
-TEST_CASE("Stats::computeAverages with requests", "[perf]") {
+TEST_CASE("Stats::avgLatency with requests", "[perf]") {
     Stats s;
     s.nbRequests = 10;
     s.totalLatency = 100.0;
     s.nbCacheMisses = 3;
-    s.computeAverages();
-    REQUIRE(s.AvgLatency == 10.0);
-    REQUIRE(s.AvgCacheMiss == 30.0);
+    REQUIRE(s.avgLatency() == 10.0);
+    REQUIRE(s.avgCacheMissPercent() == 30.0);
 }
 
-TEST_CASE("Stats::computeAverages with zero requests", "[perf]") {
+TEST_CASE("Stats::avgLatency with zero requests", "[perf]") {
     Stats s;
-    s.computeAverages();
-    REQUIRE(s.AvgLatency == 0.0);
-    REQUIRE(s.AvgCacheMiss == 0.0);
+    REQUIRE(s.avgLatency() == 0.0);
+    REQUIRE(s.avgCacheMissPercent() == 0.0);
 }
 
 TEST_CASE("addGetStats cache miss increments counter", "[perf]") {

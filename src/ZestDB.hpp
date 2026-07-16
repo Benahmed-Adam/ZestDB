@@ -64,21 +64,19 @@ namespace Zest {
 
         bool createArchive();
 
+        std::unordered_map<std::string, std::string> users;
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<Server> socket;
 
         std::atomic<bool> replaying;
         std::atomic<bool> isFlushing;
 
-        std::unordered_map<std::string, std::string> users;
+        std::mutex flushThreadMtx;
+        std::mutex saveThreadMtx;
+        std::condition_variable_any threadCV;
 
         std::jthread flushThread;
-        std::mutex flushThreadMtx;
-
         std::jthread saveThread;
-        std::mutex saveThreadMtx;
-
-        std::condition_variable_any threadCV;
     };
 
     std::string sha256(const std::string &str);

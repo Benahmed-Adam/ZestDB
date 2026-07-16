@@ -2,31 +2,34 @@
 
 namespace Zest {
 
-    void Stats::computeAverages() {
-        if (this->nbRequests > 0) {
-            this->AvgLatency = this->totalLatency / this->nbRequests;
-            this->AvgCacheMiss = (static_cast<double>(this->nbCacheMisses) / this->nbRequests) * 100.0;
-        }
+    double Stats::avgLatency() const {
+        unsigned int reqs = this->nbRequests.load();
+        return reqs > 0 ? this->totalLatency.load() / static_cast<double>(reqs) : 0.0;
+    }
+
+    double Stats::avgCacheMissPercent() const {
+        unsigned int reqs = this->nbRequests.load();
+        return reqs > 0 ? (static_cast<double>(this->nbCacheMisses.load()) / static_cast<double>(reqs)) * 100.0 : 0.0;
+    }
+
+    static json statsToJson(const Stats &s) {
+        return {
+            { "nbRequests", s.nbRequests.load() },
+            { "nbCacheMisses", s.nbCacheMisses.load() },
+            { "avgLatencyMs", s.avgLatency() },
+            { "avgCacheMissPercent", s.avgCacheMissPercent() },
+        };
     }
 
     json PerfMonitoring::getPerformances() const {
-        Stats allStats[] = { this->gStats, this->sStats, this->dStats, this->gbStats, this->sbStats, this->dbStats };
-
         json result = json::object();
 
-        std::string names[] = { "get", "set", "del", "getby", "setby", "delby" };
-
-        for (int i = 0; i < 6; ++i) {
-            Stats s = allStats[i];
-            s.computeAverages();
-
-            result[names[i]] = {
-                { "nbRequests", s.nbRequests },
-                { "nbCacheMisses", s.nbCacheMisses },
-                { "avgLatencyMs", s.AvgLatency },
-                { "avgCacheMissPercent", s.AvgCacheMiss },
-            };
-        }
+        result["get"] = statsToJson(this->gStats);
+        result["set"] = statsToJson(this->sStats);
+        result["del"] = statsToJson(this->dStats);
+        result["getby"] = statsToJson(this->gbStats);
+        result["setby"] = statsToJson(this->sbStats);
+        result["delby"] = statsToJson(this->dbStats);
 
         unsigned int totalRequests = this->gStats.nbRequests + this->sStats.nbRequests + this->dStats.nbRequests + this->gbStats.nbRequests + this->sbStats.nbRequests + this->dbStats.nbRequests;
         unsigned int totalCacheMisses = this->gStats.nbCacheMisses + this->sStats.nbCacheMisses + this->dStats.nbCacheMisses + this->gbStats.nbCacheMisses + this->sbStats.nbCacheMisses + this->dbStats.nbCacheMisses;

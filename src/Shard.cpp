@@ -86,13 +86,13 @@ namespace Zest {
             promise.set_value();
         });
 
-        this->compactorThread = std::jthread([this](std::stop_token stopToken) mutable {
+        this->compactorThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->compactorThreadMtx);
 
             ZestLog(LogLevel::INFO, "Starting the compactor...");
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.CompactingInterval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 std::vector<IndexEntry> entries = indexManager->compact();
 
@@ -124,7 +124,10 @@ namespace Zest {
         });
 
         cacheFuture.wait();
-        cacheThread.detach();
+
+        if (cacheThread.joinable()) {
+            cacheThread.join();
+        }
     }
 
     void Shard::fillCache() {

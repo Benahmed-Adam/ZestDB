@@ -38,7 +38,6 @@ namespace Zest {
 
         void reloadSettings(Settings &set);
 
-        std::unique_ptr<IndexManager> indexManager;
         Settings settings;
         int shardId;
         PerfMonitoring perfMonitor;
@@ -48,18 +47,17 @@ namespace Zest {
         void fillCache();
         void verifyIndexEntries();
 
+        std::unique_ptr<WAL> wal;
+        std::unique_ptr<IndexManager> indexManager;
         std::unique_ptr<StorageManager> storageManager;
         std::unique_ptr<LRUCache> cache;
-        std::unique_ptr<WAL> wal;
 
         std::shared_mutex readMtx;
 
-        std::jthread compactorThread;
+        std::atomic<bool> isStopped = false; 
         std::mutex compactorThreadMtx;
-
         std::condition_variable_any threadCV;
-
-        std::atomic<bool> isStopped = false;
+        std::jthread compactorThread;
     };
 
 } // namespace Zest
