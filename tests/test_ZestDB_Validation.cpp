@@ -101,9 +101,7 @@ TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ew mode key shor
     REQUIRE_FALSE(vr.func("short"));
 }
 
-TEST_CASE_METHOD(ZestDBValidationFixture, "isJsonValid valid JSON", "[validation]") {
-    REQUIRE(db->execCmd("gcfg").code == ResultType::Code::SUCCESS);
-}
+TEST_CASE_METHOD(ZestDBValidationFixture, "isJsonValid valid JSON", "[validation]") { REQUIRE(db->execCmd("gcfg").code == ResultType::Code::SUCCESS); }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "ResultType default values", "[validation]") {
     ResultType r;

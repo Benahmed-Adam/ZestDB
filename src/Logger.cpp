@@ -52,8 +52,7 @@ namespace Zest {
         std::string timestamp = std::format("{:%F %T}", now);
 
         std::ostringstream logEntry;
-        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message
-                 << "\x1b[0m" << std::endl;
+        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message << "\x1b[0m" << std::endl;
 
         std::cout << logEntry.str();
     }

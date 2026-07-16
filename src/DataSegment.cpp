@@ -36,8 +36,7 @@ namespace Zest {
         }
 
         if (!this->segment.is_open()) {
-            ZestLog(LogLevel::ERROR,
-                    std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
+            ZestLog(LogLevel::ERROR, std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
         }
     }
 

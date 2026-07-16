@@ -74,9 +74,7 @@ namespace Zest {
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(
-                    lock, stopToken, std::chrono::seconds(this->settings.FlushInterval),
-                    [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.FlushInterval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
@@ -95,8 +93,7 @@ namespace Zest {
             unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
             std::optional<fs::file_time_type> most_recent_time;
 
-            if (!fs::exists(this->settings.ArchiveStoragePath) ||
-                !fs::is_directory(this->settings.ArchiveStoragePath)) {
+            if (!fs::exists(this->settings.ArchiveStoragePath) || !fs::is_directory(this->settings.ArchiveStoragePath)) {
                 ZestLog(LogLevel::ERROR, "Archive storage path does not exist or is not a directory.");
                 fs::create_directories(this->settings.ArchiveStoragePath);
             }
@@ -131,9 +128,7 @@ namespace Zest {
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(
-                    lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay),
-                    [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (first_iteration) {
                     this->settings.ArchiveCreationDelay = archiveCreationDelay;
@@ -146,16 +141,14 @@ namespace Zest {
 
                 if (this->settings.AutoArchiveSaving) {
                     lock.unlock();
-                    ZestLog(LogLevel::INFO,
-                            this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
+                    ZestLog(LogLevel::INFO, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
                     lock.lock();
                 }
             }
         });
 
         if (this->settings.useSSL) {
-            this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(),
-                                                             this->settings.SSLKeyPath.string().c_str());
+            this->srv = std::make_unique<httplib::SSLServer>(this->settings.SSLCertPath.string().c_str(), this->settings.SSLKeyPath.string().c_str());
             ZestLog(LogLevel::INFO, "Server mode: Encrypted");
         } else {
             this->srv = std::make_unique<httplib::Server>();
@@ -204,10 +197,8 @@ namespace Zest {
         this->settings = std::move(this->loadConfig());
         setLoggerDebugMode(this->settings.isDebug);
 
-        ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}",
-                                                 this->settings.DbPath.string(), this->settings.CacheSize,
-                                                 this->settings.SegSize, this->settings.DBPort,
-                                                 this->settings.WebPort));
+        ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}", this->settings.DbPath.string(), this->settings.CacheSize, this->settings.SegSize, this->settings.DBPort,
+                                             this->settings.WebPort));
 
         if (!fs::exists(this->settings.DbPath)) {
             fs::create_directories(this->settings.DbPath);
@@ -258,8 +249,7 @@ namespace Zest {
             result.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
             result.SSLKeyPath = node["SSLKeyPath"].get_value_or<std::string>("");
 
-            result.ArchiveStoragePath =
-                node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
+            result.ArchiveStoragePath = node["ArchiveStoragePath"].get_value_or<std::string>((current_path / "archive/").string());
             result.ArchiveCreationDelay = node["ArchiveCreationDelay"].get_value_or<unsigned int>(3600);
             result.AutoArchiveSaving = node["AutoArchiveSaving"].get_value_or<bool>(true);
 
@@ -299,8 +289,7 @@ namespace Zest {
         }
 
         if (result.MaxKeySize > MAX_KEY_SIZE) {
-            ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...",
-                                                   result.MaxKeySize, MAX_KEY_SIZE));
+            ZestLog(LogLevel::WARNING, std::format("MaxKeySize ({}) exceeds internal limit ({}), clamping...", result.MaxKeySize, MAX_KEY_SIZE));
             result.MaxKeySize = MAX_KEY_SIZE;
         }
 
@@ -322,8 +311,7 @@ namespace Zest {
             Settings oldSettings = this->settings;
             Settings s = this->loadConfig();
 
-            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath ||
-                s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath ||
+            if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath ||
                 s.SSLCertPath != oldSettings.SSLCertPath || s.SSLKeyPath != oldSettings.SSLKeyPath) {
                 ZestLog(LogLevel::ERROR, "Cannot change path settings during "
                                          "hot-reload. Paths are immutable.");
@@ -420,8 +408,7 @@ namespace Zest {
         }
 
         auto now = std::chrono::system_clock::now();
-        fs::path archive_full_path =
-            this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
+        fs::path archive_full_path = this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
 
         libzippp::ZipArchive archive(archive_full_path.string());
         if (!archive.open(libzippp::ZipArchive::New)) {
@@ -440,8 +427,6 @@ namespace Zest {
                     archive.close();
                     return false;
                 }
-
-
             }
         }
 
@@ -468,8 +453,7 @@ namespace Zest {
 
     bool ZestDB::validateKey(const std::string &key) const {
         if (key.size() > this->settings.MaxKeySize) {
-            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG,
-                                                 this->settings.MaxKeySize));
+            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG, this->settings.MaxKeySize));
             return false;
         }
         return true;
@@ -477,8 +461,7 @@ namespace Zest {
 
     bool ZestDB::validateValue(const std::string &value) const {
         if (value.size() > this->settings.MaxValueSize) {
-            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}",
-                                                 Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
+            ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}", Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
             return false;
         }
         return true;
@@ -564,8 +547,7 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
-    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode,
-                                                              const std::string &pattern) const {
+    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode, const std::string &pattern) const {
         ValidationRule valid;
         bool validMode = true;
 

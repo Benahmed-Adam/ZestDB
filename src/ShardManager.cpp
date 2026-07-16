@@ -80,8 +80,7 @@ namespace Zest {
         for (auto &shard : this->shards) {
             Shard *rawShard = shard.get();
 
-            futures.push_back(
-                threadPool->enqueue([rawShard, &valid, &value]() { return rawShard->setBy(valid, value); }));
+            futures.push_back(threadPool->enqueue([rawShard, &valid, &value]() { return rawShard->setBy(valid, value); }));
         }
 
         long long totalUpdated = 0;
@@ -93,8 +92,7 @@ namespace Zest {
         }
         threadPool->waitAll();
         valid.globalMatchCount = nullptr;
-        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated),
-                 totalUpdated };
+        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
     }
 
     ResultType ShardManager::delBy(ValidationRule &valid) {
@@ -118,8 +116,7 @@ namespace Zest {
         }
         threadPool->waitAll();
         valid.globalMatchCount = nullptr;
-        return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted),
-                 totalDeleted };
+        return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
     }
 
     void ShardManager::flush() {
@@ -148,12 +145,10 @@ namespace Zest {
             WAL &wal = this->shards[i]->getWAL();
             std::vector<WalEntry> cmds = wal.getCmds();
 
-            allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()),
-                                 std::make_move_iterator(cmds.end()));
+            allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }
 
-        std::sort(allWalEntries.begin(), allWalEntries.end(),
-                  [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
+        std::sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
 
         for (const auto &entry : allWalEntries) {
             ZestLog(LogLevel::INFO, std::format("WAL replay command: {}", entry.cmd));

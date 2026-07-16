@@ -12,8 +12,7 @@ public:
     Settings settings;
     fs::path testDir;
     ShardFixture() {
-        testDir =
-            fs::temp_directory_path() / ("zestdb_test_shard_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
+        testDir = fs::temp_directory_path() / ("zestdb_test_shard_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
         settings.DbPath = testDir;
         settings.SegSize = 100000;

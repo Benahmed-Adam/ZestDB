@@ -97,13 +97,11 @@ namespace Zest {
 
                 if (std::filesystem::exists(segPath)) {
                     if (!std::filesystem::remove(segPath)) {
-                        ZestLog(LogLevel::ERROR,
-                                std::format("StorageManager - Failed to remove file: {}", segPath.string()));
+                        ZestLog(LogLevel::ERROR, std::format("StorageManager - Failed to remove file: {}", segPath.string()));
                     }
                 }
             }
         }
-
     }
 
     void StorageManager::flush() {

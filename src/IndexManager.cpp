@@ -165,8 +165,7 @@ namespace Zest {
 
     std::vector<IndexEntry> IndexManager::compact() {
         ZestLog(LogLevel::DEBUG, "Starting index compaction...");
-        std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp",
-                                   std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
 
         std::vector<IndexEntry> entries = this->getAll();
         std::vector<IndexEntry> validEntries = entries;
@@ -196,8 +195,7 @@ namespace Zest {
                 this->memoryTree[std::string(entry.key)] = newPos;
                 result.push_back(entry);
             } else {
-                ZestLog(LogLevel::ERROR,
-                        std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
+                ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
             }
         }
 

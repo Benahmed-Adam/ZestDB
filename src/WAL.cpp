@@ -39,8 +39,7 @@ namespace Zest {
             return;
         }
         size_t size = cmd.size();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now().time_since_epoch());
+        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
 
         this->wal.write(reinterpret_cast<const char *>(&size), sizeof(size));
         this->wal.write(cmd.c_str(), static_cast<long int>(size));
@@ -89,8 +88,7 @@ namespace Zest {
             }
         }
 
-        std::sort(res.begin(), res.end(),
-                  [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
+        std::sort(res.begin(), res.end(), [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
 
         this->wal.clear();
         this->wal.seekg(0, std::ios::end);

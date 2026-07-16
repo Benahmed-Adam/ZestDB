@@ -20,10 +20,7 @@ namespace Zest {
 
     Shard::Shard(Settings &baseSettings, int shardIdNum)
         : settings(baseSettings),
-          shardId(shardIdNum),
-          replaying(false),
-          stopRequested(false),
-          stopped(false) {
+          shardId(shardIdNum) {
         this->boot();
     }
 
@@ -76,7 +73,6 @@ namespace Zest {
         this->storageManager = std::make_unique<StorageManager>(this->settings);
 
         this->cache = std::make_unique<LRUCache>(this->settings.CacheSize);
-        this->compactor = std::make_unique<Compactor>(this->settings);
 
         this->verifyIndexEntries();
 
@@ -90,13 +86,45 @@ namespace Zest {
             promise.set_value();
         });
 
-        std::thread compactorThread([this]() mutable {
-            this->compactor->run(*this->indexManager, *this->storageManager, this->stopRequested);
+        this->compactorThread = std::jthread([this](std::stop_token stopToken) mutable {
+            std::unique_lock<std::mutex> lock(this->compactorThreadMtx);
+
+            ZestLog(LogLevel::INFO, "Starting the compactor...");
+
+            while (this->settings.isRunning && !stopToken.stop_requested()) {
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+
+                std::vector<IndexEntry> entries = indexManager->compact();
+
+                if (entries.empty()) {
+                    ZestLog(LogLevel::DEBUG, "Compactor - index is empty, skipping segment cleanup");
+                    continue;
+                }
+
+                if (stopToken.stop_requested() || !this->settings.isRunning) {
+                    break;
+                }
+
+                std::vector<int> usedSegmentIds;
+                for (const auto &entry : entries) {
+                    if (!entry.isTombstone && entry.segmentId != -1) {
+                        if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) == usedSegmentIds.end()) {
+                            usedSegmentIds.push_back(entry.segmentId);
+                        }
+                    }
+                }
+
+                if (!usedSegmentIds.empty()) {
+                    storageManager->removeUnusedSegments(usedSegmentIds);
+                }
+
+                ZestLog(LogLevel::DEBUG, "Compactor - compaction done, waiting...");
+            }
+            ZestLog(LogLevel::INFO, "Stopping the compactor...");
         });
 
         cacheFuture.wait();
         cacheThread.detach();
-        compactorThread.detach();
     }
 
     void Shard::fillCache() {
@@ -299,8 +327,7 @@ namespace Zest {
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetByStats(false, latency);
 
-        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount),
-                 matchCount };
+        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
     }
 
     ResultType Shard::delBy(ValidationRule &valid) {
@@ -349,16 +376,17 @@ namespace Zest {
     }
 
     void Shard::stop() {
-        bool expected = false;
-        if (!this->stopped.compare_exchange_strong(expected, true)) {
-            return;
+        if (!this->isStopped.load()) {
+            ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
+
+            this->settings.isRunning = false;
+            this->compactorThread.request_stop();
+            this->threadCV.notify_all();
+
+            this->flush();
+
+            this->isStopped.store(true);
         }
-
-        ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
-
-        this->stopRequested.store(true);
-
-        this->flush();
     }
 
     void Shard::verifyIndexEntries() {
@@ -378,8 +406,7 @@ namespace Zest {
             std::string storedValue = this->storageManager->read(entry);
 
             if (storedValue.empty()) {
-                ZestLog(LogLevel::WARNING,
-                        std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, key));
+                ZestLog(LogLevel::WARNING, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, key));
 
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
@@ -390,8 +417,7 @@ namespace Zest {
             }
         }
 
-        ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed",
-                                            this->shardId, verifiedCount, removedCount));
+        ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
     }
 
     void Shard::reloadSettings(Settings &set) {

@@ -1,9 +1,10 @@
 #pragma once
 
+#include <condition_variable>
 #include <memory>
 #include <shared_mutex>
+#include <thread>
 
-#include "Compactor.hpp"
 #include "IndexManager.hpp"
 #include "LRUCache.hpp"
 #include "PerfMonitoring.hpp"
@@ -49,13 +50,16 @@ namespace Zest {
 
         std::unique_ptr<StorageManager> storageManager;
         std::unique_ptr<LRUCache> cache;
-        std::unique_ptr<Compactor> compactor;
         std::unique_ptr<WAL> wal;
 
-        std::atomic<bool> replaying;
-        std::atomic<bool> stopRequested;
-        std::atomic<bool> stopped;
         std::shared_mutex readMtx;
+
+        std::jthread compactorThread;
+        std::mutex compactorThreadMtx;
+
+        std::condition_variable_any threadCV;
+
+        std::atomic<bool> isStopped = false;
     };
 
 } // namespace Zest
