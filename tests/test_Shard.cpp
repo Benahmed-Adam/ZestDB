@@ -70,7 +70,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard getBy with pattern", "[shard]") {
     shard.set("abc_2", "v2");
     shard.set("xyz_1", "v3");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     auto result = shard.getBy(vr);
     REQUIRE(result.code == ResultType::Code::SUCCESS);
@@ -84,7 +84,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard getBy with limit", "[shard]") {
     shard.set("a3", "v3");
     ValidationRule vr;
     std::atomic<unsigned int> counter(0);
-    vr.func = [](const std::string &) { return true; };
+    vr.func = [](std::string_view) { return true; };
     vr.limit = 2;
     vr.globalMatchCount = &counter;
     auto result = shard.getBy(vr);
@@ -97,7 +97,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard setBy updates matching keys", "[shard]") {
     shard.set("abc_2", "old");
     shard.set("xyz_1", "old");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     auto result = shard.setBy(vr, "new");
     REQUIRE(result.code == ResultType::Code::SUCCESS);
@@ -111,7 +111,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard delBy tombstones matching keys", "[shard]"
     shard.set("abc_2", "v2");
     shard.set("xyz_1", "v3");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     auto result = shard.delBy(vr);
     REQUIRE(result.code == ResultType::Code::SUCCESS);

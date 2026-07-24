@@ -10,7 +10,7 @@ namespace Zest {
 
         auto it = this->map.find(key);
         if (it == this->map.end()) {
-            return { { "", -1, 0, 0, false }, "" };
+            return { { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false }, "" };
         }
 
         this->lru_list.erase(it->second.second);

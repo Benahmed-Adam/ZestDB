@@ -10,7 +10,7 @@
 namespace Zest {
 
     struct ValidationRule {
-        std::function<bool(const std::string &)> func;
+        std::function<bool(std::string_view)> func;
         unsigned int limit = UINT_MAX;
         std::atomic<unsigned int> *globalMatchCount = nullptr;
     };

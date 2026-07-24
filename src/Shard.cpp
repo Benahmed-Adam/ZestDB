@@ -1,6 +1,5 @@
 #include "Shard.hpp"
 
-#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -105,9 +104,9 @@ namespace Zest {
                     break;
                 }
 
-                std::vector<int> usedSegmentIds;
+                std::vector<uint32_t> usedSegmentIds;
                 for (const auto &entry : entries) {
-                    if (!entry.isTombstone && entry.segmentId != -1) {
+                    if (!entry.isTombstone && entry.segmentId != INVALID_SEGMENT_ID) {
                         if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) == usedSegmentIds.end()) {
                             usedSegmentIds.push_back(entry.segmentId);
                         }
@@ -139,14 +138,13 @@ namespace Zest {
         unsigned int cacheLimit = (this->settings.CacheSize < entriesCount) ? this->settings.CacheSize : entriesCount;
 
         for (unsigned int i = 0; i < cacheLimit; i++) {
-            if (entries[i].segmentId == -1 || entries[i].isTombstone) {
+            if (entries[i].segmentId == INVALID_SEGMENT_ID || entries[i].isTombstone) {
                 continue;
             }
-            std::string key(entries[i].key);
-            if (seenKeys.find(key) != seenKeys.end()) {
+            if (seenKeys.find(entries[i].key) != seenKeys.end()) {
                 continue;
             }
-            seenKeys.insert(key);
+            seenKeys.insert(entries[i].key);
 
             std::string value = this->storageManager->read(entries[i]);
             this->cache->put(entries[i], value);
@@ -161,7 +159,7 @@ namespace Zest {
 
         CacheEntry cacheEntry = this->cache->get(key);
 
-        bool fromCache = (cacheEntry.index.segmentId != -1 && !cacheEntry.index.isTombstone);
+        bool fromCache = (cacheEntry.index.segmentId != INVALID_SEGMENT_ID && !cacheEntry.index.isTombstone);
 
         if (fromCache) {
             auto end = std::chrono::high_resolution_clock::now();
@@ -173,7 +171,7 @@ namespace Zest {
         IndexEntry entry;
         entry = this->indexManager->search(key);
 
-        if (entry.segmentId != -1 && !entry.isTombstone) {
+        if (entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone) {
             std::string value = this->storageManager->read(entry);
 
             this->cache->put(entry, value);
@@ -196,7 +194,7 @@ namespace Zest {
 
         IndexEntry entry = this->storageManager->append(value);
 
-        if (entry.segmentId == -1) {
+        if (entry.segmentId == INVALID_SEGMENT_ID) {
             ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} "
                                                  "- segment full",
                                                  key, shardId));
@@ -206,10 +204,7 @@ namespace Zest {
             return { ResultType::Code::ERROR, "Failed to write: segment full", 0 };
         }
 
-        memset(entry.key, 0, sizeof(entry.key));
-        size_t copySize = (key.size() < sizeof(entry.key) - 1) ? key.size() : sizeof(entry.key) - 1;
-        memcpy(entry.key, key.c_str(), copySize);
-        entry.key[copySize] = '\0';
+        entry.key = key;
 
         this->indexManager->insert(entry);
 
@@ -228,7 +223,7 @@ namespace Zest {
         this->cache->remove(key);
         IndexEntry entry = this->indexManager->search(key);
 
-        if (entry.segmentId != -1 && !entry.isTombstone) {
+        if (entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone) {
             entry.isTombstone = true;
 
             this->indexManager->update(key, entry);
@@ -259,13 +254,12 @@ namespace Zest {
             if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
                 break;
 
-            if (entry.isTombstone || entry.segmentId == -1) {
+            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            std::string key(entry.key);
-            if (valid.func(key)) {
+            if (valid.func(entry.key)) {
                 std::string value = this->storageManager->read(entry);
-                resultArray.push_back(nlohmann::json::object({ { key, value } }));
+                resultArray.push_back(nlohmann::json::object({ { entry.key, value } }));
                 matchCount++;
                 if (valid.globalMatchCount) {
                     valid.globalMatchCount->fetch_add(1);
@@ -294,24 +288,20 @@ namespace Zest {
             if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
                 break;
 
-            if (entry.isTombstone || entry.segmentId == -1) {
+            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            std::string key(entry.key);
-            if (valid.func(key)) {
+            if (valid.func(entry.key)) {
                 IndexEntry newEntry = this->storageManager->append(value);
 
-                if (newEntry.segmentId == -1) {
+                if (newEntry.segmentId == INVALID_SEGMENT_ID) {
                     ZestLog(LogLevel::ERROR, std::format("Shard::setBy - FAILED to write for key: "
                                                          "{} - segment full",
-                                                         key));
+                                                         entry.key));
                     continue;
                 }
 
-                memset(newEntry.key, 0, sizeof(newEntry.key));
-                size_t copySize = (key.size() < sizeof(newEntry.key) - 1) ? key.size() : sizeof(newEntry.key) - 1;
-                memcpy(newEntry.key, key.c_str(), copySize);
-                newEntry.key[copySize] = '\0';
+                newEntry.key = entry.key;
 
                 this->indexManager->insert(newEntry);
 
@@ -345,16 +335,15 @@ namespace Zest {
             if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
                 break;
 
-            if (entry.isTombstone || entry.segmentId == -1) {
+            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            std::string key(entry.key);
-            if (valid.func(key)) {
+            if (valid.func(entry.key)) {
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
 
-                this->indexManager->update(key, tombstoneEntry);
-                this->cache->remove(key);
+                this->indexManager->update(entry.key, tombstoneEntry);
+                this->cache->remove(entry.key);
 
                 matchCount++;
                 if (valid.globalMatchCount) {
@@ -400,20 +389,18 @@ namespace Zest {
         int removedCount = 0;
 
         for (const auto &entry : entries) {
-            if (entry.isTombstone || entry.segmentId == -1) {
+            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-
-            std::string key(entry.key);
 
             std::string storedValue = this->storageManager->read(entry);
 
             if (storedValue.empty()) {
-                ZestLog(LogLevel::WARNING, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, key));
+                ZestLog(LogLevel::WARNING, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, entry.key));
 
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
-                this->indexManager->update(key, tombstoneEntry);
+                this->indexManager->update(entry.key, tombstoneEntry);
                 removedCount++;
             } else {
                 verifiedCount++;

@@ -450,7 +450,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateKey(const std::string &key) const {
+    bool ZestDB::validateKey(std::string_view key) const {
         if (key.size() > this->settings.MaxKeySize) {
             ZestLog(LogLevel::ERROR, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG, this->settings.MaxKeySize));
             return false;
@@ -458,7 +458,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::validateValue(const std::string &value) const {
+    bool ZestDB::validateValue(std::string_view value) const {
         if (value.size() > this->settings.MaxValueSize) {
             ZestLog(LogLevel::ERROR, std::format("ZestDB::validateValue - {} MaxValueSize : {}", Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
             return false;
@@ -466,7 +466,7 @@ namespace Zest {
         return true;
     }
 
-    bool ZestDB::isJsonValid(const std::string &value) const { return nlohmann::json::accept(value); }
+    bool ZestDB::isJsonValid(std::string_view value) const { return nlohmann::json::accept(value); }
 
     ResultType ZestDB::get(const std::string &key) {
         if (!this->validateKey(key)) {
@@ -546,25 +546,26 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
-    CreationValidationRuleResult ZestDB::createValidationRule(const std::string &mode, const std::string &pattern) const {
+    CreationValidationRuleResult ZestDB::createValidationRule(std::string_view mode, std::string_view pattern) const {
         ValidationRule valid;
         bool validMode = true;
 
         if (mode == "re") {
             try {
-                std::regex keyRegex(pattern);
-                valid.func = [reg = std::move(keyRegex)](const std::string &key) { return std::regex_match(key, reg); };
+                std::string patStr(pattern);
+                std::regex keyRegex(patStr);
+                valid.func = [reg = std::move(keyRegex)](std::string_view key) { return std::regex_match(std::string(key), reg); };
             } catch (const std::regex_error &) {
                 validMode = false;
             }
         } else if (mode == "sw") {
-            valid.func = [pattern](const std::string &key) { return key.find(pattern) == 0; };
+            valid.func = [pat = std::string(pattern)](std::string_view key) { return key.substr(0, pat.size()) == pat; };
         } else if (mode == "ct") {
-            valid.func = [pattern](const std::string &key) { return key.find(pattern) != std::string::npos; };
+            valid.func = [pat = std::string(pattern)](std::string_view key) { return key.find(pat) != std::string_view::npos; };
         } else if (mode == "ew") {
-            valid.func = [pattern](const std::string &key) {
-                if (key.size() >= pattern.size()) {
-                    return key.compare(key.size() - pattern.size(), pattern.size(), pattern) == 0;
+            valid.func = [pat = std::string(pattern)](std::string_view key) {
+                if (key.size() >= pat.size()) {
+                    return key.compare(key.size() - pat.size(), pat.size(), pat) == 0;
                 }
                 return false;
             };
@@ -583,8 +584,8 @@ namespace Zest {
         this->shardManager->appendToWAL(key, command);
     }
 
-    std::string toLowerStr(const std::string &str) {
-        std::string result = str;
+    std::string toLowerStr(std::string_view str) {
+        std::string result(str);
         std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
         return result;
     }
@@ -615,14 +616,13 @@ namespace Zest {
             return { ResultType::Code::ERROR, Messages::NO_COMMAND_GIVEN };
         }
 
-        std::string cmd = toLowerStr(std::string(words[0]));
+        std::string cmd = toLowerStr(words[0]);
 
         if (cmd == "g") {
             if (words.size() < 2) {
                 result.response = Messages::MISSING_KEY;
             } else {
-                std::string key(words[1]);
-                result = this->get(key);
+                result = this->get(std::string(words[1]));
             }
         } else if (cmd == "s") {
             if (words.size() < 2) {
@@ -630,29 +630,25 @@ namespace Zest {
             } else if (words.size() < 3) {
                 result.response = Messages::MISSING_VALUE;
             } else {
-                std::string key(words[1]);
                 size_t keyPos = command.find(words[1]);
                 size_t valPos = command.find_first_not_of(" \t\r\n", keyPos + words[1].size());
-                std::string value = command.substr(valPos);
-
-                result = this->set(key, value);
+                result = this->set(std::string(words[1]), command.substr(valPos));
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
                 result.response = Messages::MISSING_KEY;
             } else {
-                std::string key(words[1]);
-                result = this->del(key);
+                result = this->del(std::string(words[1]));
             }
         } else if (cmd == "gb") {
             if (words.size() < 3) {
                 result.response = Messages::MISSING_ARGUMENTS;
             } else {
-                std::string mode = toLowerStr(std::string(words[1]));
-                std::string pattern(words[2]);
+                std::string mode = toLowerStr(words[1]);
+                std::string_view pattern = words[2];
                 unsigned int limit = UINT_MAX;
                 for (size_t i = 3; i < words.size(); i++) {
-                    if (toLowerStr(std::string(words[i])) == "lim" && i + 1 < words.size()) {
+                    if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
                         limit = static_cast<unsigned int>(std::stoi(std::string(words[i + 1])));
                     }
                 }
@@ -668,14 +664,14 @@ namespace Zest {
             if (words.size() < 4) {
                 result.response = Messages::MISSING_VALUE;
             } else {
-                std::string mode = toLowerStr(std::string(words[1]));
-                std::string pattern(words[2]);
+                std::string mode = toLowerStr(words[1]);
+                std::string_view pattern = words[2];
                 unsigned int limit = UINT_MAX;
 
                 size_t valStartIdx = 3;
                 if (words.size() >= 5) {
                     for (size_t i = 3; i < words.size(); i++) {
-                        if (toLowerStr(std::string(words[i])) == "lim" && i + 1 < words.size()) {
+                        if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
                             limit = static_cast<unsigned int>(std::stoi(std::string(words[i + 1])));
                             valStartIdx = i + 2;
                             break;
@@ -702,11 +698,11 @@ namespace Zest {
             if (words.size() < 3) {
                 result.response = Messages::MISSING_PATTERN;
             } else {
-                std::string mode = toLowerStr(std::string(words[1]));
-                std::string pattern(words[2]);
+                std::string mode = toLowerStr(words[1]);
+                std::string_view pattern = words[2];
                 unsigned int limit = UINT_MAX;
                 for (size_t i = 3; i < words.size(); i++) {
-                    if (toLowerStr(std::string(words[i])) == "lim" && i + 1 < words.size()) {
+                    if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
                         limit = static_cast<unsigned int>(std::stoi(std::string(words[i + 1])));
                     }
                 }
@@ -733,14 +729,14 @@ namespace Zest {
                 return result;
             }
 
-            std::string param = toLowerStr(std::string(words[1]));
-            std::string valueStr(words[2]);
+            std::string param = toLowerStr(words[1]);
+            std::string_view valueStr = words[2];
 
             bool valueSet = false;
 
             if (param == "segsize") {
                 try {
-                    unsigned long val = std::stoul(valueStr);
+                    unsigned long val = std::stoul(std::string(valueStr));
                     if (val <= this->settings.MaxValueSize) {
                         result.response = "SegSize must be greater than MaxValueSize";
                         return result;
@@ -753,7 +749,7 @@ namespace Zest {
                 }
             } else if (param == "maxkeysize") {
                 try {
-                    unsigned int val = std::stoul(valueStr);
+                    unsigned int val = std::stoul(std::string(valueStr));
                     if (val > MAX_KEY_SIZE) {
                         result.response = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
                         return result;
@@ -766,7 +762,7 @@ namespace Zest {
                 }
             } else if (param == "maxvaluesize") {
                 try {
-                    unsigned int val = std::stoul(valueStr);
+                    unsigned int val = std::stoul(std::string(valueStr));
                     if (val >= this->settings.SegSize) {
                         result.response = "MaxValueSize must be less than SegSize";
                         return result;
@@ -779,7 +775,7 @@ namespace Zest {
                 }
             } else if (param == "cachesize") {
                 try {
-                    this->settings.CacheSize = std::stoul(valueStr);
+                    this->settings.CacheSize = std::stoul(std::string(valueStr));
                     valueSet = true;
                 } catch (...) {
                     result.response = "Invalid CacheSize value";
@@ -787,7 +783,7 @@ namespace Zest {
                 }
             } else if (param == "compactinginterval") {
                 try {
-                    this->settings.CompactingInterval = std::stoul(valueStr);
+                    this->settings.CompactingInterval = std::stoul(std::string(valueStr));
                     valueSet = true;
                 } catch (...) {
                     result.response = "Invalid CompactingInterval value";
@@ -795,7 +791,7 @@ namespace Zest {
                 }
             } else if (param == "flushinterval") {
                 try {
-                    this->settings.FlushInterval = std::stoul(valueStr);
+                    this->settings.FlushInterval = std::stoul(std::string(valueStr));
                     valueSet = true;
                 } catch (...) {
                     result.response = "Invalid FlushInterval value";
@@ -803,8 +799,9 @@ namespace Zest {
                 }
             } else if (param == "networkvalidationstr") {
                 try {
-                    std::regex testRegex(valueStr);
-                    this->settings.NetworkValidationStr = valueStr;
+                    std::string valueStrStr(valueStr);
+                    std::regex testRegex(valueStrStr);
+                    this->settings.NetworkValidationStr = std::move(valueStrStr);
                     this->settings.NetworkValidation = std::move(testRegex);
                     valueSet = true;
                 } catch (const std::regex_error &e) {
@@ -858,7 +855,7 @@ namespace Zest {
                 }
             } else if (param == "archivecreationdelay") {
                 try {
-                    this->settings.ArchiveCreationDelay = std::stoul(valueStr);
+                    this->settings.ArchiveCreationDelay = std::stoul(std::string(valueStr));
                     valueSet = true;
                 } catch (...) {
                     result.response = "Invalid ArchiveCreationDelay value";
@@ -877,7 +874,7 @@ namespace Zest {
                     return result;
                 }
             } else {
-                result.response = "Unknown parameter: " + param;
+                result.response = std::string("Unknown parameter: ") + std::string(param);
                 return result;
             }
 

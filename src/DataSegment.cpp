@@ -7,7 +7,7 @@
 
 namespace Zest {
 
-    DataSegment::DataSegment(Settings &set, int id)
+    DataSegment::DataSegment(Settings &set, uint32_t id)
         : segmentId(id),
           currentOffset(0),
           settings(set),
@@ -106,7 +106,7 @@ namespace Zest {
 
     bool DataSegment::isFull() const { return this->currentOffset.load() >= this->settings.SegSize; }
 
-    int DataSegment::getSegmentId() const { return this->segmentId; }
+    uint32_t DataSegment::getSegmentId() const { return this->segmentId; }
 
     void DataSegment::flush() {
         std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);

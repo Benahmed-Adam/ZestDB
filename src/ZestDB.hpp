@@ -48,13 +48,13 @@ namespace Zest {
 
     private:
         void boot();
-        bool validateKey(const std::string &key) const;
-        bool validateValue(const std::string &value) const;
-        bool isJsonValid(const std::string &value) const;
+        bool validateKey(std::string_view key) const;
+        bool validateValue(std::string_view value) const;
+        bool isJsonValid(std::string_view value) const;
         void flush();
         void replayWAL();
         std::string help() const;
-        CreationValidationRuleResult createValidationRule(const std::string &mode, const std::string &pattern) const;
+        CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
         void appendToWAL(const std::string &key, const std::string &command);
 
         Settings loadConfig();

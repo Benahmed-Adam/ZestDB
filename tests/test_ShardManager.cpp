@@ -53,7 +53,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager getBy parallel merged result
     sm.set("abc_2", "v2");
     sm.set("xyz_1", "v3");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     auto result = sm.getBy(vr);
     REQUIRE(result.code == ResultType::Code::SUCCESS);
@@ -65,7 +65,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager setBy parallel", "[shardmana
     sm.set("abc_1", "old");
     sm.set("abc_2", "old");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     sm.setBy(vr, "new");
     REQUIRE(sm.get("abc_1").response == "new");
@@ -78,7 +78,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager delBy parallel", "[shardmana
     sm.set("abc_2", "v2");
     sm.set("xyz_1", "v3");
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("abc_") == 0; };
+    vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     sm.delBy(vr);
     REQUIRE(sm.get("abc_1").code == ResultType::Code::ERROR);
@@ -117,7 +117,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager getBy with global limit", "[
         sm.set("item_" + std::to_string(i), "val");
     }
     ValidationRule vr;
-    vr.func = [](const std::string &) { return true; };
+    vr.func = [](std::string_view) { return true; };
     vr.limit = 5;
     auto result = sm.getBy(vr);
     REQUIRE(result.affectedRows >= 5);

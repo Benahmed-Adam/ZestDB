@@ -4,10 +4,9 @@
 
 using namespace Zest;
 
-static IndexEntry makeEntry(const std::string &key, int segId = 1, unsigned long offset = 0, unsigned int size = 5) {
+static IndexEntry makeEntry(const std::string &key, uint32_t segId = 1, unsigned long offset = 0, unsigned int size = 5) {
     IndexEntry e{};
-    strncpy(e.key, key.c_str(), sizeof(e.key) - 1);
-    e.key[sizeof(e.key) - 1] = '\0';
+    e.key = key;
     e.segmentId = segId;
     e.offset = offset;
     e.size = size;
@@ -18,7 +17,7 @@ static IndexEntry makeEntry(const std::string &key, int segId = 1, unsigned long
 TEST_CASE("LRUCache constructor creates empty cache", "[lru]") {
     LRUCache cache(10);
     auto result = cache.get("nonexistent");
-    REQUIRE(result.index.segmentId == -1);
+    REQUIRE(result.index.segmentId == INVALID_SEGMENT_ID);
     REQUIRE(result.value.empty());
 }
 
@@ -34,7 +33,7 @@ TEST_CASE("LRUCache get hit promotes to front", "[lru]") {
 TEST_CASE("LRUCache get miss returns sentinel", "[lru]") {
     LRUCache cache(10);
     auto result = cache.get("missing");
-    REQUIRE(result.index.segmentId == -1);
+    REQUIRE(result.index.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE("LRUCache put new key not full", "[lru]") {
@@ -51,7 +50,7 @@ TEST_CASE("LRUCache put full evicts LRU", "[lru]") {
     cache.put(makeEntry("b"), "2");
     cache.put(makeEntry("c"), "3");
     auto old = cache.get("a");
-    REQUIRE(old.index.segmentId == -1);
+    REQUIRE(old.index.segmentId == INVALID_SEGMENT_ID);
     REQUIRE(cache.get("b").value == "2");
     REQUIRE(cache.get("c").value == "3");
 }
@@ -70,7 +69,7 @@ TEST_CASE("LRUCache remove existing key", "[lru]") {
     LRUCache cache(5);
     cache.put(makeEntry("a"), "1");
     cache.remove("a");
-    REQUIRE(cache.get("a").index.segmentId == -1);
+    REQUIRE(cache.get("a").index.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE("LRUCache remove nonexistent key no-op", "[lru]") {
@@ -86,7 +85,7 @@ TEST_CASE("LRUCache LRU ordering after get/put", "[lru]") {
     cache.get("a");
     cache.put(makeEntry("d"), "4");
     REQUIRE(cache.get("a").value == "1");
-    REQUIRE(cache.get("b").index.segmentId == -1);
+    REQUIRE(cache.get("b").index.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE("LRUCache capacity 1", "[lru]") {
@@ -94,6 +93,6 @@ TEST_CASE("LRUCache capacity 1", "[lru]") {
     cache.put(makeEntry("a"), "1");
     REQUIRE(cache.get("a").value == "1");
     cache.put(makeEntry("b"), "2");
-    REQUIRE(cache.get("a").index.segmentId == -1);
+    REQUIRE(cache.get("a").index.segmentId == INVALID_SEGMENT_ID);
     REQUIRE(cache.get("b").value == "2");
 }

@@ -43,21 +43,19 @@ namespace Zest {
         this->index.seekg(0, std::ios::end);
         std::streamoff fsize = this->index.tellg();
 
-        std::streamoff position = 0;
-        IndexEntry entry;
+        this->index.seekg(0, std::ios::beg);
 
-        while (position < fsize) {
-            this->index.seekg(position, std::ios::beg);
-            if (!this->index.read((char *)&entry, sizeof(entry)))
+        while (this->index.tellg() < fsize) {
+            std::streamoff position = this->index.tellg();
+            IndexEntry entry;
+            if (!entry.deserialize(this->index))
                 break;
 
-            std::string entryKey(entry.key);
             if (entry.isTombstone) {
                 this->tombstoneOffsets.push_back(position);
             } else {
-                this->memoryTree[entryKey] = position;
+                this->memoryTree[entry.key] = position;
             }
-            position += static_cast<std::streamoff>(sizeof(IndexEntry));
         }
         ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
     }
@@ -72,12 +70,12 @@ namespace Zest {
             this->index.seekg(offset, std::ios::beg);
             IndexEntry entry;
 
-            if (this->index.read((char *)&entry, sizeof(entry)) && !entry.isTombstone) {
+            if (entry.deserialize(this->index) && !entry.isTombstone) {
                 return entry;
             }
         }
 
-        return { "", -1, 0, 0, false };
+        return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
     }
 
     void IndexManager::update(const std::string &key, const IndexEntry &entry) {
@@ -88,7 +86,7 @@ namespace Zest {
             std::streamoff offset = it->second;
 
             this->index.seekp(offset, std::ios::beg);
-            this->index.write((const char *)&entry, sizeof(entry));
+            entry.serialize(this->index);
             this->canFlush = true;
             if (entry.isTombstone) {
                 this->memoryTree.erase(it);
@@ -98,26 +96,25 @@ namespace Zest {
     }
 
     void IndexManager::insert(const IndexEntry &entry) {
-        std::string keyStr(entry.key);
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
-        auto it = this->memoryTree.find(keyStr);
+        auto it = this->memoryTree.find(entry.key);
         if (it != this->memoryTree.end()) {
             std::streamoff oldOffset = it->second;
             IndexEntry oldEntry;
             this->index.seekg(oldOffset, std::ios::beg);
-            if (this->index.read((char *)&oldEntry, sizeof(oldEntry))) {
+            if (oldEntry.deserialize(this->index)) {
                 oldEntry.isTombstone = true;
                 this->index.seekp(oldOffset, std::ios::beg);
-                this->index.write((const char *)&oldEntry, sizeof(oldEntry));
+                oldEntry.serialize(this->index);
                 this->tombstoneOffsets.push_back(oldOffset);
             }
 
             this->index.seekp(0, std::ios::end);
             std::streamoff newOffset = this->index.tellp();
-            this->index.write((const char *)&entry, sizeof(entry));
+            entry.serialize(this->index);
             this->canFlush = true;
-            this->memoryTree[keyStr] = newOffset;
+            this->memoryTree[entry.key] = newOffset;
             return;
         }
 
@@ -132,9 +129,9 @@ namespace Zest {
         }
 
         this->index.seekp(insertPosition, std::ios::beg);
-        this->index.write((const char *)&entry, sizeof(entry));
+        entry.serialize(this->index);
         this->canFlush = true;
-        this->memoryTree[keyStr] = insertPosition;
+        this->memoryTree[entry.key] = insertPosition;
     }
 
     std::vector<IndexEntry> IndexManager::getAll(unsigned int limit) {
@@ -143,15 +140,15 @@ namespace Zest {
 
         res.reserve(this->memoryTree.size());
 
-        IndexEntry e;
         for (auto const &[key, offset] : this->memoryTree) {
             if (res.size() >= limit)
                 break;
 
             this->index.seekg(offset, std::ios::beg);
 
-            if (this->index.read((char *)&e, sizeof(IndexEntry))) {
-                res.push_back(e);
+            IndexEntry e;
+            if (e.deserialize(this->index)) {
+                res.push_back(std::move(e));
             } else {
                 ZestLog(LogLevel::ERROR, std::format("IndexManager::getAll - Failed to read "
                                                      "entry at offset: {}",
@@ -168,7 +165,6 @@ namespace Zest {
         std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
 
         std::vector<IndexEntry> entries = this->getAll();
-        std::vector<IndexEntry> validEntries = entries;
 
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
@@ -177,7 +173,7 @@ namespace Zest {
 
         if (!this->index.is_open()) {
             ZestLog(LogLevel::ERROR, "Compact failed: could not reopen index file.");
-            return validEntries;
+            return entries;
         }
 
         this->memoryTree.clear();
@@ -186,16 +182,17 @@ namespace Zest {
         std::vector<IndexEntry> result;
 
         for (const auto &entry : entries) {
-            if (entry.isTombstone || entry.segmentId == -1) {
+            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
             std::streamoff newPos = this->index.tellp();
 
-            if (this->index.write((const char *)&entry, sizeof(IndexEntry))) {
-                this->memoryTree[std::string(entry.key)] = newPos;
+            entry.serialize(this->index);
+            if (this->index.good()) {
+                this->memoryTree[entry.key] = newPos;
                 result.push_back(entry);
             } else {
-                ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", std::string(entry.key)));
+                ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", entry.key));
             }
         }
 

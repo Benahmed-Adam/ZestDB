@@ -11,19 +11,19 @@ namespace Zest {
 
     class DataSegment {
     public:
-        DataSegment(Settings &set, int segmentId);
+        DataSegment(Settings &set, uint32_t segmentId);
         ~DataSegment();
         unsigned long write(const std::string &value);
         std::string read(unsigned long offset, unsigned int size);
         bool isFull() const;
-        int getSegmentId() const;
+        uint32_t getSegmentId() const;
         unsigned long getWritePosition() const;
         void refreshFullStatus();
         void flush();
 
     private:
         void openSegment();
-        int segmentId;
+        uint32_t segmentId;
         std::atomic<unsigned long> currentOffset;
         Settings &settings;
         std::fstream segment;

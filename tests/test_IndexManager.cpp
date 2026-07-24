@@ -20,10 +20,9 @@ public:
     ~IndexManagerFixture() { fs::remove_all(testDir); }
 };
 
-static IndexEntry makeEntry(const std::string &key, int segId = 1, unsigned long offset = 0) {
+static IndexEntry makeEntry(const std::string &key, uint32_t segId = 1, unsigned long offset = 0) {
     IndexEntry e{};
-    strncpy(e.key, key.c_str(), sizeof(e.key) - 1);
-    e.key[sizeof(e.key) - 1] = '\0';
+    e.key = key;
     e.segmentId = segId;
     e.offset = offset;
     e.size = static_cast<unsigned int>(key.size());
@@ -36,13 +35,13 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert and search", "[indexm
     im.insert(makeEntry("key1", 1, 0));
     auto result = im.search("key1");
     REQUIRE(result.segmentId == 1);
-    REQUIRE(std::string(result.key) == "key1");
+    REQUIRE(result.key == "key1");
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager search key not found", "[indexmanager]") {
     IndexManager im(settings);
     auto result = im.search("nonexistent");
-    REQUIRE(result.segmentId == -1);
+    REQUIRE(result.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert duplicate key updates", "[indexmanager]") {
@@ -68,7 +67,7 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager update non-existent key is n
     IndexManager im(settings);
     im.update("ghost", makeEntry("ghost", 1, 0));
     auto result = im.search("ghost");
-    REQUIRE(result.segmentId == -1);
+    REQUIRE(result.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager update to tombstone", "[indexmanager]") {
@@ -78,7 +77,7 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager update to tombstone", "[inde
     tomb.isTombstone = true;
     im.update("key1", tomb);
     auto result = im.search("key1");
-    REQUIRE(result.segmentId == -1);
+    REQUIRE(result.segmentId == INVALID_SEGMENT_ID);
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager getAll empty index", "[indexmanager]") {
@@ -112,7 +111,7 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager compact removes tombstones",
     im.update("a", tomb);
     auto result = im.compact();
     REQUIRE(result.size() == 1);
-    REQUIRE(std::string(result[0].key) == "b");
+    REQUIRE(result[0].key == "b");
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager compact all tombstoned", "[indexmanager]") {

@@ -67,7 +67,7 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager removeUnusedSegments", "
     sm.append("a");
     sm.append("b");
     sm.flush();
-    std::vector<int> used = { 1 };
+    std::vector<uint32_t> used = { 1 };
     sm.removeUnusedSegments(used);
 }
 

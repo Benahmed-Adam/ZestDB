@@ -59,21 +59,21 @@ TEST_CASE_METHOD(ZestDBValidationFixture, "ValidationRule regex mode valid", "[v
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule re valid regex", "[validation]") {
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return std::regex_match(k, std::regex("^test_.*")); };
+    vr.func = [](std::string_view k) { return std::regex_match(std::string(k), std::regex("^test_.*")); };
     REQUIRE(vr.func("test_1"));
     REQUIRE_FALSE(vr.func("other"));
 }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule sw mode", "[validation]") {
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("pre") == 0; };
+    vr.func = [](std::string_view k) { return k.find("pre") == 0; };
     REQUIRE(vr.func("prefix"));
     REQUIRE_FALSE(vr.func("aprefix"));
 }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ct mode", "[validation]") {
     ValidationRule vr;
-    vr.func = [](const std::string &k) { return k.find("xyz") != std::string::npos; };
+    vr.func = [](std::string_view k) { return k.find("xyz") != std::string_view::npos; };
     REQUIRE(vr.func("xyz_abc"));
     REQUIRE(vr.func("abc_xyz"));
     REQUIRE_FALSE(vr.func("abcdef"));
@@ -81,8 +81,8 @@ TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ct mode", "[vali
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ew mode key longer", "[validation]") {
     ValidationRule vr;
-    vr.func = [](const std::string &k) {
-        std::string pattern = "_end";
+    vr.func = [](std::string_view k) {
+        std::string_view pattern = "_end";
         if (k.size() >= pattern.size()) {
             return k.compare(k.size() - pattern.size(), pattern.size(), pattern) == 0;
         }
@@ -94,8 +94,8 @@ TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ew mode key long
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ew mode key shorter", "[validation]") {
     ValidationRule vr;
-    vr.func = [](const std::string &k) {
-        std::string pattern = "verylongpattern";
+    vr.func = [](std::string_view k) {
+        std::string_view pattern = "verylongpattern";
         return k.size() >= pattern.size() && k.compare(k.size() - pattern.size(), pattern.size(), pattern) == 0;
     };
     REQUIRE_FALSE(vr.func("short"));

@@ -19,7 +19,7 @@ namespace Zest {
         for (auto &entry : std::filesystem::directory_iterator(this->settings.DbPath / "seg")) {
             std::string ext = entry.path().extension();
             if (ext == ".seg") {
-                int segId = std::stoi(entry.path().filename());
+                uint32_t segId = static_cast<uint32_t>(std::stoi(entry.path().filename()));
                 this->segments[segId] = std::make_unique<DataSegment>(this->settings, segId);
                 nb++;
             }
@@ -29,7 +29,7 @@ namespace Zest {
             this->segments[1] = std::make_unique<DataSegment>(this->settings, 1);
             this->latestSegmentId = 1;
         } else {
-            int maxId = 0;
+            uint32_t maxId = 0;
             for (const auto &[id, seg] : this->segments) {
                 if (id > maxId)
                     maxId = id;
@@ -42,23 +42,23 @@ namespace Zest {
         unsigned long pos = seg->write(value);
 
         if (pos == this->settings.SegSize + 1) {
-            return { "", -1, 0, 0, false };
+            return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
         }
 
-        return { "", seg->getSegmentId(), pos, (unsigned int)value.size(), false };
+        return { "", static_cast<uint64_t>(pos), seg->getSegmentId(), static_cast<uint32_t>(value.size()), false };
     }
 
     IndexEntry StorageManager::append(const std::string &value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
-        int currentId = this->latestSegmentId.load();
+        uint32_t currentId = this->latestSegmentId.load();
         DataSegment *seg = nullptr;
 
         auto it = this->segments.find(currentId);
         if (it != this->segments.end() && !it->second->isFull()) {
             seg = it->second.get();
         } else {
-            int nextId = currentId + 1;
+            uint32_t nextId = currentId + 1;
 
             this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
             this->latestSegmentId.store(nextId);
@@ -78,18 +78,18 @@ namespace Zest {
         return "";
     }
 
-    void StorageManager::removeUnusedSegments(const std::vector<int> &usedSegmentIds) {
+    void StorageManager::removeUnusedSegments(const std::vector<uint32_t> &usedSegmentIds) {
         std::lock_guard<std::mutex> lock(this->mtx);
-        std::unordered_set<int> usedSet(usedSegmentIds.begin(), usedSegmentIds.end());
+        std::unordered_set<uint32_t> usedSet(usedSegmentIds.begin(), usedSegmentIds.end());
 
-        std::vector<int> toRemove;
+        std::vector<uint32_t> toRemove;
         for (const auto &[id, seg] : this->segments) {
             if (usedSet.find(id) == usedSet.end()) {
                 toRemove.push_back(id);
             }
         }
 
-        for (int id : toRemove) {
+        for (uint32_t id : toRemove) {
             auto it = this->segments.find(id);
             if (it != this->segments.end()) {
                 std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", id);

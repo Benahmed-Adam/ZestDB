@@ -54,7 +54,7 @@ namespace Zest {
 
         std::shared_mutex readMtx;
 
-        std::atomic<bool> isStopped = false; 
+        std::atomic<bool> isStopped = false;
         std::mutex compactorThreadMtx;
         std::condition_variable_any threadCV;
         std::jthread compactorThread;
