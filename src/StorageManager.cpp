@@ -65,7 +65,18 @@ namespace Zest {
             seg = this->segments[nextId].get();
         }
 
-        return this->appendToSegment(seg, value);
+        IndexEntry result = this->appendToSegment(seg, value);
+
+        if (result.segmentId == INVALID_SEGMENT_ID) {
+            ZestLog(LogLevel::DEBUG, std::format("StorageManager::append - segment {} full, creating new segment", seg->getSegmentId()));
+            uint32_t nextId = this->latestSegmentId.load() + 1;
+
+            this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
+            this->latestSegmentId.store(nextId);
+            result = this->appendToSegment(this->segments[nextId].get(), value);
+        }
+
+        return result;
     }
 
     std::string StorageManager::read(const IndexEntry &entry) {

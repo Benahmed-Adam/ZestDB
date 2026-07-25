@@ -77,6 +77,18 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager flush", "[storagemanager
     REQUIRE_NOTHROW(sm.flush());
 }
 
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager rotates to new segment when remaining space is too small", "[storagemanager]") {
+    Settings small;
+    small.DbPath = testDir;
+    small.SegSize = 10;
+    StorageManager sm(small);
+
+    sm.append("12345678");
+    auto e2 = sm.append("abcd");
+    REQUIRE(e2.segmentId == 2);
+    REQUIRE(sm.read(e2) == "abcd");
+}
+
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager append multiple values read back", "[storagemanager]") {
     StorageManager sm(settings);
     auto e1 = sm.append("val1");

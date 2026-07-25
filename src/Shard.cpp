@@ -196,8 +196,8 @@ namespace Zest {
 
         if (entry.segmentId == INVALID_SEGMENT_ID) {
             ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} "
-                                                 "- segment full",
-                                                 key, shardId));
+                                                 "- segment id {}",
+                                                 key, shardId, entry.segmentId));
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addSetStats(false, latency);
