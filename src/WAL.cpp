@@ -4,12 +4,14 @@
 #include <format>
 #include <iostream>
 
+#include "File.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
 
-    WAL::WAL(const std::filesystem::path &walPath)
-        : canClear(true) {
+    WAL::WAL(Settings &set, const std::filesystem::path &walPath)
+        : settings(set),
+          canClear(true) {
         ZestLog(LogLevel::INFO, "Opening WAL file...");
         this->WalPath = walPath;
 
@@ -45,8 +47,11 @@ namespace Zest {
         this->wal.write(cmd.c_str(), static_cast<long int>(size));
         this->wal.write(reinterpret_cast<const char *>(&timestamp), sizeof(timestamp));
         this->wal.put('\n');
-        this->wal.flush();
-        // this->wal.fsync();
+
+        if (this->settings.fsyncOnWrite) {
+            flush_and_fsync(this->wal);
+        }
+
         if (!this->wal.good()) {
             ZestLog(LogLevel::ERROR, "WAL::append - Write failed");
         }

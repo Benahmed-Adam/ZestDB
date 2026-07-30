@@ -243,6 +243,7 @@ namespace Zest {
             result.isDebug = node["isDebug"].get_value_or<bool>(false);
             result.jsonOnly = node["jsonOnly"].get_value_or<bool>(false);
             result.readOnly = node["readOnly"].get_value_or<bool>(false);
+            result.fsyncOnWrite = node["fsyncOnWrite"].get_value_or<bool>(true);
 
             result.useSSL = node["useSSL"].get_value_or<bool>(false);
             result.SSLCertPath = node["SSLCertPath"].get_value_or<std::string>("");
@@ -350,6 +351,8 @@ namespace Zest {
 
         auto node = fkyaml::node::deserialize(buffer.str());
 
+        node["DbPath"] = this->settings.DbPath.string();
+        node["ArchiveStoragePath"] = this->settings.ArchiveStoragePath.string();
         node["SegSize"] = this->settings.SegSize;
         node["MaxKeySize"] = this->settings.MaxKeySize;
         node["MaxValueSize"] = this->settings.MaxValueSize;
@@ -358,9 +361,14 @@ namespace Zest {
         node["FlushInterval"] = this->settings.FlushInterval;
         node["DBPort"] = this->settings.DBPort;
         node["WebPort"] = this->settings.WebPort;
+        node["NetworkValidation"] = this->settings.NetworkValidationStr;
         node["isDebug"] = this->settings.isDebug;
         node["jsonOnly"] = this->settings.jsonOnly;
         node["readOnly"] = this->settings.readOnly;
+        node["fsyncOnWrite"] = this->settings.fsyncOnWrite;
+        node["useSSL"] = this->settings.useSSL;
+        node["SSLCertPath"] = this->settings.SSLCertPath.string();
+        node["SSLKeyPath"] = this->settings.SSLKeyPath.string();
         node["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
         node["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
 
@@ -381,13 +389,18 @@ namespace Zest {
         j["CacheSize"] = this->settings.CacheSize;
         j["CompactingInterval"] = this->settings.CompactingInterval;
         j["FlushInterval"] = this->settings.FlushInterval;
+        j["DBPort"] = this->settings.DBPort;
+        j["WebPort"] = this->settings.WebPort;
+        j["NetworkValidation"] = this->settings.NetworkValidationStr;
         j["isDebug"] = this->settings.isDebug;
         j["jsonOnly"] = this->settings.jsonOnly;
         j["readOnly"] = this->settings.readOnly;
+        j["fsyncOnWrite"] = this->settings.fsyncOnWrite;
+        j["useSSL"] = this->settings.useSSL;
+        j["SSLCertPath"] = this->settings.SSLCertPath.string();
+        j["SSLKeyPath"] = this->settings.SSLKeyPath.string();
         j["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
         j["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
-        j["DBPort"] = this->settings.DBPort;
-        j["WebPort"] = this->settings.WebPort;
         return j.dump();
     }
 

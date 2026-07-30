@@ -3,6 +3,7 @@
 #include <chrono>
 #include <format>
 
+#include "File.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
@@ -115,8 +116,7 @@ namespace Zest {
         }
 
         if (this->canFlush) {
-            this->segment.flush();
-            // this->segment.fsync();
+            flush_and_fsync(this->segment);
             this->canFlush = false;
         }
     }

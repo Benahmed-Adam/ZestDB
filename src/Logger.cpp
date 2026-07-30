@@ -3,11 +3,13 @@
 #include <chrono>
 #include <format>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 
 namespace Zest {
 
     static bool isDebug = true;
+    static std::mutex logMutex;
 
     void setLoggerDebugMode(bool enabled) { isDebug = enabled; }
 
@@ -53,6 +55,8 @@ namespace Zest {
 
         std::ostringstream logEntry;
         logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message << "\x1b[0m" << std::endl;
+
+        std::lock_guard<std::mutex> lock(logMutex);
 
         std::cout << logEntry.str();
     }

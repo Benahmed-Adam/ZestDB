@@ -8,9 +8,11 @@ namespace fs = std::filesystem;
 
 class WALFixture {
 public:
+    Settings settings;
     fs::path testDir;
     fs::path walPath;
     WALFixture() {
+        settings.fsyncOnWrite = false;
         testDir = fs::temp_directory_path() / ("zestdb_test_wal_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
         walPath = testDir / "WAL";
@@ -19,13 +21,13 @@ public:
 };
 
 TEST_CASE_METHOD(WALFixture, "WAL constructor creates new file", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     auto cmds = wal.getCmds();
     REQUIRE(cmds.empty());
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL append and getCmds single entry", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("s key1 value1");
     auto cmds = wal.getCmds();
     REQUIRE(cmds.size() == 1);
@@ -33,7 +35,7 @@ TEST_CASE_METHOD(WALFixture, "WAL append and getCmds single entry", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL append empty command", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("");
     auto cmds = wal.getCmds();
     REQUIRE(cmds.size() == 1);
@@ -41,7 +43,7 @@ TEST_CASE_METHOD(WALFixture, "WAL append empty command", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL append long command", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     std::string longCmd(10000, 'x');
     wal.append(longCmd);
     auto cmds = wal.getCmds();
@@ -50,13 +52,13 @@ TEST_CASE_METHOD(WALFixture, "WAL append long command", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL getCmds empty WAL", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     auto cmds = wal.getCmds();
     REQUIRE(cmds.empty());
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL getCmds multiple entries ordered by timestamp", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("cmd1");
     wal.append("cmd2");
     wal.append("cmd3");
@@ -68,7 +70,7 @@ TEST_CASE_METHOD(WALFixture, "WAL getCmds multiple entries ordered by timestamp"
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL clear empties the file", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("test");
     wal.clear();
     auto cmds = wal.getCmds();
@@ -76,7 +78,7 @@ TEST_CASE_METHOD(WALFixture, "WAL clear empties the file", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL double clear is no-op", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("test");
     wal.clear();
     wal.clear();
@@ -85,7 +87,7 @@ TEST_CASE_METHOD(WALFixture, "WAL double clear is no-op", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL clear then append then clear", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.clear();
     wal.append("newcmd");
     wal.clear();
@@ -94,7 +96,7 @@ TEST_CASE_METHOD(WALFixture, "WAL clear then append then clear", "[wal]") {
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL preserves command with newlines", "[wal]") {
-    WAL wal(walPath);
+    WAL wal(settings, walPath);
     wal.append("line1\nline2");
     auto cmds = wal.getCmds();
     REQUIRE(cmds.size() == 1);

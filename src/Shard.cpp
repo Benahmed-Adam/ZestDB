@@ -62,7 +62,7 @@ namespace Zest {
             }
         }
 
-        this->wal = std::make_unique<WAL>(walPath);
+        this->wal = std::make_unique<WAL>(this->settings, walPath);
 
         this->settings.DbPath = shardPath;
         this->settings.IndexPath = indexPath;
@@ -245,9 +245,7 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() {
-            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
-        });
+        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         nlohmann::json resultArray = nlohmann::json::array();
         int matchCount = 0;
@@ -281,9 +279,7 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() {
-            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
-        });
+        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 
@@ -332,9 +328,7 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() {
-            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
-        });
+        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 

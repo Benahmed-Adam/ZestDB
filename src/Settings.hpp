@@ -83,6 +83,7 @@ namespace Zest {
         bool isRunning = true;
         bool jsonOnly;
         bool readOnly;
+        bool fsyncOnWrite;
     };
 
 } // namespace Zest
