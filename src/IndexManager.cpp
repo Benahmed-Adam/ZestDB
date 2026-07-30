@@ -134,7 +134,7 @@ namespace Zest {
         this->memoryTree[entry.key] = insertPosition;
     }
 
-    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit) {
+    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()> &stopEarly) {
         std::vector<IndexEntry> res;
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
@@ -142,6 +142,8 @@ namespace Zest {
 
         for (auto const &[key, offset] : this->memoryTree) {
             if (res.size() >= limit)
+                break;
+            if (stopEarly && stopEarly())
                 break;
 
             this->index.seekg(offset, std::ios::beg);

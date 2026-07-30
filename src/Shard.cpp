@@ -245,27 +245,28 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit);
+        entries = this->indexManager->getAll(valid.limit, [&valid]() {
+            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
+        });
 
         nlohmann::json resultArray = nlohmann::json::array();
         int matchCount = 0;
 
         for (const IndexEntry &entry : entries) {
-            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                break;
-
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
             if (valid.func(entry.key)) {
+                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                    if (prev >= valid.limit) {
+                        valid.globalMatchCount->fetch_sub(1);
+                        break;
+                    }
+                }
                 std::string value = this->storageManager->read(entry);
                 resultArray.push_back(nlohmann::json::object({ { entry.key, value } }));
                 matchCount++;
-                if (valid.globalMatchCount) {
-                    valid.globalMatchCount->fetch_add(1);
-                }
-                if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                    break;
             }
         }
 
@@ -280,21 +281,30 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit);
+        entries = this->indexManager->getAll(valid.limit, [&valid]() {
+            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
+        });
 
         int matchCount = 0;
 
         for (const IndexEntry &entry : entries) {
-            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                break;
-
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
             if (valid.func(entry.key)) {
+                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                    if (prev >= valid.limit) {
+                        valid.globalMatchCount->fetch_sub(1);
+                        break;
+                    }
+                }
                 IndexEntry newEntry = this->storageManager->append(value);
 
                 if (newEntry.segmentId == INVALID_SEGMENT_ID) {
+                    if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                        valid.globalMatchCount->fetch_sub(1);
+                    }
                     ZestLog(LogLevel::ERROR, std::format("Shard::setBy - FAILED to write for key: "
                                                          "{} - segment full",
                                                          entry.key));
@@ -308,11 +318,6 @@ namespace Zest {
                 this->cache->put(newEntry, value);
 
                 matchCount++;
-                if (valid.globalMatchCount) {
-                    valid.globalMatchCount->fetch_add(1);
-                }
-                if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                    break;
             }
         }
 
@@ -327,18 +332,24 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit);
+        entries = this->indexManager->getAll(valid.limit, [&valid]() {
+            return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit;
+        });
 
         int matchCount = 0;
 
         for (const IndexEntry &entry : entries) {
-            if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                break;
-
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
             if (valid.func(entry.key)) {
+                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                    if (prev >= valid.limit) {
+                        valid.globalMatchCount->fetch_sub(1);
+                        break;
+                    }
+                }
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
 
@@ -346,11 +357,6 @@ namespace Zest {
                 this->cache->remove(entry.key);
 
                 matchCount++;
-                if (valid.globalMatchCount) {
-                    valid.globalMatchCount->fetch_add(1);
-                }
-                if (valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit)
-                    break;
             }
         }
 

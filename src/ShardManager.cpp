@@ -14,7 +14,7 @@ namespace Zest {
     ShardManager::ShardManager(Settings &baseSettings, int numShardsCount)
         : settings(baseSettings),
           numShards(numShardsCount),
-          threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency())) {
+          threadPool(std::make_unique<ThreadPool>(std::thread::hardware_concurrency() > 0 ? std::thread::hardware_concurrency() : 8)) {
         for (int i = 0; i < this->numShards; ++i) {
             this->shards.push_back(std::make_unique<Shard>(baseSettings, i));
         }
@@ -61,6 +61,8 @@ namespace Zest {
             if (r.code == ResultType::Code::SUCCESS) {
                 nlohmann::json shardArray = nlohmann::json::parse(r.response);
                 for (auto &item : shardArray) {
+                    if (valid.limit != UINT_MAX && mergedArray.size() >= static_cast<size_t>(valid.limit))
+                        break;
                     mergedArray.push_back(std::move(item));
                 }
                 totalMatches += r.affectedRows;
@@ -68,6 +70,9 @@ namespace Zest {
         }
         threadPool->waitAll();
         valid.globalMatchCount = nullptr;
+        if (valid.limit != UINT_MAX && totalMatches > static_cast<long long>(valid.limit)) {
+            totalMatches = static_cast<long long>(valid.limit);
+        }
         return { ResultType::Code::SUCCESS, mergedArray.dump(), totalMatches };
     }
 
@@ -92,6 +97,9 @@ namespace Zest {
         }
         threadPool->waitAll();
         valid.globalMatchCount = nullptr;
+        if (valid.limit != UINT_MAX && totalUpdated > static_cast<long long>(valid.limit)) {
+            totalUpdated = static_cast<long long>(valid.limit);
+        }
         return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
     }
 
@@ -116,6 +124,9 @@ namespace Zest {
         }
         threadPool->waitAll();
         valid.globalMatchCount = nullptr;
+        if (valid.limit != UINT_MAX && totalDeleted > static_cast<long long>(valid.limit)) {
+            totalDeleted = static_cast<long long>(valid.limit);
+        }
         return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
     }
 
@@ -151,9 +162,9 @@ namespace Zest {
         std::sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry &a, const WalEntry &b) { return a.timestamp < b.timestamp; });
 
         for (const auto &entry : allWalEntries) {
-            ZestLog(LogLevel::INFO, std::format("WAL replay command: {}", entry.cmd));
+            ZestLog(LogLevel::DEBUG, std::format("WAL replay command: {}", entry.cmd));
             std::string result = execCmdFunc(entry.cmd);
-            ZestLog(LogLevel::INFO, std::format("WAL replay result: {}", result));
+            ZestLog(LogLevel::DEBUG, std::format("WAL replay result: {}", result));
         }
 
         this->flush();

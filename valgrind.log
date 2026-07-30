@@ -1,0 +1,33 @@
+==27520== Memcheck, a memory error detector
+==27520== Copyright (C) 2002-2024, and GNU GPL'd, by Julian Seward et al.
+==27520== Using Valgrind-3.26.0 and LibVEX; rerun with -h for copyright info
+==27520== Command: ./bin/zestdb
+==27520== Parent PID: 24193
+==27520== 
+==27520== 
+==27520== HEAP SUMMARY:
+==27520==     in use at exit: 56 bytes in 1 blocks
+==27520==   total heap usage: 231,966 allocs, 231,965 frees, 97,463,467 bytes allocated
+==27520== 
+==27520== 56 bytes in 1 blocks are still reachable in loss record 1 of 1
+==27520==    at 0x4B33858: malloc (vg_replace_malloc.c:447)
+==27520==    by 0x4DB1D65: CRYPTO_malloc (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x4DB1EF4: CRYPTO_zalloc (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x4DC6EB0: CRYPTO_THREAD_lock_new (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x4DB049C: ??? (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x57387F3: __pthread_once_slow.isra.0 (pthread_once.c:116)
+==27520==    by 0x5738868: pthread_once@@GLIBC_2.34 (pthread_once.c:143)
+==27520==    by 0x4DC6FAC: CRYPTO_THREAD_run_once (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x4DB055E: ??? (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x4DAC00C: ??? (in /usr/lib/x86_64-linux-gnu/libcrypto.so.3)
+==27520==    by 0x57387F3: __pthread_once_slow.isra.0 (pthread_once.c:116)
+==27520==    by 0x5738868: pthread_once@@GLIBC_2.34 (pthread_once.c:143)
+==27520== 
+==27520== LEAK SUMMARY:
+==27520==    definitely lost: 0 bytes in 0 blocks
+==27520==    indirectly lost: 0 bytes in 0 blocks
+==27520==      possibly lost: 0 bytes in 0 blocks
+==27520==    still reachable: 56 bytes in 1 blocks
+==27520==         suppressed: 0 bytes in 0 blocks
+==27520== 
+==27520== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)

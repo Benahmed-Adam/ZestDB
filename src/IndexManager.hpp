@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -84,7 +85,7 @@ namespace Zest {
         IndexEntry search(const std::string &key);
         void update(const std::string &key, const IndexEntry &entry);
         void insert(const IndexEntry &entry);
-        std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX);
+        std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX, const std::function<bool()> &stopEarly = {});
         std::vector<IndexEntry> compact();
         void flush();
 

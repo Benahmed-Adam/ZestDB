@@ -6,8 +6,7 @@ SANFLAGS =
 COMMON_LDFLAGS = -lcrypto -lssl -lzippp_static -lzip -lz -lbz2 -llzma -lzstd
 
 ifeq ($(DEBUG), 1)
-    SANFLAGS = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer
-    CXXFLAGS = $(BASE_CXXFLAGS) -g -O0 $(SANFLAGS)
+    CXXFLAGS = $(BASE_CXXFLAGS) -g3 -O0 $(SANFLAGS)
     LDFLAGS  = $(SANFLAGS) $(COMMON_LDFLAGS)
 else
     CXXFLAGS = $(BASE_CXXFLAGS) -O3

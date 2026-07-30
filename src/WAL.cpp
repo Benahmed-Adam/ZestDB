@@ -38,7 +38,7 @@ namespace Zest {
             ZestLog(LogLevel::ERROR, "WAL::append - WAL not open");
             return;
         }
-        size_t size = cmd.size();
+        uint32_t size = cmd.size();
         auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
 
         this->wal.write(reinterpret_cast<const char *>(&size), sizeof(size));
@@ -65,7 +65,7 @@ namespace Zest {
         this->wal.clear();
         this->wal.seekg(0, std::ios::beg);
 
-        size_t size;
+        uint32_t size;
         std::chrono::milliseconds timestamp;
         while (this->wal.read(reinterpret_cast<char *>(&size), sizeof(size))) {
             if (size > 1000000) {
