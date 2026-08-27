@@ -142,7 +142,7 @@ namespace Zest {
         res.reserve(this->memoryTree.size());
 
         for (auto const &[key, offset] : this->memoryTree) {
-            if (res.size() >= limit)
+            if (res.size() >= limit || limit == 0)
                 break;
             if (stopEarly && stopEarly())
                 break;
