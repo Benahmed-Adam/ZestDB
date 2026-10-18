@@ -40,7 +40,7 @@ namespace Zest {
     }
 
     void IndexManager::loadIndexIntoMemory() {
-        std::unique_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
         this->index.seekg(0, std::ios::end);
         std::streamoff fsize = this->index.tellg();
 
@@ -60,7 +60,7 @@ namespace Zest {
     }
 
     IndexEntry IndexManager::search(const std::string& key) {
-        std::shared_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
         if (it != this->memoryTree.end()) {
@@ -78,7 +78,7 @@ namespace Zest {
     }
 
     void IndexManager::update(const std::string& key, const IndexEntry& entry) {
-        std::unique_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
         if (it != this->memoryTree.end()) {
@@ -94,7 +94,7 @@ namespace Zest {
     }
 
     void IndexManager::insert(const IndexEntry& entry) {
-        std::unique_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(entry.key);
         if (it != this->memoryTree.end()) {
@@ -108,7 +108,6 @@ namespace Zest {
             }
         }
 
-        // Records are variable-length (key bytes), so tombstone slots are never reused: always append, compaction reclaims space.
         this->index.seekp(0, std::ios::end);
         std::streamoff insertPosition = this->index.tellp();
         entry.serialize(this->index);
@@ -118,7 +117,7 @@ namespace Zest {
 
     std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()>& stopEarly) {
         std::vector<IndexEntry> res;
-        std::shared_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         res.reserve(this->memoryTree.size());
 
@@ -150,7 +149,7 @@ namespace Zest {
 
         std::vector<IndexEntry> entries = this->getAll();
 
-        std::unique_lock<std::shared_mutex> lock(this->mtx);
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         this->index.close();
         this->index.open(this->indexPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
@@ -179,8 +178,8 @@ namespace Zest {
             }
         }
 
-        this->canFlush = true;
-        this->flush();
+        flush_and_fsync(this->index);
+        this->canFlush = false;
         ZestLog(LogLevel::DEBUG, "Index compaction completed successfully.");
 
         std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
@@ -188,10 +187,7 @@ namespace Zest {
     }
 
     void IndexManager::flush() {
-        std::unique_lock<std::shared_mutex> lock(this->mtx, std::try_to_lock);
-        if (!lock.owns_lock()) {
-            return;
-        }
+        std::unique_lock<std::mutex> lock(this->mtx);
 
         if (this->canFlush) {
             flush_and_fsync(this->index);

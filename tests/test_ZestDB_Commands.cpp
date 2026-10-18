@@ -1,4 +1,5 @@
 #include <catch2/catch_all.hpp>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -307,12 +308,12 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby lim counts matches, not scanne
         db->set("k" + std::to_string(i), "v");
     }
     REQUIRE(db->execCmd("gb sw target lim 1").affectedRows == 1);
-    REQUIRE(db->execCmd("sb sw target lim 1 y").affectedRows == 1);
+    REQUIRE(db->execCmd("sb sw target y lim 1").affectedRows == 1);
     REQUIRE(db->execCmd("db sw target lim 1").affectedRows == 1);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd invalid lim is an error, not an exception", "[commands]") {
-    for (const char* cmd : { "gb sw a lim abc", "sb sw a lim x val", "db sw a lim -1" }) {
+    for (const char* cmd : { "gb sw a lim abc", "sb sw a val lim x", "db sw a lim -1" }) {
         ResultType r;
         REQUIRE_NOTHROW(r = db->execCmd(cmd));
         REQUIRE(r.code == ResultType::Code::ERROR);
@@ -366,7 +367,33 @@ TEST_CASE("ZestDB missing config fields fall back to defaults", "[commands]") {
         REQUIRE(cfg["CacheSize"] == 1000);
         REQUIRE(cfg["FlushInterval"] == 120);
         REQUIRE(cfg["fsyncOnWrite"] == true);
+        REQUIRE(cfg["NetworkValidation"] == ".*");
     }
     fs::current_path(originalCwd);
     fs::remove_all(testDir);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby takes a trailing lim, as documented", "[commands]") {
+    for (const char* k : { "k1", "k2", "k3" }) {
+        db->set(k, "old");
+    }
+    REQUIRE(db->execCmd("sb sw k hello world lim 2").affectedRows == 2);
+    int updated = 0;
+    for (const char* k : { "k1", "k2", "k3" }) {
+        updated += db->get(k).response == "hello world";
+    }
+    REQUIRE(updated == 2);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby regex without catastrophic backtracking", "[commands]") {
+    db->set(std::string(30, 'a') + "b", "v");
+    auto start = std::chrono::steady_clock::now();
+    auto r = db->execCmd("gb re (a+)+$");
+    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.affectedRows == 0);
+    REQUIRE(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby regex refuses back-references", "[commands]") {
+    REQUIRE(db->execCmd(R"(gb re (a)\1)").response == Messages::INVALID_REGEX);
 }

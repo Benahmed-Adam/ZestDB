@@ -50,6 +50,8 @@ namespace Zest {
 
         if (this->settings.fsyncOnWrite) {
             flush_and_fsync(this->wal);
+        } else {
+            this->wal.flush();
         }
 
         if (!this->wal.good()) {

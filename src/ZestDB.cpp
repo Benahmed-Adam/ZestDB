@@ -8,6 +8,7 @@
 #include <future>
 #include <iostream>
 #include <libzippp/libzippp.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <regex>
 #include <sstream>
@@ -199,6 +200,10 @@ namespace Zest {
         this->settings = std::move(this->loadConfig());
         setLoggerDebugMode(this->settings.isDebug);
 
+        if (!this->settings.useSSL && !this->users.empty()) {
+            ZestLog(LogLevel::WARNING, "useSSL is false: authentication tokens and data travel in clear and a captured token can be replayed. Enable useSSL outside a trusted network.");
+        }
+
         ZestLog(LogLevel::DEBUG, std::format("Boot config: path={}, cache={}, segSize={}, dbPort={}, webPort={}", this->settings.DbPath.string(), this->settings.CacheSize, this->settings.SegSize, this->settings.DBPort, this->settings.WebPort));
 
         if (!fs::exists(this->settings.DbPath)) {
@@ -245,7 +250,10 @@ namespace Zest {
             result.DBPort = getOr<short>(node, "DBPort", 7321);
             result.WebPort = getOr<short>(node, "WebPort", 1237);
 
-            result.NetworkValidationStr = getOr<std::string>(node, "NetworkValidation", "");
+            result.NetworkValidationStr = getOr<std::string>(node, "NetworkValidation", ".*");
+            if (result.NetworkValidationStr.empty()) {
+                result.NetworkValidationStr = ".*";
+            }
 
             result.isDebug = getOr<bool>(node, "isDebug", false);
             result.jsonOnly = getOr<bool>(node, "jsonOnly", false);
@@ -277,11 +285,12 @@ namespace Zest {
             if (node.contains("users") && node["users"].is_sequence()) {
                 for (const auto& user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
-                    std::string password = user_node["password"].get_value<std::string>();
-
-                    this->users[username] = sha256(username + password);
+                    if (user_node.contains("tokenHash")) {
+                        this->users[username] = user_node["tokenHash"].get_value<std::string>();
+                    } else {
+                        this->users[username] = sha256(sha256(username + user_node["password"].get_value<std::string>()));
+                    }
                 }
-            } else {
             }
         } catch (const std::exception& e) {
             ZestLog(LogLevel::ERROR, "Failed to parse config : " + std::string(e.what()));
@@ -463,11 +472,9 @@ namespace Zest {
             return false;
         }
 
-        if (this->users.at(username) != token) {
-            return false;
-        }
-
-        return true;
+        const std::string& expected = this->users.at(username);
+        const std::string actual = sha256(token);
+        return actual.size() == expected.size() && CRYPTO_memcmp(actual.data(), expected.data(), actual.size()) == 0;
     }
 
     bool ZestDB::validateKey(std::string_view key) const {
@@ -577,7 +584,10 @@ namespace Zest {
         if (mode == "re") {
             try {
                 std::string patStr(pattern);
-                std::regex keyRegex(patStr);
+                if (std::regex_search(patStr, std::regex(R"(\\[1-9])"))) {
+                    return { valid, false };
+                }
+                std::regex keyRegex(patStr, std::regex::ECMAScript | std::regex_constants::__polynomial);
                 valid.func = [reg = std::move(keyRegex)](std::string_view key) { return std::regex_match(std::string(key), reg); };
             } catch (const std::regex_error&) {
                 validMode = false;
@@ -654,6 +664,12 @@ namespace Zest {
             cmd = it->second;
         }
 
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db";
+        std::shared_lock<std::shared_mutex> writeLock(this->writeMtx, std::defer_lock);
+        if (isWrite) {
+            writeLock.lock();
+        }
+
         if (cmd == "g") {
             if (words.size() < 2) {
                 result.response = Messages::MISSING_KEY;
@@ -704,25 +720,20 @@ namespace Zest {
                 std::string mode = toLowerStr(words[1]);
                 std::string_view pattern = words[2];
                 unsigned int limit = UINT_MAX;
-
                 bool limitOk = true;
-                size_t valStartIdx = 3;
-                if (words.size() >= 5) {
-                    for (size_t i = 3; i < words.size(); i++) {
-                        if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                            limitOk = parseUInt(words[i + 1], limit);
-                            valStartIdx = i + 2;
-                            break;
-                        }
-                    }
+
+                size_t valStart = static_cast<size_t>(words[3].data() - command.data());
+                size_t valEnd = command.size();
+                if (words.size() >= 6 && toLowerStr(words[words.size() - 2]) == "lim") {
+                    limitOk = parseUInt(words.back(), limit);
+                    std::string_view lastValueWord = words[words.size() - 3];
+                    valEnd = static_cast<size_t>(lastValueWord.data() + lastValueWord.size() - command.data());
                 }
 
                 if (!limitOk) {
                     result.response = Messages::INVALID_LIMIT;
-                } else if (valStartIdx >= words.size()) {
-                    result.response = Messages::MISSING_VALUE;
                 } else {
-                    std::string value = command.substr(static_cast<size_t>(words[valStartIdx].data() - command.data()));
+                    std::string value = command.substr(valStart, valEnd - valStart);
 
                     auto [valid, validMode] = this->createValidationRule(mode, pattern);
                     if (!validMode) {
@@ -942,7 +953,7 @@ namespace Zest {
         }
 
         if (!this->replaying.load()) {
-            if (result.code == ResultType::Code::SUCCESS && (cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db")) {
+            if (result.code == ResultType::Code::SUCCESS && isWrite) {
                 if (words.size() >= 2) {
                     this->appendToWAL(std::string(words[1]), command);
                 }
@@ -1024,9 +1035,9 @@ namespace Zest {
 
     void ZestDB::flush() {
         ZestLog(LogLevel::DEBUG, "Flushing all shards...");
+        std::unique_lock<std::shared_mutex> lock(this->writeMtx);
         this->isFlushing.store(true);
         this->shardManager->flush();
-        this->shardManager->clearAllWAL();
         this->isFlushing.store(false);
     }
 

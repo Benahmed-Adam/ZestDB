@@ -48,6 +48,11 @@ namespace Zest {
                         uint32_t payload_size;
                         is.read(reinterpret_cast<char*>(&payload_size), 4);
                         payload_size = ntohl(payload_size);
+                        if (payload_size > (this->authenticated_ ? MAX_PAYLOAD_SIZE : MAX_UNAUTHENTICATED_PAYLOAD_SIZE)) {
+                            ZestLog(LogLevel::WARNING, std::format("Session: payload of {} bytes refused", payload_size));
+                            this->queue_write(ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::PAYLOAD_TOO_LARGE, 0 }) + "\n", true);
+                            return;
+                        }
                         this->do_read_command(payload_size);
                     } else if (ec != asio::error::operation_aborted) {
                         ZestLog(LogLevel::INFO, "Client disconnected");

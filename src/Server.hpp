@@ -31,6 +31,9 @@ namespace Zest {
 
         void close_stream();
 
+        static constexpr uint32_t MAX_UNAUTHENTICATED_PAYLOAD_SIZE = 1024 * 1024;
+        static constexpr uint32_t MAX_PAYLOAD_SIZE = 64 * 1024 * 1024;
+
         ZestStream stream_;
         asio::streambuf buffer_;
         ZestDB& db_;

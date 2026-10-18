@@ -26,4 +26,4 @@ AutoArchiveSaving: true
 
 users:
   - user: bob
-    password: bob
+    tokenHash: fa2c869a802a01ebc7a945b0c60f51dc8da08780209eeb27a833240c861db9c0 # sha256 of the token sha256("bob" + "bob")

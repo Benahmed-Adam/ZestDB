@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
+#include <atomic>
 #include <filesystem>
+#include <format>
 #include <thread>
 
 #include "Shard.hpp"
@@ -155,4 +157,70 @@ TEST_CASE_METHOD(ShardFixture, "Shard WAL append works", "[shard]") {
     auto cmds = wal.getCmds();
     REQUIRE_FALSE(cmds.empty());
     REQUIRE(cmds[0].cmd == "set key1 val1");
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions keep every value", "[shard]") {
+    settings.CompactingInterval = 0;
+    constexpr int writers = 4;
+    constexpr int perWriter = 200;
+
+    auto expected = [](int w, int i) -> std::string {
+        return i % 3 == 0 ? "" : std::format("k{}_{}_v2", w, i);
+    };
+    auto checkAll = [&](Shard& shard) {
+        for (int w = 0; w < writers; w++) {
+            for (int i = 0; i < perWriter; i++) {
+                auto r = shard.get(std::format("k{}_{}", w, i));
+                if (expected(w, i).empty()) {
+                    REQUIRE(r.code == ResultType::Code::ERROR);
+                } else {
+                    REQUIRE(r.response == expected(w, i));
+                }
+            }
+        }
+    };
+
+    {
+        Shard shard(settings, 0);
+        std::atomic<bool> done = false;
+        std::thread flusher([&] {
+            while (!done) {
+                shard.flush();
+            }
+        });
+        std::vector<std::thread> threads;
+        for (int w = 0; w < writers; w++) {
+            threads.emplace_back([&shard, w] {
+                for (int i = 0; i < perWriter; i++) {
+                    std::string key = std::format("k{}_{}", w, i);
+                    shard.set(key, key + "_v1");
+                    shard.set(key, key + "_v2");
+                    if (i % 3 == 0) {
+                        shard.del(key);
+                    }
+                    shard.get(key);
+                }
+            });
+        }
+        for (auto& t : threads) {
+            t.join();
+        }
+        done = true;
+        flusher.join();
+        checkAll(shard);
+    }
+
+    Shard reopened(settings, 0);
+    checkAll(reopened);
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
+    Shard shard(settings, 0);
+    shard.set("key1", "value1");
+    Settings s = settings;
+    s.CacheSize = 0;
+    shard.reloadSettings(s);
+    shard.set("key2", "value2");
+    REQUIRE(shard.get("key1").response == "value1");
+    REQUIRE(shard.get("key2").response == "value2");
 }

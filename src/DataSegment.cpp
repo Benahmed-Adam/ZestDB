@@ -116,10 +116,7 @@ namespace Zest {
     }
 
     void DataSegment::flush() {
-        std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);
-        if (!lock.owns_lock()) {
-            return;
-        }
+        std::lock_guard<std::mutex> lock(this->mtx);
 
         if (this->canFlush) {
             flush_and_fsync(this->segment);

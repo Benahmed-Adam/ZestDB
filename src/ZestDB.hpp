@@ -69,6 +69,8 @@ namespace Zest {
         std::unique_ptr<Server> socket;
 
         std::atomic<bool> replaying;
+
+        std::shared_mutex writeMtx;
         std::atomic<bool> isFlushing;
 
         std::mutex flushThreadMtx;

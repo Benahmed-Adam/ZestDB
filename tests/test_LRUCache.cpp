@@ -96,3 +96,22 @@ TEST_CASE("LRUCache capacity 1", "[lru]") {
     REQUIRE(cache.get("a").index.segmentId == INVALID_SEGMENT_ID);
     REQUIRE(cache.get("b").value == "2");
 }
+
+TEST_CASE("LRUCache with capacity 0 caches nothing", "[lru]") {
+    LRUCache cache(0);
+    REQUIRE_NOTHROW(cache.put(makeEntry("a"), "1"));
+    REQUIRE(cache.get("a").index.segmentId == INVALID_SEGMENT_ID);
+}
+
+TEST_CASE("LRUCache resize evicts least recently used entries", "[lru]") {
+    LRUCache cache(5);
+    for (const char* k : { "a", "b", "c", "d" }) {
+        cache.put(makeEntry(k), k);
+    }
+    cache.get("a");
+    cache.resize(2);
+    REQUIRE(cache.get("a").value == "a");
+    REQUIRE(cache.get("d").value == "d");
+    REQUIRE(cache.get("b").index.segmentId == INVALID_SEGMENT_ID);
+    REQUIRE(cache.get("c").index.segmentId == INVALID_SEGMENT_ID);
+}

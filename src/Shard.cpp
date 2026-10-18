@@ -95,15 +95,16 @@ namespace Zest {
             while (this->settings.isRunning && !stopToken.stop_requested()) {
                 this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.CompactingInterval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
+                if (stopToken.stop_requested() || !this->settings.isRunning) {
+                    break;
+                }
+
+                std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
                 std::vector<IndexEntry> entries = indexManager->compact();
 
                 if (entries.empty()) {
                     ZestLog(LogLevel::DEBUG, "Compactor - index is empty, skipping segment cleanup");
                     continue;
-                }
-
-                if (stopToken.stop_requested() || !this->settings.isRunning) {
-                    break;
                 }
 
                 std::vector<uint32_t> usedSegmentIds;
@@ -364,6 +365,7 @@ namespace Zest {
     }
 
     void Shard::flush() {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
         this->indexManager->flush();
         this->storageManager->flush();
         this->wal->clear();
@@ -422,6 +424,8 @@ namespace Zest {
         this->settings.DbPath = shardPath;
         this->settings.IndexPath = indexPath;
         this->settings.WalPath = walPath;
+
+        this->cache->resize(set.CacheSize);
     }
 
 } // namespace Zest

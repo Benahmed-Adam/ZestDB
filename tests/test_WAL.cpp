@@ -106,3 +106,9 @@ TEST_CASE_METHOD(WALFixture, "WAL preserves command with newlines", "[wal]") {
     REQUIRE(cmds.size() == 1);
     REQUIRE(cmds[0].cmd == "line1\nline2");
 }
+
+TEST_CASE_METHOD(WALFixture, "WAL append reaches the file without fsyncOnWrite", "[wal]") {
+    WAL wal(settings, walPath);
+    wal.append("s key value");
+    REQUIRE(fs::file_size(walPath) > 0);
+}

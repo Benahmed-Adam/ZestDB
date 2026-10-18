@@ -27,6 +27,10 @@ namespace Zest {
 
         std::lock_guard<std::mutex> lock(this->mtx);
 
+        if (this->capacity == 0) {
+            return;
+        }
+
         auto it = this->map.find(key);
 
         if (it != this->map.end()) {
@@ -41,6 +45,16 @@ namespace Zest {
 
         this->lru_list.push_front(key);
         this->map[key] = { { entry, value }, this->lru_list.begin() };
+    }
+
+    void LRUCache::resize(unsigned int cap) {
+        std::lock_guard<std::mutex> lock(this->mtx);
+
+        this->capacity = cap;
+        while (this->map.size() > this->capacity) {
+            this->map.erase(this->lru_list.back());
+            this->lru_list.pop_back();
+        }
     }
 
     void LRUCache::remove(const std::string& key) {

@@ -55,6 +55,7 @@ namespace Zest {
         static constexpr const char* INVALID_VALUE = "The value does not respect the value validation rule !";
         static constexpr const char* MISSING_ARGUMENTS = "Not enough arguments provided !";
         static constexpr const char* UPDATE_SUCCESSFUL = "Values successfuly updated !";
+        static constexpr const char* PAYLOAD_TOO_LARGE = "Payload too large !";
         static constexpr const char* INVALID_LIMIT = "Invalid limit ! lim expects a positive integer";
         static constexpr const char* INVALID_MODE = "Invalid mode ! Use a mode between re, sw, ct, ew";
     };

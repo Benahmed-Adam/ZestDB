@@ -256,7 +256,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `FlushInterval` | 120 | Seconds between disk syncs. |
 | `DBPort` | 7321 | TCP data server port. |
 | `WebPort` | 1237 | HTTP monitoring server port. |
-| `NetworkValidation` | "" | Regex for allowed client IP addresses. |
+| `NetworkValidation` | ".*" | Regex for allowed client IP addresses (empty also allows all). |
 | `isDebug` | false | Enable debug logging. |
 | `jsonOnly` | false | Accept only JSON values. |
 | `readOnly` | false | Block write operations. |
@@ -267,7 +267,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `ArchiveStoragePath` | ./archive/ | Folder where zip archives are written. |
 | `ArchiveCreationDelay` | 3600 | Seconds between automatic archives. |
 | `AutoArchiveSaving` | true | Enable automatic archiving. |
-| `users` | empty | List of `{user, password}` credential pairs. |
+| `users` | empty | List of `{user, tokenHash}` pairs, where `tokenHash` is `sha256(token)` and the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
 
 ---
 
@@ -292,6 +292,15 @@ A session must first send:
 Authorization: <username>.<sha256(username+password)>
 ```
 The server replies with `{"code":0,...}` on success, or closes the connection on failure. Commands sent before authentication are rejected.
+
+`config.yaml` only stores a hash of the token, so a leaked config does not grant access. To compute the `tokenHash` for a user:
+```bash
+printf %s "$(printf %s "<user><password>" | sha256sum | cut -d' ' -f1)" | sha256sum | cut -d' ' -f1
+```
+
+Without `useSSL` the token travels in clear and a captured token can be replayed, so enable SSL outside a trusted network.
+
+Before authentication a request payload is limited to 1 MiB, and to 64 MiB afterwards; a larger size closes the connection.
 
 ### Response format
 Each command yields one JSON object:
@@ -354,6 +363,7 @@ The project ships a test suite built with Catch2, covering every subsystem:
 | Performance monitoring | `tests/test_PerfMonitoring.cpp` |
 | Logger | `tests/test_Logger.cpp` |
 | Server protocol | `tests/test_Server_Protocol.cpp` |
+| Server sessions (auth, payload limit) | `tests/test_Server_Session.cpp` |
 | ZestDB commands | `tests/test_ZestDB_Commands.cpp` |
 | ZestDB utilities | `tests/test_ZestDB_Utils.cpp` |
 | ZestDB validation | `tests/test_ZestDB_Validation.cpp` |

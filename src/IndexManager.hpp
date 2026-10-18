@@ -96,7 +96,7 @@ namespace Zest {
     private:
         std::filesystem::path indexPath;
         std::fstream index;
-        std::shared_mutex mtx;
+        std::mutex mtx;
         Settings& settings;
 
         std::unordered_map<std::string, std::streamoff> memoryTree;
