@@ -1,5 +1,5 @@
-#include <catch2/catch_all.hpp>
 #include <atomic>
+#include <catch2/catch_all.hpp>
 #include <filesystem>
 #include <format>
 #include <thread>
@@ -164,9 +164,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
     constexpr int writers = 4;
     constexpr int perWriter = 200;
 
-    auto expected = [](int w, int i) -> std::string {
-        return i % 3 == 0 ? "" : std::format("k{}_{}_v2", w, i);
-    };
+    auto expected = [](int w, int i) -> std::string { return i % 3 == 0 ? "" : std::format("k{}_{}_v2", w, i); };
     auto checkAll = [&](Shard& shard) {
         for (int w = 0; w < writers; w++) {
             for (int i = 0; i < perWriter; i++) {
