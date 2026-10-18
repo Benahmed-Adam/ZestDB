@@ -311,7 +311,7 @@ Each command yields one JSON object:
 - `response`: a string, or a JSON array/object for bulk operations.
 - `affectedRows`: number of affected entries.
 
-Multiple commands in one request are answered with responses separated by `\r\n\r\n` and terminated by a trailing newline. See `test.py` for a full reference client implementation used for stress testing.
+Multiple commands in one request are answered with responses separated by `\r\n\r\n` and terminated by a trailing newline. See `benchmark/zest_client.py` for a minimal reference client.
 
 ---
 
@@ -407,5 +407,84 @@ A GitHub Actions workflow (`c-cpp.yml`) builds the project and runs the full tes
 │   ├── File.hpp                  # fsync helper
 │   ├── main.cpp                  # entry point, REPL, signal handling
 │   └── lib/                      # vendored third-party headers
-└── tests/                        # Catch2 unit tests
+├── tests/                        # Catch2 unit tests
+└── benchmark/                    # Python benchmark scripts
 ```
+
+---
+
+## Benchmarks
+
+The `benchmark/` folder contains Python scripts (3.10+, standard library only) that measure a running server over the TCP protocol. Start the server first (`make run`), then run the scripts from the `benchmark/` folder:
+
+| Script | Measures |
+| --- | --- |
+| `bench_kv.py` | `set` / `get` throughput and latency (avg, median, p95, p99) per batch and per command, for several volumes and batch sizes. |
+| `bench_bulk.py` | Latency of `getby` / `setby` / `delby` for each mode (`sw`, `ct`, `ew`, `re`) and with `lim`, over a populated database. |
+| `bench_concurrency.py` | Aggregate throughput with 1 to N clients in parallel (one process each), for a GET/SET mix. |
+| `zest_client.py` | Shared client: framing, authentication, statistics. |
+
+```bash
+cd benchmark
+python3 bench_kv.py --entries 100000,1000000 --batches 1,100,10000 --cleanup
+python3 bench_bulk.py --entries 100000 --repeat 5
+python3 bench_concurrency.py --clients 1,2,4,8 --ops 50000 --read-pct 80
+```
+
+Every script accepts `--host`, `--port`, `--user`, `--password` (default `bob` / `bob`) and `--json <file>` to save the results for comparison. The scripts write keys prefixed with `tk_` (`bench_kv.py`, removed with `--cleanup`), `bench_user:` / `bench_order:` and `bench_conc_` (removed at the end). Run them on a test database: the default `bench_kv.py` run writes 1 million keys.
+
+### Results
+
+Measured with the commands above, client and server on the same machine (WSL2 Ubuntu, localhost), with the default `config.yaml` (32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`). Numbers depend on the hardware: use them to compare runs, not as absolute figures.
+
+#### SET / GET (`bench_kv.py`)
+
+| Mode | Entries | Batch | Throughput (ops/s) | Avg per command (ms) | p99 per batch (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SET | 100,000 | 1 | 15,790 | 0.061 | 0.211 |
+| GET | 100,000 | 1 | 17,241 | 0.056 | 0.130 |
+| SET | 100,000 | 100 | 145,738 | 0.0067 | 1.222 |
+| GET | 100,000 | 100 | 223,517 | 0.0043 | 0.766 |
+| SET | 100,000 | 10,000 | 189,725 | 0.0051 | 64.471 |
+| GET | 100,000 | 10,000 | 290,103 | 0.0033 | 39.699 |
+| SET | 1,000,000 | 1 | 14,788 | 0.066 | 0.154 |
+| GET | 1,000,000 | 1 | 19,028 | 0.051 | 0.141 |
+| SET | 1,000,000 | 100 | 148,466 | 0.0065 | 0.967 |
+| GET | 1,000,000 | 100 | 220,280 | 0.0044 | 0.690 |
+| SET | 1,000,000 | 10,000 | 177,507 | 0.0055 | 287.957 |
+| GET | 1,000,000 | 10,000 | 286,212 | 0.0034 | 42.548 |
+
+- **Batching matters most**: one command per request is bound by the network round trip (~15-19k ops/s). Batches of 100 already give ~10x more, and batches of 10,000 reach ~180k SET/s and ~290k GET/s.
+- **Volume has little effect**: throughput at 1 million keys is close to throughput at 100,000 keys.
+- **No errors** across the 6.6 million operations.
+- **Occasional SET outliers** of 150-290 ms (worst case, while the median stays around 0.05 ms per command), most likely when a periodic flush runs.
+
+#### Pattern commands (`bench_bulk.py`, 100,000 keys)
+
+| Scenario | Command | Rows | Median (ms) |
+| --- | --- | ---: | ---: |
+| getby prefix, lim 100 | `gb sw bench_user: lim 100` | 100 | 2.73 |
+| getby prefix, all | `gb sw bench_user:` | 50,000 | 55.03 |
+| getby contains | `gb ct :12` | 1,111 | 17.03 |
+| getby suffix | `gb ew 99` | 1,000 | 16.72 |
+| getby regex | `gb re bench_user:\d*8` | 10,000 | 31.11 |
+| getby regex, no match | `gb re (a+)+$` | 0 | 16.16 |
+| setby prefix, lim 1000 | `sb sw bench_order: updated lim 1000` | 1,000 | 5.58 |
+| setby prefix, all | `sb sw bench_order: updated` | 50,000 | 47.31 |
+| delby prefix, lim 1000 | `db sw bench_order: lim 1000` | 1,000 | 5.28 |
+| delby prefix, all | `db sw bench_` | 99,000 | 249.91 |
+
+- A pattern command scans the whole index (~16 ms for 100,000 keys even with no match); the rest of the cost grows with the number of rows returned or modified.
+- `lim` stops the scan early: 2.7 ms for 100 rows instead of 55 ms for all of them.
+- The catastrophic-backtracking regex `(a+)+$` costs no more than a plain scan.
+
+#### Concurrent clients (`bench_concurrency.py`, 80% GET / 20% SET, batch 100)
+
+| Clients | Total ops | Throughput (ops/s) | Median batch (ms) | p99 batch (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 50,000 | 281,195 | 0.315 | 0.786 |
+| 2 | 100,000 | 219,706 | 0.843 | 1.599 |
+| 4 | 200,000 | 205,477 | 1.849 | 2.873 |
+| 8 | 400,000 | 182,519 | 3.907 | 6.013 |
+
+- Adding clients does not add throughput: the TCP server handles every session on a single Asio thread, so clients wait for each other and latency grows with their number. Spreading sessions over several threads is the main lever for multi-client workloads.
