@@ -8,7 +8,7 @@
 
 namespace Zest {
 
-    DataSegment::DataSegment(Settings &set, uint32_t id)
+    DataSegment::DataSegment(Settings& set, uint32_t id)
         : segmentId(id),
           currentOffset(0),
           settings(set),
@@ -49,9 +49,11 @@ namespace Zest {
         this->currentOffset = static_cast<unsigned long>(pos);
     }
 
-    unsigned long DataSegment::getWritePosition() const { return this->currentOffset.load(); }
+    unsigned long DataSegment::getWritePosition() const {
+        return this->currentOffset.load();
+    }
 
-    unsigned long DataSegment::write(const std::string &value) {
+    unsigned long DataSegment::write(const std::string& value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         unsigned long startOffset = this->currentOffset.load();
@@ -105,9 +107,13 @@ namespace Zest {
         return res;
     }
 
-    bool DataSegment::isFull() const { return this->currentOffset.load() >= this->settings.SegSize; }
+    bool DataSegment::isFull() const {
+        return this->currentOffset.load() >= this->settings.SegSize;
+    }
 
-    uint32_t DataSegment::getSegmentId() const { return this->segmentId; }
+    uint32_t DataSegment::getSegmentId() const {
+        return this->segmentId;
+    }
 
     void DataSegment::flush() {
         std::unique_lock<std::mutex> lock(this->mtx, std::try_to_lock);

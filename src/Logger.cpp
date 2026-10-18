@@ -11,7 +11,9 @@ namespace Zest {
     static bool isDebug = true;
     static std::mutex logMutex;
 
-    void setLoggerDebugMode(bool enabled) { isDebug = enabled; }
+    void setLoggerDebugMode(bool enabled) {
+        isDebug = enabled;
+    }
 
     std::string levelToString(LogLevel level) {
         switch (level) {
@@ -45,7 +47,7 @@ namespace Zest {
         }
     }
 
-    void ZestLog(LogLevel level, const std::string &message) {
+    void ZestLog(LogLevel level, const std::string& message) {
         if (!isDebug && level == LogLevel::DEBUG)
             return;
 

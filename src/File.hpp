@@ -5,14 +5,16 @@
 
 namespace Zest {
 
-    inline void flush_and_fsync(std::fstream &fs) {
+    inline void flush_and_fsync(std::fstream& fs) {
         fs.flush();
 
         struct GnuFileBuf : std::filebuf {
-            int get_fd() { return this->_M_file.fd(); }
+            int get_fd() {
+                return this->_M_file.fd();
+            }
         };
 
-        auto *buf = static_cast<GnuFileBuf *>(fs.rdbuf());
+        auto* buf = static_cast<GnuFileBuf*>(fs.rdbuf());
         if (buf && fs.is_open()) {
             int fd = buf->get_fd();
             if (fd != -1) {

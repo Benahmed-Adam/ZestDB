@@ -33,7 +33,7 @@ namespace Zest {
                     if (task) {
                         try {
                             task();
-                        } catch (const std::exception &e) {
+                        } catch (const std::exception& e) {
                             ZestLog(LogLevel::CRITICAL, std::format("Exception during the execution of "
                                                                     "a task in the ThreadPool : {}",
                                                                     e.what()));
@@ -63,7 +63,7 @@ namespace Zest {
             this->stopFlag = true;
         }
         this->condition.notify_all();
-        for (auto &worker : this->workers) {
+        for (auto& worker : this->workers) {
             worker.join();
         }
     }

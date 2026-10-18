@@ -11,13 +11,17 @@ public:
     Settings settings;
     fs::path testDir;
     fs::path walPath;
+
     WALFixture() {
         settings.fsyncOnWrite = false;
         testDir = fs::temp_directory_path() / ("zestdb_test_wal_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
         walPath = testDir / "WAL";
     }
-    ~WALFixture() { fs::remove_all(testDir); }
+
+    ~WALFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
 TEST_CASE_METHOD(WALFixture, "WAL constructor creates new file", "[wal]") {

@@ -4,7 +4,7 @@
 
 using namespace Zest;
 
-static IndexEntry makeEntry(const std::string &key, uint32_t segId = 1, unsigned long offset = 0, unsigned int size = 5) {
+static IndexEntry makeEntry(const std::string& key, uint32_t segId = 1, unsigned long offset = 0, unsigned int size = 5) {
     IndexEntry e{};
     e.key = key;
     e.segmentId = segId;

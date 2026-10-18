@@ -17,13 +17,15 @@ namespace Zest {
 
     namespace fs = std::filesystem;
 
-    Shard::Shard(Settings &baseSettings, int shardIdNum)
+    Shard::Shard(Settings& baseSettings, int shardIdNum)
         : settings(baseSettings),
           shardId(shardIdNum) {
         this->boot();
     }
 
-    Shard::~Shard() { this->stop(); }
+    Shard::~Shard() {
+        this->stop();
+    }
 
     void Shard::boot() {
         fs::path shardPath = this->settings.DbPath / "shards" / std::to_string(shardId);
@@ -105,7 +107,7 @@ namespace Zest {
                 }
 
                 std::vector<uint32_t> usedSegmentIds;
-                for (const auto &entry : entries) {
+                for (const auto& entry : entries) {
                     if (!entry.isTombstone && entry.segmentId != INVALID_SEGMENT_ID) {
                         if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) == usedSegmentIds.end()) {
                             usedSegmentIds.push_back(entry.segmentId);
@@ -153,7 +155,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, std::format("Shard {} cache filled with {} keys", shardId, numKeysInserted));
     }
 
-    ResultType Shard::get(const std::string &key) {
+    ResultType Shard::get(const std::string& key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
 
@@ -188,7 +190,7 @@ namespace Zest {
         return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
     }
 
-    ResultType Shard::set(const std::string &key, const std::string &value) {
+    ResultType Shard::set(const std::string& key, const std::string& value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
 
@@ -216,7 +218,7 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1 };
     }
 
-    ResultType Shard::del(const std::string &key) {
+    ResultType Shard::del(const std::string& key) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
 
@@ -241,16 +243,16 @@ namespace Zest {
         return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
     }
 
-    ResultType Shard::getBy(ValidationRule &valid) {
+    ResultType Shard::getBy(ValidationRule& valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         nlohmann::json resultArray = nlohmann::json::array();
         int matchCount = 0;
 
-        for (const IndexEntry &entry : entries) {
+        for (const IndexEntry& entry : entries) {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
@@ -275,15 +277,15 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, resultArray.dump(), matchCount };
     }
 
-    ResultType Shard::setBy(ValidationRule &valid, const std::string &value) {
+    ResultType Shard::setBy(ValidationRule& valid, const std::string& value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 
-        for (const IndexEntry &entry : entries) {
+        for (const IndexEntry& entry : entries) {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
@@ -324,15 +326,15 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
     }
 
-    ResultType Shard::delBy(ValidationRule &valid) {
+    ResultType Shard::delBy(ValidationRule& valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(valid.limit, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 
-        for (const IndexEntry &entry : entries) {
+        for (const IndexEntry& entry : entries) {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
@@ -388,7 +390,7 @@ namespace Zest {
         int verifiedCount = 0;
         int removedCount = 0;
 
-        for (const auto &entry : entries) {
+        for (const auto& entry : entries) {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
@@ -410,7 +412,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
     }
 
-    void Shard::reloadSettings(Settings &set) {
+    void Shard::reloadSettings(Settings& set) {
         fs::path shardPath = set.DbPath / "shards" / std::to_string(shardId);
         fs::path indexPath = shardPath / "INDEX";
         fs::path walPath = shardPath / "WAL";

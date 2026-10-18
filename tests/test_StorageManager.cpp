@@ -11,13 +11,17 @@ class StorageManagerFixture {
 public:
     Settings settings;
     fs::path testDir;
+
     StorageManagerFixture() {
         testDir = fs::temp_directory_path() / ("zestdb_test_sm_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir / "seg");
         settings.DbPath = testDir;
         settings.SegSize = 256;
     }
-    ~StorageManagerFixture() { fs::remove_all(testDir); }
+
+    ~StorageManagerFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager boot creates segment 1", "[storagemanager]") {

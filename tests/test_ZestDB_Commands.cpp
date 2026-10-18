@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "ZestDB.hpp"
+#include "lib/json.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -11,7 +12,7 @@ class ZestDBCmdFixture {
 public:
     fs::path testDir;
     fs::path originalCwd;
-    ZestDB *db = nullptr;
+    ZestDB* db = nullptr;
 
     ZestDBCmdFixture() {
         originalCwd = fs::current_path();
@@ -298,4 +299,74 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd jsononly allows json", "[commands]")
     db->execCmd("scfg jsononly true");
     auto r = db->execCmd("s key1 {\"a\":1}");
     REQUIRE(r.code == ResultType::Code::SUCCESS);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby lim counts matches, not scanned keys", "[commands]") {
+    db->set("target", "x");
+    for (int i = 0; i < 500; i++) {
+        db->set("k" + std::to_string(i), "v");
+    }
+    REQUIRE(db->execCmd("gb sw target lim 1").affectedRows == 1);
+    REQUIRE(db->execCmd("sb sw target lim 1 y").affectedRows == 1);
+    REQUIRE(db->execCmd("db sw target lim 1").affectedRows == 1);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd invalid lim is an error, not an exception", "[commands]") {
+    for (const char* cmd : { "gb sw a lim abc", "sb sw a lim x val", "db sw a lim -1" }) {
+        ResultType r;
+        REQUIRE_NOTHROW(r = db->execCmd(cmd));
+        REQUIRE(r.code == ResultType::Code::ERROR);
+        REQUIRE(r.response == Messages::INVALID_LIMIT);
+    }
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set key that appears earlier in the command", "[commands]") {
+    db->execCmd("s s hello");
+    REQUIRE(db->execCmd("g s").response == "hello");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby value equal to pattern", "[commands]") {
+    db->execCmd("s user1 a");
+    db->execCmd("sb sw user user");
+    REQUIRE(db->execCmd("g user1").response == "user");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd accepts long command names", "[commands]") {
+    REQUIRE(db->execCmd("set key1 v1").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("GET key1").response == "v1");
+    REQUIRE(db->execCmd("getby sw key").affectedRows == 1);
+    REQUIRE(db->execCmd("setby sw key v2").affectedRows == 1);
+    REQUIRE(db->execCmd("delby sw key").affectedRows == 1);
+    REQUIRE(db->execCmd("del key1").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("flush").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("help").code == ResultType::Code::SUCCESS);
+}
+
+TEST_CASE("ZestDB missing config fields fall back to defaults", "[commands]") {
+    fs::path originalCwd = fs::current_path();
+    fs::path testDir = fs::temp_directory_path() / "zestdb_test_cfg_defaults";
+    fs::remove_all(testDir);
+    fs::create_directories(testDir);
+    {
+        std::ofstream cfg(testDir / "config.yaml");
+        cfg << "DbPath: " << (testDir / "db").string() << "\n";
+        cfg << "DBPort: 29511\n";
+        cfg << "WebPort: 29512\n";
+        cfg << "ArchiveStoragePath: " << (testDir / "archive").string() << "\n";
+        cfg << "AutoArchiveSaving: false\n";
+    }
+    fs::current_path(testDir);
+    {
+        ZestDB db;
+        auto cfg = nlohmann::json::parse(db.execCmd("gcfg").response);
+        db.stop();
+        REQUIRE(cfg["MaxKeySize"] == 64);
+        REQUIRE(cfg["MaxValueSize"] == 10000);
+        REQUIRE(cfg["SegSize"] == 128000);
+        REQUIRE(cfg["CacheSize"] == 1000);
+        REQUIRE(cfg["FlushInterval"] == 120);
+        REQUIRE(cfg["fsyncOnWrite"] == true);
+    }
+    fs::current_path(originalCwd);
+    fs::remove_all(testDir);
 }

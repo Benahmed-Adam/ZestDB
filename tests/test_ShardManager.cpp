@@ -10,6 +10,7 @@ class ShardManagerFixture {
 public:
     Settings settings;
     fs::path testDir;
+
     ShardManagerFixture() {
         testDir = fs::temp_directory_path() / ("zestdb_test_smgr_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
@@ -22,7 +23,10 @@ public:
         settings.FlushInterval = 3600;
         settings.isDebug = false;
     }
-    ~ShardManagerFixture() { fs::remove_all(testDir); }
+
+    ~ShardManagerFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager set and get", "[shardmanager]") {
@@ -103,7 +107,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager replayAllWAL", "[shardmanage
     sm.set("key1", "val1");
     sm.flush();
     std::vector<std::string> replayed;
-    sm.replayAllWAL([&](const std::string &cmd) {
+    sm.replayAllWAL([&](const std::string& cmd) {
         replayed.push_back(cmd);
         return "ok";
     });

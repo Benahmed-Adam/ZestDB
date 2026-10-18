@@ -10,6 +10,7 @@ class IndexManagerFixture {
 public:
     Settings settings;
     fs::path testDir;
+
     IndexManagerFixture() {
         testDir = fs::temp_directory_path() / ("zestdb_test_im_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
@@ -17,10 +18,13 @@ public:
         settings.IndexPath = testDir / "INDEX";
         settings.SegSize = 100000;
     }
-    ~IndexManagerFixture() { fs::remove_all(testDir); }
+
+    ~IndexManagerFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
-static IndexEntry makeEntry(const std::string &key, uint32_t segId = 1, unsigned long offset = 0) {
+static IndexEntry makeEntry(const std::string& key, uint32_t segId = 1, unsigned long offset = 0) {
     IndexEntry e{};
     e.key = key;
     e.segmentId = segId;
@@ -156,4 +160,22 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager persistence across instances
     auto result = im2.search("persistent");
     REQUIRE(result.segmentId == 1);
     REQUIRE(result.offset == 42);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert after tombstone keeps neighbours intact", "[indexmanager]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("a", 1, 0));
+        im.insert(makeEntry("b", 1, 10));
+        IndexEntry tomb = makeEntry("a", 1, 0);
+        tomb.isTombstone = true;
+        im.update("a", tomb);
+        im.insert(makeEntry("a_much_longer_key", 1, 20));
+        REQUIRE(im.search("b").offset == 10);
+        im.flush();
+    }
+    IndexManager im2(settings);
+    REQUIRE(im2.search("b").offset == 10);
+    REQUIRE(im2.search("a_much_longer_key").offset == 20);
+    REQUIRE(im2.search("a").segmentId == INVALID_SEGMENT_ID);
 }

@@ -12,7 +12,7 @@ namespace Zest {
         return reqs > 0 ? (static_cast<double>(this->nbCacheMisses.load()) / static_cast<double>(reqs)) * 100.0 : 0.0;
     }
 
-    static json statsToJson(const Stats &s) {
+    static json statsToJson(const Stats& s) {
         return {
             { "nbRequests", s.nbRequests.load() },
             { "nbCacheMisses", s.nbCacheMisses.load() },

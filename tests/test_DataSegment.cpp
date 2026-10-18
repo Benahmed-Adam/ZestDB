@@ -11,13 +11,17 @@ class DataSegmentFixture {
 public:
     Settings settings;
     fs::path testDir;
+
     DataSegmentFixture() {
         testDir = fs::temp_directory_path() / ("zestdb_test_ds_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir / "seg");
         settings.DbPath = testDir;
         settings.SegSize = 1024;
     }
-    ~DataSegmentFixture() { fs::remove_all(testDir); }
+
+    ~DataSegmentFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
 TEST_CASE_METHOD(DataSegmentFixture, "DataSegment write normal", "[datasegment]") {

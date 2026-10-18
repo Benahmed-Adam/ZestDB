@@ -9,14 +9,15 @@
 
 namespace Zest {
 
-    Session::Session(ZestStream stream, ZestDB &db)
+    Session::Session(ZestStream stream, ZestDB& db)
         : stream_(std::move(stream)),
-          db_(db) {}
+          db_(db) {
+    }
 
     void Session::start() {
-        std::string remote_ip = std::visit([](auto &s) { return s.lowest_layer().remote_endpoint().address().to_string(); }, stream_);
+        std::string remote_ip = std::visit([](auto& s) { return s.lowest_layer().remote_endpoint().address().to_string(); }, stream_);
 
-        unsigned short int remote_port = std::visit([](auto &s) { return s.lowest_layer().remote_endpoint().port(); }, stream_);
+        unsigned short int remote_port = std::visit([](auto& s) { return s.lowest_layer().remote_endpoint().port(); }, stream_);
 
         if (!std::regex_match(remote_ip, this->db_.settings.NetworkValidation)) {
             ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", remote_ip));
@@ -27,7 +28,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", remote_ip, remote_port));
 
         if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
-            auto &ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
+            auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
             ssl_stream.async_handshake(asio::ssl::stream_base::server, [self = this->shared_from_this()](std::error_code ec) {
                 if (!ec)
                     self->do_read_size();
@@ -40,12 +41,12 @@ namespace Zest {
     void Session::do_read_size() {
         auto self(this->shared_from_this());
         std::visit(
-            [this, self](auto &stream) {
+            [this, self](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(4), [this, self](std::error_code ec, std::size_t length) {
                     if (!ec && length == 4) {
                         std::istream is(&this->buffer_);
                         uint32_t payload_size;
-                        is.read(reinterpret_cast<char *>(&payload_size), 4);
+                        is.read(reinterpret_cast<char*>(&payload_size), 4);
                         payload_size = ntohl(payload_size);
                         this->do_read_command(payload_size);
                     } else if (ec != asio::error::operation_aborted) {
@@ -59,7 +60,7 @@ namespace Zest {
     void Session::do_read_command(uint32_t payload_size) {
         auto self(this->shared_from_this());
         std::visit(
-            [this, self, payload_size](auto &stream) {
+            [this, self, payload_size](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(payload_size), [this, self, payload_size](std::error_code ec, std::size_t length) {
                     if (!ec && length == payload_size) {
                         std::istream is(&this->buffer_);
@@ -133,7 +134,7 @@ namespace Zest {
             stream_);
     }
 
-    void Session::queue_write(const std::string &message, bool closeAfter) {
+    void Session::queue_write(const std::string& message, bool closeAfter) {
         bool write_in_progress = !write_queue_.empty();
         write_queue_.push_back(message);
         closing_ = closeAfter;
@@ -146,7 +147,7 @@ namespace Zest {
     void Session::do_write() {
         auto self(this->shared_from_this());
         std::visit(
-            [this, self](auto &stream) {
+            [this, self](auto& stream) {
                 asio::async_write(stream, asio::buffer(write_queue_.front()), [this, self](std::error_code ec, std::size_t) {
                     if (!ec) {
                         write_queue_.pop_front();
@@ -165,14 +166,14 @@ namespace Zest {
 
     void Session::close_stream() {
         std::visit(
-            [](auto &s) {
+            [](auto& s) {
                 std::error_code ec;
                 s.lowest_layer().close(ec);
             },
             this->stream_);
     }
 
-    Server::Server(asio::io_context &io_context, short port, ZestDB &db)
+    Server::Server(asio::io_context& io_context, short port, ZestDB& db)
         : ssl_context_(asio::ssl::context::sslv23),
           acceptor_(io_context, tcp::endpoint(tcp::v4(), static_cast<asio::ip::port_type>(port))),
           db_(db) {

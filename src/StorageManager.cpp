@@ -8,7 +8,7 @@
 
 namespace Zest {
 
-    StorageManager::StorageManager(Settings &set)
+    StorageManager::StorageManager(Settings& set)
         : settings(set) {
         this->latestSegmentId = 0;
         this->boot();
@@ -16,7 +16,7 @@ namespace Zest {
 
     void StorageManager::boot() {
         int nb = 0;
-        for (auto &entry : std::filesystem::directory_iterator(this->settings.DbPath / "seg")) {
+        for (auto& entry : std::filesystem::directory_iterator(this->settings.DbPath / "seg")) {
             std::string ext = entry.path().extension();
             if (ext == ".seg") {
                 uint32_t segId = static_cast<uint32_t>(std::stoi(entry.path().filename()));
@@ -30,7 +30,7 @@ namespace Zest {
             this->latestSegmentId = 1;
         } else {
             uint32_t maxId = 0;
-            for (const auto &[id, seg] : this->segments) {
+            for (const auto& [id, seg] : this->segments) {
                 if (id > maxId)
                     maxId = id;
             }
@@ -38,7 +38,7 @@ namespace Zest {
         }
     }
 
-    IndexEntry StorageManager::appendToSegment(DataSegment *seg, const std::string &value) {
+    IndexEntry StorageManager::appendToSegment(DataSegment* seg, const std::string& value) {
         unsigned long pos = seg->write(value);
 
         if (pos == this->settings.SegSize + 1) {
@@ -48,11 +48,11 @@ namespace Zest {
         return { "", static_cast<uint64_t>(pos), seg->getSegmentId(), static_cast<uint32_t>(value.size()), false };
     }
 
-    IndexEntry StorageManager::append(const std::string &value) {
+    IndexEntry StorageManager::append(const std::string& value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         uint32_t currentId = this->latestSegmentId.load();
-        DataSegment *seg = nullptr;
+        DataSegment* seg = nullptr;
 
         auto it = this->segments.find(currentId);
         if (it != this->segments.end() && !it->second->isFull()) {
@@ -79,7 +79,7 @@ namespace Zest {
         return result;
     }
 
-    std::string StorageManager::read(const IndexEntry &entry) {
+    std::string StorageManager::read(const IndexEntry& entry) {
         auto it = this->segments.find(entry.segmentId);
         if (it != this->segments.end()) {
             return it->second->read(entry.offset, entry.size);
@@ -89,12 +89,12 @@ namespace Zest {
         return "";
     }
 
-    void StorageManager::removeUnusedSegments(const std::vector<uint32_t> &usedSegmentIds) {
+    void StorageManager::removeUnusedSegments(const std::vector<uint32_t>& usedSegmentIds) {
         std::lock_guard<std::mutex> lock(this->mtx);
         std::unordered_set<uint32_t> usedSet(usedSegmentIds.begin(), usedSegmentIds.end());
 
         std::vector<uint32_t> toRemove;
-        for (const auto &[id, seg] : this->segments) {
+        for (const auto& [id, seg] : this->segments) {
             if (usedSet.find(id) == usedSet.end()) {
                 toRemove.push_back(id);
             }
@@ -116,7 +116,7 @@ namespace Zest {
     }
 
     void StorageManager::flush() {
-        for (auto &[id, seg] : this->segments) {
+        for (auto& [id, seg] : this->segments) {
             seg->flush();
         }
     }

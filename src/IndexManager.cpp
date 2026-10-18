@@ -8,7 +8,7 @@
 
 namespace Zest {
 
-    IndexManager::IndexManager(Settings &set)
+    IndexManager::IndexManager(Settings& set)
         : settings(set),
           canFlush(false) {
         ZestLog(LogLevel::INFO, "Opening INDEX file...");
@@ -52,16 +52,14 @@ namespace Zest {
             if (!entry.deserialize(this->index))
                 break;
 
-            if (entry.isTombstone) {
-                this->tombstoneOffsets.push_back(position);
-            } else {
+            if (!entry.isTombstone) {
                 this->memoryTree[entry.key] = position;
             }
         }
         ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
     }
 
-    IndexEntry IndexManager::search(const std::string &key) {
+    IndexEntry IndexManager::search(const std::string& key) {
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
@@ -79,7 +77,7 @@ namespace Zest {
         return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
     }
 
-    void IndexManager::update(const std::string &key, const IndexEntry &entry) {
+    void IndexManager::update(const std::string& key, const IndexEntry& entry) {
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
@@ -91,12 +89,11 @@ namespace Zest {
             this->canFlush = true;
             if (entry.isTombstone) {
                 this->memoryTree.erase(it);
-                this->tombstoneOffsets.push_back(offset);
             }
         }
     }
 
-    void IndexManager::insert(const IndexEntry &entry) {
+    void IndexManager::insert(const IndexEntry& entry) {
         std::unique_lock<std::shared_mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(entry.key);
@@ -108,40 +105,24 @@ namespace Zest {
                 oldEntry.isTombstone = true;
                 this->index.seekp(oldOffset, std::ios::beg);
                 oldEntry.serialize(this->index);
-                this->tombstoneOffsets.push_back(oldOffset);
             }
-
-            this->index.seekp(0, std::ios::end);
-            std::streamoff newOffset = this->index.tellp();
-            entry.serialize(this->index);
-            this->canFlush = true;
-            this->memoryTree[entry.key] = newOffset;
-            return;
         }
 
-        std::streamoff insertPosition;
-
-        if (!this->tombstoneOffsets.empty()) {
-            insertPosition = this->tombstoneOffsets.back();
-            this->tombstoneOffsets.pop_back();
-        } else {
-            this->index.seekp(0, std::ios::end);
-            insertPosition = this->index.tellp();
-        }
-
-        this->index.seekp(insertPosition, std::ios::beg);
+        // Records are variable-length (key bytes), so tombstone slots are never reused: always append, compaction reclaims space.
+        this->index.seekp(0, std::ios::end);
+        std::streamoff insertPosition = this->index.tellp();
         entry.serialize(this->index);
         this->canFlush = true;
         this->memoryTree[entry.key] = insertPosition;
     }
 
-    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()> &stopEarly) {
+    std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()>& stopEarly) {
         std::vector<IndexEntry> res;
         std::shared_lock<std::shared_mutex> lock(this->mtx);
 
         res.reserve(this->memoryTree.size());
 
-        for (auto const &[key, offset] : this->memoryTree) {
+        for (auto const& [key, offset] : this->memoryTree) {
             if (res.size() >= limit || limit == 0)
                 break;
             if (stopEarly && stopEarly())
@@ -180,11 +161,10 @@ namespace Zest {
         }
 
         this->memoryTree.clear();
-        this->tombstoneOffsets.clear();
 
         std::vector<IndexEntry> result;
 
-        for (const auto &entry : entries) {
+        for (const auto& entry : entries) {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }

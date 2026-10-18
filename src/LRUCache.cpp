@@ -3,9 +3,10 @@
 namespace Zest {
 
     LRUCache::LRUCache(unsigned int cap)
-        : capacity(cap) {}
+        : capacity(cap) {
+    }
 
-    CacheEntry LRUCache::get(const std::string &key) {
+    CacheEntry LRUCache::get(const std::string& key) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         auto it = this->map.find(key);
@@ -21,7 +22,7 @@ namespace Zest {
         return it->second.first;
     }
 
-    void LRUCache::put(const IndexEntry &entry, const std::string &value) {
+    void LRUCache::put(const IndexEntry& entry, const std::string& value) {
         std::string key(entry.key);
 
         std::lock_guard<std::mutex> lock(this->mtx);
@@ -42,7 +43,7 @@ namespace Zest {
         this->map[key] = { { entry, value }, this->lru_list.begin() };
     }
 
-    void LRUCache::remove(const std::string &key) {
+    void LRUCache::remove(const std::string& key) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         auto it = this->map.find(key);

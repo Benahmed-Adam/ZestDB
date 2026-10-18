@@ -28,6 +28,10 @@ TEST_CASE("setLoggerDebugMode enable/disable", "[logger]") {
     setLoggerDebugMode(true);
 }
 
-TEST_CASE("ZestLog with empty message", "[logger]") { REQUIRE_NOTHROW(ZestLog(LogLevel::INFO, "")); }
+TEST_CASE("ZestLog with empty message", "[logger]") {
+    REQUIRE_NOTHROW(ZestLog(LogLevel::INFO, ""));
+}
 
-TEST_CASE("ZestLog with special characters", "[logger]") { REQUIRE_NOTHROW(ZestLog(LogLevel::WARNING, "test\nnewline\ttab")); }
+TEST_CASE("ZestLog with special characters", "[logger]") {
+    REQUIRE_NOTHROW(ZestLog(LogLevel::WARNING, "test\nnewline\ttab"));
+}

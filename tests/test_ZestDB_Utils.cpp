@@ -58,3 +58,10 @@ TEST_CASE("responseToJson affectedRows", "[utils]") {
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"affectedRows\":42") != std::string::npos);
 }
+
+TEST_CASE("responseToJson value that only looks like JSON", "[utils]") {
+    ResultType r{ ResultType::Code::SUCCESS, "{not json", 1 };
+    std::string json;
+    REQUIRE_NOTHROW(json = ZestDB::responseToJson(r));
+    REQUIRE(json.find("\"response\":\"{not json\"") != std::string::npos);
+}

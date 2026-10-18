@@ -16,27 +16,37 @@ namespace Zest {
 
     class Shard {
     public:
-        Shard(Settings &baseSettings, int shardIdNum);
+        Shard(Settings& baseSettings, int shardIdNum);
         ~Shard();
 
-        ResultType get(const std::string &key);
-        ResultType set(const std::string &key, const std::string &value);
-        ResultType del(const std::string &key);
+        ResultType get(const std::string& key);
+        ResultType set(const std::string& key, const std::string& value);
+        ResultType del(const std::string& key);
 
-        ResultType getBy(ValidationRule &valid);
-        ResultType setBy(ValidationRule &valid, const std::string &value);
-        ResultType delBy(ValidationRule &valid);
+        ResultType getBy(ValidationRule& valid);
+        ResultType setBy(ValidationRule& valid, const std::string& value);
+        ResultType delBy(ValidationRule& valid);
 
         void flush();
         void stop();
 
-        int getShardId() const { return this->shardId; }
+        int getShardId() const {
+            return this->shardId;
+        }
 
-        PerfMonitoring &getPerfMonitoring() { return this->perfMonitor; }
-        WAL &getWAL() { return *this->wal; };
-        StorageManager &getStorageManager() { return *this->storageManager; }
+        PerfMonitoring& getPerfMonitoring() {
+            return this->perfMonitor;
+        }
 
-        void reloadSettings(Settings &set);
+        WAL& getWAL() {
+            return *this->wal;
+        };
+
+        StorageManager& getStorageManager() {
+            return *this->storageManager;
+        }
+
+        void reloadSettings(Settings& set);
 
         Settings settings;
         int shardId;

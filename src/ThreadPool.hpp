@@ -15,14 +15,15 @@ namespace Zest {
         explicit ThreadPool(size_t numThreads);
         ~ThreadPool();
 
-        template <typename F> std::future<typename std::result_of<F()>::type> enqueue(F &&task);
+        template <typename F>
+        std::future<typename std::result_of<F()>::type> enqueue(F&& task);
 
         void waitAll();
 
-        ThreadPool(const ThreadPool &) = delete;
-        ThreadPool &operator=(const ThreadPool &) = delete;
-        ThreadPool(ThreadPool &&) = delete;
-        ThreadPool &operator=(ThreadPool &&) = delete;
+        ThreadPool(const ThreadPool&) = delete;
+        ThreadPool& operator=(const ThreadPool&) = delete;
+        ThreadPool(ThreadPool&&) = delete;
+        ThreadPool& operator=(ThreadPool&&) = delete;
 
     private:
         std::vector<std::thread> workers;
@@ -34,7 +35,8 @@ namespace Zest {
         size_t activeTasks;
     };
 
-    template <typename F> std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F &&task) {
+    template <typename F>
+    std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F&& task) {
         using returnType = typename std::result_of<F()>::type;
 
         auto taskPtr = std::make_shared<std::packaged_task<returnType()>>(std::forward<F>(task));

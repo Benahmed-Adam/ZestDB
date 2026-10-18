@@ -14,8 +14,8 @@ namespace Zest {
 
         std::atomic<double> totalLatency = 0.0;
 
-        Stats(const Stats &) = delete;
-        Stats &operator=(const Stats &) = delete;
+        Stats(const Stats&) = delete;
+        Stats& operator=(const Stats&) = delete;
         Stats() = default;
 
         double avgLatency() const;

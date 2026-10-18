@@ -11,6 +11,7 @@ class ShardFixture {
 public:
     Settings settings;
     fs::path testDir;
+
     ShardFixture() {
         testDir = fs::temp_directory_path() / ("zestdb_test_shard_" + std::to_string(reinterpret_cast<uintptr_t>(this)));
         fs::create_directories(testDir);
@@ -23,7 +24,10 @@ public:
         settings.FlushInterval = 3600;
         settings.isDebug = false;
     }
-    ~ShardFixture() { fs::remove_all(testDir); }
+
+    ~ShardFixture() {
+        fs::remove_all(testDir);
+    }
 };
 
 TEST_CASE_METHOD(ShardFixture, "Shard set and get", "[shard]") {
@@ -146,7 +150,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard multiple operations", "[shard]") {
 
 TEST_CASE_METHOD(ShardFixture, "Shard WAL append works", "[shard]") {
     Shard shard(settings, 0);
-    auto &wal = shard.getWAL();
+    auto& wal = shard.getWAL();
     wal.append("set key1 val1");
     auto cmds = wal.getCmds();
     REQUIRE_FALSE(cmds.empty());

@@ -18,8 +18,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - [Testing](#testing)
 - [Tooling](#tooling)
 - [Project Structure](#project-structure)
-- [Performance](#performance)
-
+- [Benchmarks](#benchmarks)
 ---
 
 ## Features
@@ -56,7 +55,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - An index file maps every key to its location (segment id, offset, size) on disk.
 - The index is loaded into an in-memory `unordered_map` for O(1) lookups.
 - Updates to an existing key mark the previous index entry as a tombstone and append the new entry, keeping the index append-friendly.
-- Tombstone slots are reused on later inserts to limit index growth.
+- New and updated entries are always appended (index records are variable-length, so tombstone slots are not reused); compaction reclaims the space.
 - Periodic compaction rewrites the index file, dropping all tombstones and unreachable entries.
 
 ### LRU Caching
@@ -261,7 +260,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `isDebug` | false | Enable debug logging. |
 | `jsonOnly` | false | Accept only JSON values. |
 | `readOnly` | false | Block write operations. |
-| `fsyncOnWrite` | false | Force fsync on every write. |
+| `fsyncOnWrite` | true | Force fsync on every write. |
 | `useSSL` | false | Enable TLS on the servers. |
 | `SSLCertPath` | "" | Path to the TLS certificate (PEM). |
 | `SSLKeyPath` | "" | Path to the TLS private key (PEM). |
