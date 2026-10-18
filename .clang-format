@@ -5,12 +5,19 @@ ColumnLimit: 250
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
+PointerAlignment: Left
 
 AccessModifierOffset: -4
 
 NamespaceIndentation: All
 FixNamespaceComments: true
 Cpp11BracedListStyle: false
+
+BreakTemplateDeclarations: Yes
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+SeparateDefinitionBlocks: Always
+MaxEmptyLinesToKeep: 1
 
 BreakBeforeBraces: Custom
 BraceWrapping:
