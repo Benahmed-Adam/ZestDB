@@ -13,28 +13,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libasio-dev \
-          libssl-dev \
-          libzip-dev \
-          libbz2-dev \
-          liblzma-dev \
-          libzstd-dev \
-          zlib1g-dev \
-          catch2 \
-          cmake
-    - name: install libzippp
-      run: |
-        git clone https://github.com/ctabin/libzippp.git /tmp/libzippp
-        cd /tmp/libzippp
-        mkdir build && cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-        make -j$(nproc)
-        sudo make install
-        sudo ldconfig
+    - name: cache downloaded dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/Release/_deps
+        key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: deps-${{ runner.os }}-
     - name: build
       run: make
     - name: run tests

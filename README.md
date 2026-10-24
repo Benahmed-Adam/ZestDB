@@ -317,19 +317,31 @@ Multiple commands in one request are answered with responses separated by `\r\n\
 
 ## Build
 
-### Dependencies
-- A C++20 compiler (GCC recommended).
-- OpenSSL (`libssl-dev`, `libcrypto`).
-- Asio (`libasio-dev`).
-- libzippp + libzip, zlib, bzip2, lzma, zstd (for archiving).
-- Catch2 (for the test suite).
-- The vendored headers in `src/lib/` (httplib, nlohmann/json, fkyaml).
+### Requirements
+- Linux with GCC (C++20, libstdc++): the storage layer uses `fdatasync` and libstdc++'s file buffer.
+- CMake 3.25+, `make`, and Perl 5 when OpenSSL has to be built.
+
+No library has to be installed: on the first build, CMake (`FetchContent`) downloads and builds pinned versions of the dependencies. OpenSSL is the exception: an installed OpenSSL 3 (e.g. `libssl-dev`) is used when found, otherwise it is built from source.
+
+| Library | Version | Used for |
+| --- | --- | --- |
+| OpenSSL | system 3.x, else 3.5.9 (via openssl-cmake 4.1.0) | TLS, SHA-256 |
+| Asio (standalone) | 1.38.2 | TCP/SSL server |
+| libzip + zlib | 1.12.1 + 1.3.2 | archives |
+| libzippp | 7.1-1.10.1 | archives (C++ wrapper) |
+| Catch2 | 3.16.1 | test suite |
+
+The vendored headers in `src/lib/` (httplib, nlohmann/json, fkyaml) are part of the repository. The first build takes about a minute, or two when OpenSSL is built from source; the dependencies are kept in `build/<Release|Debug>/_deps` and reused by later builds (`make clean` removes them).
 
 ### Compile
 ```bash
 make
 ```
-The resulting binary is placed in `bin/zestdb`.
+The resulting binary is placed in `bin/zestdb`. `make` is a thin wrapper around CMake; the equivalent direct commands are:
+```bash
+cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release
+cmake --build build/Release --parallel
+```
 
 ### Debug build
 ```bash
@@ -387,7 +399,8 @@ A GitHub Actions workflow (`c-cpp.yml`) builds the project and runs the full tes
 ## Project Structure
 
 ```
-├── Makefile                      # build / test / run / format targets
+├── CMakeLists.txt                # build definition, fetches the dependencies
+├── Makefile                      # build / test / run / format targets (wraps CMake)
 ├── config.yaml                   # runtime configuration
 ├── .github/workflows/            # CI pipeline
 ├── src/                          # C++ source
