@@ -384,6 +384,10 @@ The project ships a test suite built with Catch2, covering every subsystem:
 ```bash
 make tests
 ```
+All test files are compiled into a single executable, `build/Release/zestdb_tests` (`build/Debug/` with `DEBUG=1`), and `make tests` runs each test case through `ctest`. To run a subset directly, use Catch2 tags or names:
+```bash
+./build/Release/zestdb_tests "[shard]"
+```
 
 ### Code formatting
 ```bash
