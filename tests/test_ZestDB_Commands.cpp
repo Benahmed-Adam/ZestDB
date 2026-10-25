@@ -496,9 +496,9 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby/delby with lim pick the smalle
     REQUIRE(db->get("k3").response == "new");
 }
 
-TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set does not store trailing whitespace", "[commands]") {
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set keeps trailing spaces but not the line ending", "[commands]") {
     db->execCmd("s key1 value  \r\n");
-    REQUIRE(db->get("key1").response == "value");
+    REQUIRE(db->get("key1").response == "value  ");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg refuses negative numbers and zero intervals", "[commands]") {
@@ -507,4 +507,51 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg refuses negative numbers and ze
     REQUIRE(db->execCmd("scfg flushinterval 0").code == ResultType::Code::ERROR);
     REQUIRE(db->execCmd("scfg archivecreationdelay 0").code == ResultType::Code::ERROR);
     REQUIRE(db->execCmd("scfg compactinginterval 0").code == ResultType::Code::ERROR);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "responses stay valid JSON for values that are not UTF-8", "[commands]") {
+    REQUIRE(db->execCmd(std::string("s k \xff")).code == ResultType::Code::SUCCESS);
+    REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("g k")));
+    REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("gb sw k")));
+    REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd(std::string("scfg \xff x"))));
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg cannot toggle useSSL at runtime", "[commands]") {
+    REQUIRE(db->execCmd("scfg usessl true").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg usessl false").code == ResultType::Code::ERROR);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd refuses regexes that would blow up the regex compiler", "[commands]") {
+    REQUIRE(db->execCmd("gb re " + std::string(50000, '(') + "a" + std::string(50000, ')')).response == Messages::INVALID_REGEX);
+    REQUIRE(db->execCmd("gb re ((a{1000}){1000}){1000}").response == Messages::INVALID_REGEX);
+    REQUIRE(db->execCmd("gb re a{50}b{50}").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("gb re (ab|cd)+[a-z]{3}").code == ResultType::Code::SUCCESS);
+}
+
+TEST_CASE("ZestDB keeps only the configured number of archives", "[commands]") {
+    TempDbDir tmp("zestdb_test_archive_retention", "ArchiveRetention: 2\n", 29541);
+    ZestDB db;
+    db.execCmd("s key value");
+    for (int i = 0; i < 3; i++) {
+        REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+    }
+    size_t zips = 0;
+    for (const auto& entry : fs::directory_iterator(tmp.dir / "archive")) {
+        REQUIRE(entry.path().extension() == ".zip");
+        zips++;
+    }
+    REQUIRE(zips == 2);
+}
+
+TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
+    TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
+    ZestDB db;
+    std::thread http([&db] { db.srv->listen("127.0.0.1", 29544); });
+    db.srv->wait_until_ready();
+    httplib::Client client("127.0.0.1", 29544);
+    auto res = client.Get("/");
+    db.srv->stop();
+    http.join();
+    REQUIRE(res);
+    REQUIRE(res->status == 403);
 }

@@ -21,6 +21,7 @@ namespace Zest {
         void clear();
         bool append(const std::string& cmd);
         std::vector<WalEntry> getCmds();
+        static void advanceSequence(uint64_t next);
 
     private:
         Settings& settings;

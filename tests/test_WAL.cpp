@@ -163,3 +163,10 @@ TEST_CASE_METHOD(WALFixture, "flush_and_fsync reports a stream that is not open"
     open << "data";
     REQUIRE(flush_and_fsync(open));
 }
+
+TEST_CASE_METHOD(WALFixture, "WAL sequence continues after the entries found at replay", "[wal]") {
+    WAL::advanceSequence(1u << 30);
+    WAL wal(settings, walPath);
+    REQUIRE(wal.append("after replay"));
+    REQUIRE(wal.getCmds().back().seq >= (1u << 30));
+}

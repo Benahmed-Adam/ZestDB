@@ -60,6 +60,12 @@ namespace Zest {
         return ok;
     }
 
+    void WAL::advanceSequence(uint64_t next) {
+        uint64_t current = nextSeq.load();
+        while (current < next && !nextSeq.compare_exchange_weak(current, next)) {
+        }
+    }
+
     std::vector<WalEntry> WAL::getCmds() {
         std::lock_guard<std::mutex> lock(this->mtx);
         std::vector<WalEntry> res;

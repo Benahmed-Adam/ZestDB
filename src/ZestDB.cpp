@@ -1,5 +1,6 @@
 #include "ZestDB.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -38,7 +39,7 @@ namespace Zest {
             }
         }
         j["affectedRows"] = resp.affectedRows;
-        return j.dump();
+        return j.dump(-1, ' ', false, json::error_handler_t::replace);
     }
 
     std::string sha256(const std::string& str) {
@@ -75,15 +76,15 @@ namespace Zest {
         this->flushThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->flushThreadMtx);
 
-            while (this->settings.isRunning && !stopToken.stop_requested()) {
+            while (this->isRunning() && !stopToken.stop_requested()) {
                 unsigned int interval;
                 {
                     std::shared_lock<std::shared_mutex> settingsLock(this->writeMtx);
                     interval = this->settings.FlushInterval;
                 }
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [this, stopToken] { return stopToken.stop_requested() || !this->isRunning(); });
 
-                if (stopToken.stop_requested() || !this->settings.isRunning) {
+                if (stopToken.stop_requested() || !this->isRunning()) {
                     break;
                 }
 
@@ -129,11 +130,11 @@ namespace Zest {
                 }
             }
 
-            while (this->settings.isRunning && !stopToken.stop_requested()) {
+            while (this->isRunning() && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(delay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(delay), [this, stopToken] { return stopToken.stop_requested() || !this->isRunning(); });
 
-                if (stopToken.stop_requested() || !this->settings.isRunning) {
+                if (stopToken.stop_requested() || !this->isRunning()) {
                     break;
                 }
 
@@ -160,6 +161,14 @@ namespace Zest {
             ZestLog(LogLevel::INFO, "Server mode: Plain");
         }
 
+        this->srv->set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) {
+            if (this->isAddressAllowed(req.remote_addr)) {
+                return httplib::Server::HandlerResponse::Unhandled;
+            }
+            res.status = 403;
+            return httplib::Server::HandlerResponse::Handled;
+        });
+
         this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
             try {
                 res.status = 200;
@@ -172,7 +181,7 @@ namespace Zest {
                     result["stats"][shardKey] = shards[i]->getPerfMonitoring().getPerformances();
                 }
 
-                res.set_content(result.dump(), "application/json");
+                res.set_content(result.dump(-1, ' ', false, json::error_handler_t::replace), "application/json");
             } catch (const std::exception& e) {
                 ZestLog(LogLevel::CRITICAL, e.what());
             }
@@ -180,20 +189,27 @@ namespace Zest {
     }
 
     ZestDB::~ZestDB() {
-        if (this->settings.isRunning)
+        if (this->isRunning())
             this->stop();
+    }
+
+    bool ZestDB::isRunning() const {
+        return this->running.load();
     }
 
     void ZestDB::stop() {
         ZestLog(LogLevel::INFO, "Exiting ZestDB...");
 
-        this->settings.isRunning = false;
+        this->running = false;
 
         this->ioCtx.stop();
         if (this->srv)
             this->srv->stop();
 
-        this->shardManager->stop();
+        {
+            std::unique_lock<std::shared_mutex> lock(this->writeMtx);
+            this->shardManager->stop();
+        }
 
         this->threadCV.notify_all();
     }
@@ -218,9 +234,22 @@ namespace Zest {
         return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : def;
     }
 
-    Settings ZestDB::loadConfig(std::unordered_map<std::string, std::string>& usersOut) {
+    static std::optional<Role> parseRole(const std::string& name) {
+        if (name == "read") {
+            return Role::Read;
+        }
+        if (name == "write") {
+            return Role::Write;
+        }
+        if (name == "admin") {
+            return Role::Admin;
+        }
+        return std::nullopt;
+    }
+
+    Settings ZestDB::loadConfig(std::unordered_map<std::string, UserEntry>& usersOut) {
         Settings result;
-        std::unordered_map<std::string, std::string> parsedUsers;
+        std::unordered_map<std::string, UserEntry> parsedUsers;
 
         const fs::path current_path = fs::current_path().string();
         const std::string configName = "config.yaml";
@@ -274,6 +303,11 @@ namespace Zest {
             result.ArchiveStoragePath = getOr<std::string>(node, "ArchiveStoragePath", (current_path / "archive/").string());
             result.ArchiveCreationDelay = getOr<unsigned int>(node, "ArchiveCreationDelay", 3600);
             result.AutoArchiveSaving = getOr<bool>(node, "AutoArchiveSaving", true);
+            result.ArchiveRetention = getOr<unsigned int>(node, "ArchiveRetention", 10);
+
+            result.MaxConnections = getOr<unsigned int>(node, "MaxConnections", 1024);
+            result.AuthTimeout = getOr<unsigned int>(node, "AuthTimeout", 10);
+            result.IdleTimeout = getOr<unsigned int>(node, "IdleTimeout", 300);
 
             if (result.useSSL && (result.SSLCertPath == "" || result.SSLKeyPath == "")) {
                 ZestLog(LogLevel::CRITICAL, "SSL enabled and not certificate or key path provided !");
@@ -292,11 +326,13 @@ namespace Zest {
             if (node.contains("users") && node["users"].is_sequence()) {
                 for (const auto& user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
-                    if (user_node.contains("tokenHash")) {
-                        parsedUsers[username] = user_node["tokenHash"].get_value<std::string>();
-                    } else {
-                        parsedUsers[username] = sha256(sha256(username + user_node["password"].get_value<std::string>()));
+                    std::string roleName = user_node.contains("role") ? user_node["role"].get_value<std::string>() : "write";
+                    std::optional<Role> role = parseRole(roleName);
+                    if (!role) {
+                        throw std::runtime_error(std::format("user {}: unknown role '{}' (use read, write or admin)", username, roleName));
                     }
+                    std::string tokenHash = user_node.contains("tokenHash") ? user_node["tokenHash"].get_value<std::string>() : sha256(sha256(username + user_node["password"].get_value<std::string>()));
+                    parsedUsers[username] = { std::move(tokenHash), *role };
                 }
             }
         } catch (const std::exception& e) {
@@ -316,9 +352,9 @@ namespace Zest {
             result.MaxKeySize = MAX_KEY_SIZE;
         }
 
-        if (result.FlushInterval == 0 || result.CompactingInterval == 0 || result.ArchiveCreationDelay == 0) {
-            ZestLog(LogLevel::CRITICAL, "FlushInterval, CompactingInterval and ArchiveCreationDelay must be at least 1 second");
-            throw std::runtime_error("Interval of 0 seconds");
+        if (result.FlushInterval == 0 || result.CompactingInterval == 0 || result.ArchiveCreationDelay == 0 || result.AuthTimeout == 0 || result.IdleTimeout == 0 || result.MaxConnections == 0) {
+            ZestLog(LogLevel::CRITICAL, "FlushInterval, CompactingInterval, ArchiveCreationDelay, AuthTimeout, IdleTimeout and MaxConnections must be at least 1");
+            throw std::runtime_error("Setting of 0");
         }
 
         if (result.DBPort == result.WebPort) {
@@ -333,7 +369,7 @@ namespace Zest {
     ResultType ZestDB::reloadConfig() {
         try {
             Settings oldSettings = this->settings;
-            std::unordered_map<std::string, std::string> newUsers;
+            std::unordered_map<std::string, UserEntry> newUsers;
             Settings s = this->loadConfig(newUsers);
 
             if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath ||
@@ -344,9 +380,10 @@ namespace Zest {
                                                   "immutable. Restart the database to apply changes." };
             }
 
-            if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort) {
-                ZestLog(LogLevel::ERROR, "Cannot change the ports during hot-reload.");
-                return { ResultType::Code::ERROR, "Cannot change the ports settings during hot-reload. "
+            if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort || s.MaxConnections != oldSettings.MaxConnections || s.AuthTimeout != oldSettings.AuthTimeout ||
+                s.IdleTimeout != oldSettings.IdleTimeout) {
+                ZestLog(LogLevel::ERROR, "Cannot change the ports, SSL or connection limits during hot-reload.");
+                return { ResultType::Code::ERROR, "Cannot change the ports, SSL or connection limits during hot-reload. "
                                                   "Restart the database to apply changes." };
             }
 
@@ -400,6 +437,10 @@ namespace Zest {
         node["SSLKeyPath"] = this->settings.SSLKeyPath.string();
         node["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
         node["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
+        node["ArchiveRetention"] = this->settings.ArchiveRetention;
+        node["MaxConnections"] = this->settings.MaxConnections;
+        node["AuthTimeout"] = this->settings.AuthTimeout;
+        node["IdleTimeout"] = this->settings.IdleTimeout;
 
         std::ofstream outFile(configPath);
         outFile << node;
@@ -430,76 +471,162 @@ namespace Zest {
         j["SSLKeyPath"] = this->settings.SSLKeyPath.string();
         j["ArchiveCreationDelay"] = this->settings.ArchiveCreationDelay;
         j["AutoArchiveSaving"] = this->settings.AutoArchiveSaving;
-        return j.dump();
+        j["ArchiveRetention"] = this->settings.ArchiveRetention;
+        j["MaxConnections"] = this->settings.MaxConnections;
+        j["AuthTimeout"] = this->settings.AuthTimeout;
+        j["IdleTimeout"] = this->settings.IdleTimeout;
+        return j.dump(-1, ' ', false, json::error_handler_t::replace);
     }
 
     bool ZestDB::createArchive() {
-        std::unique_lock<std::shared_mutex> lock(this->writeMtx);
-        this->flushLocked();
-
-        std::string folder_to_zip = this->settings.DbPath.string();
-
-        if (!fs::exists(folder_to_zip) || !fs::is_directory(folder_to_zip)) {
-            ZestLog(LogLevel::ERROR, std::format("Source folder does not exist : {}", folder_to_zip));
+        if (this->archiving.exchange(true)) {
+            ZestLog(LogLevel::WARNING, "An archive is already being created");
             return false;
         }
-
-        try {
-            fs::create_directories(this->settings.ArchiveStoragePath);
-        } catch (const std::exception& e) {
-            ZestLog(LogLevel::ERROR, std::format("Error while creating archives folder : {}", e.what()));
-            return false;
-        }
-
-        auto now = std::chrono::system_clock::now();
-        fs::path archive_full_path = this->settings.ArchiveStoragePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", now);
-
-        libzippp::ZipArchive archive(archive_full_path.string());
-        if (!archive.open(libzippp::ZipArchive::New)) {
-            ZestLog(LogLevel::ERROR, std::format("Impossible to create the archive : {}", archive_full_path.string()));
-            return false;
-        }
-
-        std::error_code ec;
-        const fs::path archiveDir = fs::weakly_canonical(this->settings.ArchiveStoragePath, ec);
-        for (auto it = fs::recursive_directory_iterator(folder_to_zip); it != fs::recursive_directory_iterator(); ++it) {
-            const auto& entry = *it;
-            if (entry.is_directory() && fs::weakly_canonical(entry.path(), ec) == archiveDir) {
-                it.disable_recursion_pending();
-                continue;
+        struct ResetFlag {
+            std::atomic<bool>& flag;
+            ~ResetFlag() {
+                flag = false;
             }
-            if (fs::is_regular_file(entry.path())) {
-                fs::path relative_path = fs::relative(entry.path(), folder_to_zip);
+        } resetFlag{ this->archiving };
 
-                std::string zip_entry_name = relative_path.generic_string();
+        fs::path snapshot;
+        std::error_code ec;
+        try {
+            fs::path folder_to_zip;
+            fs::path archivePath;
+            unsigned int retention;
+            {
+                std::unique_lock<std::shared_mutex> lock(this->writeMtx);
+                this->flushLocked();
+                folder_to_zip = this->settings.DbPath;
+                archivePath = this->settings.ArchiveStoragePath;
+                retention = this->settings.ArchiveRetention;
 
-                if (!archive.addFile(zip_entry_name, entry.path().string())) {
-                    ZestLog(LogLevel::ERROR, std::format("Error while adding : {}", relative_path.string()));
-                    archive.close();
+                if (!fs::is_directory(folder_to_zip)) {
+                    ZestLog(LogLevel::ERROR, std::format("Source folder does not exist : {}", folder_to_zip.string()));
                     return false;
                 }
-            }
-        }
+                fs::create_directories(archivePath);
+                snapshot = archivePath / ".snapshot";
+                fs::remove_all(snapshot);
 
-        int close_result = archive.close();
-        if (close_result != LIBZIPPP_OK) {
-            ZestLog(LogLevel::ERROR, std::format("Error while saving the archive : Error code : {}", close_result));
+                auto shardLocks = this->shardManager->lockAllShards();
+                const fs::path archiveDir = fs::weakly_canonical(archivePath);
+                for (auto it = fs::recursive_directory_iterator(folder_to_zip); it != fs::recursive_directory_iterator(); ++it) {
+                    if (it->is_directory() && fs::weakly_canonical(it->path()) == archiveDir) {
+                        it.disable_recursion_pending();
+                        continue;
+                    }
+                    if (it->is_regular_file()) {
+                        fs::path target = snapshot / fs::relative(it->path(), folder_to_zip);
+                        fs::create_directories(target.parent_path());
+                        fs::copy_file(it->path(), target);
+                    }
+                }
+            }
+
+            fs::path archive_full_path = archivePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", std::chrono::system_clock::now());
+            libzippp::ZipArchive archive(archive_full_path.string());
+            if (!archive.open(libzippp::ZipArchive::New)) {
+                ZestLog(LogLevel::ERROR, std::format("Impossible to create the archive : {}", archive_full_path.string()));
+                fs::remove_all(snapshot, ec);
+                return false;
+            }
+            if (fs::exists(snapshot)) {
+                for (const auto& entry : fs::recursive_directory_iterator(snapshot)) {
+                    if (entry.is_regular_file() && !archive.addFile(fs::relative(entry.path(), snapshot).generic_string(), entry.path().string())) {
+                        ZestLog(LogLevel::ERROR, std::format("Error while adding : {}", entry.path().string()));
+                        archive.close();
+                        fs::remove_all(snapshot, ec);
+                        return false;
+                    }
+                }
+            }
+            int close_result = archive.close();
+            fs::remove_all(snapshot, ec);
+            if (close_result != LIBZIPPP_OK) {
+                ZestLog(LogLevel::ERROR, std::format("Error while saving the archive : Error code : {}", close_result));
+                return false;
+            }
+
+            if (retention > 0) {
+                std::vector<fs::path> archives;
+                for (const auto& entry : fs::directory_iterator(archivePath)) {
+                    const std::string name = entry.path().filename().string();
+                    if (entry.is_regular_file() && name.starts_with("zestdb_archive_") && name.ends_with(".zip")) {
+                        archives.push_back(entry.path());
+                    }
+                }
+                std::sort(archives.begin(), archives.end());
+                for (size_t i = 0; i + retention < archives.size(); i++) {
+                    fs::remove(archives[i], ec);
+                }
+            }
+            return true;
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::ERROR, std::format("Error while creating the archive : {}", e.what()));
+            if (!snapshot.empty()) {
+                fs::remove_all(snapshot, ec);
+            }
             return false;
         }
-
-        return true;
     }
 
     bool ZestDB::validateToken(const std::string& username, const std::string& token) const {
+        return this->authenticate(username, token).has_value();
+    }
+
+    std::optional<Role> ZestDB::authenticate(const std::string& username, const std::string& token) const {
         std::shared_lock<std::shared_mutex> lock(this->usersMtx);
         auto it = this->users.find(username);
         if (it == this->users.end()) {
-            return false;
+            return std::nullopt;
         }
 
-        const std::string& expected = it->second;
+        const std::string& expected = it->second.tokenHash;
         const std::string actual = sha256(token);
-        return actual.size() == expected.size() && CRYPTO_memcmp(actual.data(), expected.data(), actual.size()) == 0;
+        if (actual.size() != expected.size() || CRYPTO_memcmp(actual.data(), expected.data(), actual.size()) != 0) {
+            return std::nullopt;
+        }
+        return it->second.role;
+    }
+
+    std::optional<Role> ZestDB::roleOf(const std::string& username) const {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        auto it = this->users.find(username);
+        if (it == this->users.end()) {
+            return std::nullopt;
+        }
+        return it->second.role;
+    }
+
+    static constexpr unsigned int MAX_AUTH_FAILURES = 5;
+    static constexpr std::chrono::seconds AUTH_LOCKOUT{ 60 };
+
+    bool ZestDB::authAllowed(const std::string& username) {
+        std::lock_guard<std::mutex> lock(this->authFailuresMtx);
+        auto it = this->authFailures.find(username);
+        return it == this->authFailures.end() || it->second.first < MAX_AUTH_FAILURES || std::chrono::steady_clock::now() >= it->second.second;
+    }
+
+    void ZestDB::recordAuthResult(const std::string& username, bool success) {
+        std::lock_guard<std::mutex> lock(this->authFailuresMtx);
+        if (success) {
+            this->authFailures.erase(username);
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (this->authFailures.size() > 10000) {
+            std::erase_if(this->authFailures, [now](const auto& entry) { return now >= entry.second.second; });
+        }
+        auto& [failures, until] = this->authFailures[username];
+        if (now >= until) {
+            failures = 0;
+        }
+        failures++;
+        until = now + AUTH_LOCKOUT;
     }
 
     bool ZestDB::isAddressAllowed(const std::string& ip) {
@@ -613,6 +740,75 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
+    static bool isRegexTooComplex(std::string_view pattern) {
+        constexpr size_t maxLength = 1024;
+        constexpr size_t maxDepth = 32;
+        constexpr uint64_t maxStates = 100000;
+        if (pattern.size() > maxLength) {
+            return true;
+        }
+
+        std::vector<uint64_t> cost{ 0 };
+        uint64_t lastAtom = 0;
+        for (size_t i = 0; i < pattern.size(); i++) {
+            const char c = pattern[i];
+            if (c == '(') {
+                if (cost.size() > maxDepth) {
+                    return true;
+                }
+                cost.push_back(0);
+                lastAtom = 0;
+                continue;
+            }
+
+            if (c == ')' && cost.size() > 1) {
+                lastAtom = cost.back() + 1;
+                cost.pop_back();
+                cost.back() += lastAtom;
+            } else if (c == '{' && pattern.find('}', i) != std::string_view::npos) {
+                const size_t close = pattern.find('}', i);
+                uint64_t repeat = 0;
+                for (std::string_view bounds = pattern.substr(i + 1, close - i - 1); !bounds.empty();) {
+                    const size_t comma = bounds.find(',');
+                    std::string_view part = bounds.substr(0, comma);
+                    uint64_t value = 0;
+                    if (!part.empty() && (std::from_chars(part.data(), part.data() + part.size(), value).ec != std::errc() || value > maxStates)) {
+                        return true;
+                    }
+                    repeat = std::max(repeat, value);
+                    bounds = comma == std::string_view::npos ? std::string_view() : bounds.substr(comma + 1);
+                }
+                cost.back() += lastAtom * (repeat > 0 ? repeat - 1 : 0);
+                i = close;
+            } else if (c == '[') {
+                size_t j = i + 1;
+                if (j < pattern.size() && pattern[j] == '^') {
+                    j++;
+                }
+                if (j < pattern.size() && pattern[j] == ']') {
+                    j++;
+                }
+                while (j < pattern.size() && pattern[j] != ']') {
+                    j += pattern[j] == '\\' ? 2u : 1u;
+                }
+                i = j;
+                lastAtom = 1;
+                cost.back() += 1;
+            } else {
+                if (c == '\\') {
+                    i++;
+                }
+                lastAtom = 1;
+                cost.back() += 1;
+            }
+
+            if (cost.back() > maxStates) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     CreationValidationRuleResult ZestDB::createValidationRule(std::string_view mode, std::string_view pattern) const {
         ValidationRule valid;
         bool validMode = true;
@@ -620,7 +816,7 @@ namespace Zest {
         if (mode == "re") {
             try {
                 std::string patStr(pattern);
-                if (std::regex_search(patStr, std::regex(R"(\\[1-9])"))) {
+                if (isRegexTooComplex(patStr) || std::regex_search(patStr, std::regex(R"(\\[1-9])"))) {
                     return { valid, false };
                 }
                 std::regex keyRegex(patStr, std::regex::ECMAScript | std::regex_constants::__polynomial);
@@ -666,14 +862,14 @@ namespace Zest {
         return ec == std::errc() && end == str.data() + str.size();
     }
 
-    ResultType ZestDB::execCmd(const std::string& command) {
+    ResultType ZestDB::execCmd(const std::string& command, Role role) {
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
         if (start == std::string_view::npos) {
             return { ResultType::Code::ERROR, Messages::NO_COMMAND_GIVEN };
         }
         sv.remove_prefix(start);
-        sv.remove_suffix(sv.size() - 1 - sv.find_last_not_of(" \t\r\n"));
+        sv.remove_suffix(sv.size() - 1 - sv.find_last_not_of("\r\n"));
 
         std::vector<std::string_view> words;
         size_t pos = 0;
@@ -703,6 +899,11 @@ namespace Zest {
         }
 
         const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db";
+        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
+        if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
+            return { ResultType::Code::ERROR, Messages::PERMISSION_DENIED };
+        }
+
         std::shared_lock<std::shared_mutex> sharedLock(this->writeMtx, std::defer_lock);
         std::unique_lock<std::shared_mutex> uniqueLock(this->writeMtx, std::defer_lock);
         if (cmd == "r" || cmd == "scfg") {
@@ -909,16 +1110,8 @@ namespace Zest {
                 }
                 setLoggerDebugMode(this->settings.isDebug);
             } else if (param == "usessl") {
-                if (valueStr == "true" || valueStr == "1") {
-                    this->settings.useSSL = true;
-                    valueSet = true;
-                } else if (valueStr == "false" || valueStr == "0") {
-                    this->settings.useSSL = false;
-                    valueSet = true;
-                } else {
-                    result.response = "Invalid useSSL value (use true/false or 0/1)";
-                    return result;
-                }
+                result.response = "useSSL cannot be changed at runtime: edit config.yaml and restart";
+                return result;
             } else if (param == "jsononly") {
                 if (valueStr == "true" || valueStr == "1") {
                     this->settings.jsonOnly = true;
@@ -1031,7 +1224,7 @@ namespace Zest {
         oss << "Config Parameters:" << "\n";
         oss << "  SegSize(int), MaxKeySize(int), MaxValueSize(int), "
                "CacheSize(int), CompactingInterval(int), FlushInterval(int), "
-               "isDebug(bool), jsonOnly(bool), useSSL(bool), readOnly(bool), "
+               "isDebug(bool), jsonOnly(bool), readOnly(bool), "
                "NetworkValidationStr(string), ArchiveCreationDelay(int), "
                "AutoArchiveSaving(bool)"
             << "\n";

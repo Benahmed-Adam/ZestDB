@@ -4,7 +4,9 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <thread>
 #include <unordered_map>
@@ -23,6 +25,11 @@ namespace Zest {
         bool result;
     };
 
+    struct UserEntry {
+        std::string tokenHash;
+        Role role;
+    };
+
     class ZestDB {
     public:
         ZestDB();
@@ -36,9 +43,14 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
 
-        ResultType execCmd(const std::string& command);
+        ResultType execCmd(const std::string& command, Role role = Role::Admin);
         bool validateToken(const std::string& username, const std::string& token) const;
+        std::optional<Role> authenticate(const std::string& username, const std::string& token) const;
+        std::optional<Role> roleOf(const std::string& username) const;
+        bool authAllowed(const std::string& username);
+        void recordAuthResult(const std::string& username, bool success);
         bool isAddressAllowed(const std::string& ip);
+        bool isRunning() const;
         void stop();
 
         Settings settings;
@@ -59,15 +71,21 @@ namespace Zest {
         CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
         bool appendToWAL(const std::string& key, const std::string& command);
 
-        Settings loadConfig(std::unordered_map<std::string, std::string>& usersOut);
+        Settings loadConfig(std::unordered_map<std::string, UserEntry>& usersOut);
         ResultType reloadConfig();
         void setConfig();
         std::string getConfig() const;
 
         bool createArchive();
 
-        std::unordered_map<std::string, std::string> users;
+        std::unordered_map<std::string, UserEntry> users;
         mutable std::shared_mutex usersMtx;
+
+        std::mutex authFailuresMtx;
+        std::unordered_map<std::string, std::pair<unsigned int, std::chrono::steady_clock::time_point>> authFailures;
+
+        std::atomic<bool> running{ true };
+        std::atomic<bool> archiving{ false };
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<Server> socket;
 

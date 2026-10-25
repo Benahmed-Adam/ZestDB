@@ -75,7 +75,7 @@ namespace Zest {
         if (valid.limit != UINT_MAX && totalMatches > static_cast<long long>(valid.limit)) {
             totalMatches = static_cast<long long>(valid.limit);
         }
-        return { ResultType::Code::SUCCESS, mergedArray.dump(), totalMatches };
+        return { ResultType::Code::SUCCESS, mergedArray.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), totalMatches };
     }
 
     std::vector<std::string> ShardManager::firstMatchingKeys(const ValidationRule& valid) {
@@ -162,15 +162,30 @@ namespace Zest {
     }
 
     void ShardManager::flush() {
+        bool ok = true;
         for (auto& shard : this->shards) {
-            shard->flush();
+            ok = shard->flushData() && ok;
         }
+        if (!ok) {
+            ZestLog(LogLevel::ERROR, "ShardManager - a shard failed to flush, keeping every WAL");
+            return;
+        }
+        this->clearAllWAL();
     }
 
     void ShardManager::stop() {
+        this->flush();
         for (auto& shard : this->shards) {
             shard->stop();
         }
+    }
+
+    std::vector<std::shared_lock<std::shared_mutex>> ShardManager::lockAllShards() {
+        std::vector<std::shared_lock<std::shared_mutex>> locks;
+        for (auto& shard : this->shards) {
+            locks.emplace_back(shard->mutex());
+        }
+        return locks;
     }
 
     void ShardManager::clearAllWAL() {
@@ -191,6 +206,9 @@ namespace Zest {
         }
 
         std::stable_sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.seq < b.seq; });
+        if (!allWalEntries.empty()) {
+            WAL::advanceSequence(allWalEntries.back().seq + 1);
+        }
 
         for (const auto& entry : allWalEntries) {
             ZestLog(LogLevel::DEBUG, std::format("WAL replay command: {}", entry.cmd));

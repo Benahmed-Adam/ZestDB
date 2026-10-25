@@ -16,6 +16,12 @@ namespace Zest {
         std::atomic<unsigned int>* globalMatchCount = nullptr;
     };
 
+    enum class Role {
+        Read,
+        Write,
+        Admin
+    };
+
     struct ResultType {
         enum class Code {
             SUCCESS,
@@ -56,6 +62,9 @@ namespace Zest {
         static constexpr const char* INVALID_VALUE = "The value does not respect the value validation rule !";
         static constexpr const char* MISSING_ARGUMENTS = "Not enough arguments provided !";
         static constexpr const char* UPDATE_SUCCESSFUL = "Values successfuly updated !";
+        static constexpr const char* PERMISSION_DENIED = "Permission denied for this user !";
+        static constexpr const char* SESSION_REVOKED = "Session revoked: the user no longer exists !";
+        static constexpr const char* INTERNAL_ERROR = "Internal error while executing the command !";
         static constexpr const char* READ_FAILED = "Failed to read the value from disk !";
         static constexpr const char* WAL_WRITE_FAILED = "The write was applied but could not be logged in the WAL !";
         static constexpr const char* PAYLOAD_TOO_LARGE = "Payload too large !";
@@ -84,11 +93,15 @@ namespace Zest {
         std::string NetworkValidationStr;
 
         unsigned int ArchiveCreationDelay;
+        unsigned int ArchiveRetention;
+
+        unsigned int MaxConnections;
+        unsigned int AuthTimeout;
+        unsigned int IdleTimeout;
 
         bool AutoArchiveSaving;
         bool isDebug;
         bool useSSL;
-        bool isRunning = true;
         bool jsonOnly;
         bool readOnly;
         bool fsyncOnWrite;

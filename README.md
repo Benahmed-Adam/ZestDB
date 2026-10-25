@@ -76,11 +76,13 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - A verification pass on boot detects and removes index entries that no longer point to valid on-disk data.
 
 ### Network Server
-- Custom asynchronous TCP server built on Asio, handling multiple concurrent clients with batched commands.
+- Custom asynchronous TCP server built on Asio, running on one IO thread per CPU core (each session is serialized on its own strand) and handling batched commands.
 - Batch framing: a single request can carry multiple commands packed with 4-byte length prefixes, with one JSON response per command.
 - Per-request JSON output with `code`, `response` and `affectedRows` fields.
-- Authentication via a `Authorization: <user>.<sha256(user+password)>` handshake command before any data operation.
-- Configurable IP allow-listing using a regular expression (`NetworkValidation`).
+- Authentication via a `Authorization: <user>.<sha256(user+password)>` handshake command before any data operation, with per-user roles (`read`, `write`, `admin`) checked on every command, so a `reload` that removes a user or changes its role applies to open sessions.
+- A user is locked out for 60 seconds after 5 failed authentications. The lock is per user rather than per address, so it still works behind a proxy such as ngrok (where every client comes from `127.0.0.1`); the flip side is that anyone can lock a known user out for a minute.
+- Connection limits: `MaxConnections` simultaneous sessions, `AuthTimeout` to finish the TLS handshake and authenticate, `IdleTimeout` for authenticated sessions.
+- Configurable IP allow-listing using a regular expression (`NetworkValidation`), applied to both the TCP server and the HTTP stats server.
 - Optional TLS/SSL support (both the TCP server and the HTTP server can use certificates).
 
 ### HTTP Monitoring Server
@@ -101,7 +103,9 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 ### Archiving
 - The entire database directory can be zipped into a versioned archive stored in a separate `ArchiveStoragePath`.
 - Automatic archiving at a configurable `ArchiveCreationDelay` (in seconds), resuming from the most recent archive on restart.
-- Manual archiving on demand via the `save` command.
+- Manual archiving on demand via the `save` command (admin role).
+- Commands are blocked only while the database files are copied to a snapshot; the zip is built from the copy afterwards.
+- `ArchiveRetention` keeps the N most recent archives and deletes the older ones.
 - Can be disabled entirely with `AutoArchiveSaving`.
 
 ### Logging
@@ -143,7 +147,7 @@ ZestDB follows a layered design where each layer is independently testable:
 
 ### Threading Model
 - Main thread: command parsing and dispatch.
-- Asio IO threads: network server (TCP/SSL) and HTTP server.
+- Asio IO threads (one per CPU core): TCP/SSL sessions, each on its own strand. The HTTP stats server has its own threads.
 - Per-shard compactor threads: index and segment compaction.
 - Global flush thread: periodic disk synchronization.
 - Global archive (save) thread: periodic database zipping.
@@ -205,11 +209,12 @@ zestdb> d name
 | `FlushInterval` | int | Seconds between disk syncs. |
 | `NetworkValidationStr` | string | IP allow-list regex. |
 | `isDebug` | bool | Enable debug logging (`true/false` or `1/0`). |
-| `useSSL` | bool | Enable TLS on the servers. |
 | `jsonOnly` | bool | Reject non-JSON values. |
 | `readOnly` | bool | Block write operations. |
 | `ArchiveCreationDelay` | int | Seconds between automatic archives. |
 | `AutoArchiveSaving` | bool | Enable/disable automatic archiving. |
+
+`scfg`, `reload`, `gcfg`, `save` and `flush` require the `admin` role. `useSSL`, the ports and the connection limits can only be changed in `config.yaml`, followed by a restart.
 
 ---
 
@@ -256,7 +261,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `FlushInterval` | 120 | Seconds between disk syncs. |
 | `DBPort` | 7321 | TCP data server port. |
 | `WebPort` | 1237 | HTTP monitoring server port. |
-| `NetworkValidation` | ".*" | Regex for allowed client IP addresses (empty also allows all). |
+| `NetworkValidation` | ".*" | Regex for allowed client IP addresses, TCP and HTTP stats (empty also allows all). The provided `config.yaml` sets `^127\.0\.0\.1$` (local only). |
 | `isDebug` | false | Enable debug logging. |
 | `jsonOnly` | false | Accept only JSON values. |
 | `readOnly` | false | Block write operations. |
@@ -267,7 +272,13 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `ArchiveStoragePath` | ./archive/ | Folder where zip archives are written. |
 | `ArchiveCreationDelay` | 3600 | Seconds between automatic archives. |
 | `AutoArchiveSaving` | true | Enable automatic archiving. |
-| `users` | empty | List of `{user, tokenHash}` pairs, where `tokenHash` is `sha256(token)` and the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
+| `ArchiveRetention` | 10 | Number of archives kept, the oldest are deleted (`0` keeps all). |
+| `MaxConnections` | 1024 | Maximum number of simultaneous client connections. |
+| `AuthTimeout` | 10 | Seconds a client has to finish the TLS handshake and authenticate. |
+| `IdleTimeout` | 300 | Seconds of inactivity before an authenticated connection is closed. |
+| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`), `write` (+ `set`, `del`, `setby`, `delby`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
+
+The provided `config.yaml` contains a development account (`bob`/`bob`, admin) and only accepts local connections: replace the account before widening `NetworkValidation`.
 
 ---
 
@@ -504,4 +515,4 @@ Measured with the commands above, client and server on the same machine (WSL2 Ub
 | 4 | 200,000 | 205,477 | 1.849 | 2.873 |
 | 8 | 400,000 | 182,519 | 3.907 | 6.013 |
 
-- Adding clients does not add throughput: the TCP server handles every session on a single Asio thread, so clients wait for each other and latency grows with their number. Spreading sessions over several threads is the main lever for multi-client workloads.
+- These numbers were measured when the TCP server handled every session on a single Asio thread: adding clients did not add throughput, clients waited for each other and latency grew with their number. The server now runs one IO thread per core; these results have not been measured again since.

@@ -9,7 +9,7 @@ FlushInterval: 10 # The ammount of time in seconds between each sync on the disk
 DBPort: 7321
 WebPort: 1237
 
-NetworkValidation: ".*" # Regex for allowed incoming request IP addresses
+NetworkValidation: '^127\.0\.0\.1$' # Regex for allowed client IP addresses (TCP and HTTP stats); local only by default, widen it on purpose
 
 isDebug: false # Degug mode for the logger
 jsonOnly: false
@@ -23,7 +23,14 @@ SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absol
 ArchiveStoragePath: /home/test/DBArchives
 ArchiveCreationDelay: 100 # In seconds
 AutoArchiveSaving: true
+ArchiveRetention: 10 # Number of archives kept, the oldest are deleted (0 keeps all)
+
+MaxConnections: 1024 # Max simultaneous client connections
+AuthTimeout: 10 # Seconds a client has to finish the TLS handshake and authenticate
+IdleTimeout: 300 # Seconds of inactivity before an authenticated connection is closed
 
 users:
+  # Development account (bob/bob): replace it before allowing remote addresses in NetworkValidation
   - user: bob
+    role: admin # read (get, getby), write (+ set, del, setby, delby) or admin (+ flush, reload, scfg, gcfg, save)
     tokenHash: fa2c869a802a01ebc7a945b0c60f51dc8da08780209eeb27a833240c861db9c0 # sha256 of the token sha256("bob" + "bob")

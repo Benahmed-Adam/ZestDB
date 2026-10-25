@@ -9,9 +9,17 @@
 
 namespace Zest {
 
-    Session::Session(ZestStream stream, ZestDB& db)
+    Session::Session(ZestStream stream, ZestDB& db, Limits limits, std::shared_ptr<std::atomic<size_t>> activeSessions)
         : stream_(std::move(stream)),
-          db_(db) {
+          timer_(std::visit([](auto& s) { return s.get_executor(); }, stream_)),
+          db_(db),
+          limits_(limits),
+          activeSessions_(std::move(activeSessions)) {
+        this->activeSessions_->fetch_add(1);
+    }
+
+    Session::~Session() {
+        this->activeSessions_->fetch_sub(1);
     }
 
     void Session::start() {
@@ -22,29 +30,43 @@ namespace Zest {
             this->close_stream();
             return;
         }
-        std::string remote_ip = remote.address().to_string();
-        unsigned short int remote_port = remote.port();
+        this->remote_ip_ = remote.address().to_string();
 
-        if (!this->db_.isAddressAllowed(remote_ip)) {
-            ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", remote_ip));
+        if (!this->db_.isAddressAllowed(this->remote_ip_)) {
+            ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", this->remote_ip_));
             this->queue_write("unauthorized", true);
             return;
         }
 
-        ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", remote_ip, remote_port));
+        ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", this->remote_ip_, remote.port()));
 
+        this->arm_timer();
         if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
             auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
             ssl_stream.async_handshake(asio::ssl::stream_base::server, [self = this->shared_from_this()](std::error_code ec) {
-                if (!ec)
+                if (ec) {
+                    self->close_stream();
+                } else {
                     self->do_read_size();
+                }
             });
         } else {
             this->do_read_size();
         }
     }
 
+    void Session::arm_timer() {
+        this->timer_.expires_after(this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
+        this->timer_.async_wait([self = this->shared_from_this()](std::error_code ec) {
+            if (!ec && self->timer_.expiry() <= std::chrono::steady_clock::now()) {
+                ZestLog(LogLevel::INFO, std::format("Session: {} timed out", self->remote_ip_));
+                self->close_stream();
+            }
+        });
+    }
+
     void Session::do_read_size() {
+        this->arm_timer();
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto& stream) {
@@ -60,8 +82,11 @@ namespace Zest {
                             return;
                         }
                         this->do_read_command(payload_size);
-                    } else if (ec != asio::error::operation_aborted) {
-                        ZestLog(LogLevel::INFO, "Client disconnected");
+                    } else {
+                        if (ec != asio::error::operation_aborted) {
+                            ZestLog(LogLevel::INFO, "Client disconnected");
+                        }
+                        this->close_stream();
                     }
                 });
             },
@@ -69,83 +94,97 @@ namespace Zest {
     }
 
     void Session::do_read_command(uint32_t payload_size) {
+        this->arm_timer();
         auto self(this->shared_from_this());
         std::visit(
             [this, self, payload_size](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(payload_size), [this, self, payload_size](std::error_code ec, std::size_t length) {
-                    if (!ec && length == payload_size) {
-                        std::istream is(&this->buffer_);
-                        std::string payload(payload_size, '\0');
-                        is.read(&payload[0], payload_size);
+                    if (ec || length != payload_size) {
+                        this->close_stream();
+                        return;
+                    }
 
-                        std::string final_result;
-                        bool should_close = false;
-                        uint32_t offset = 0;
+                    std::istream is(&this->buffer_);
+                    std::string payload(payload_size, '\0');
+                    is.read(&payload[0], payload_size);
 
-                        while (offset < payload_size && !should_close) {
-                            if (offset + 4 > payload_size) {
-                                final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
-                                break;
-                            }
+                    std::string final_result;
+                    bool should_close = false;
+                    uint32_t offset = 0;
 
-                            uint32_t cmd_size;
-                            std::memcpy(&cmd_size, &payload[offset], 4);
-                            cmd_size = ntohl(cmd_size);
-                            offset += 4;
-
-                            if (offset + cmd_size > payload_size) {
-                                final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
-                                break;
-                            }
-
-                            std::string cmd = payload.substr(offset, cmd_size);
-                            offset += cmd_size;
-
-                            std::string cmd_result;
-
-                            if (!this->authenticated_) {
-                                std::string authPrefix = "Authorization: ";
-                                if (cmd.compare(0, authPrefix.length(), authPrefix) == 0) {
-                                    std::string authContent = cmd.substr(authPrefix.length());
-                                    size_t dotPos = authContent.find(".");
-                                    if (dotPos != std::string::npos) {
-                                        std::string username = authContent.substr(0, dotPos);
-                                        std::string token = authContent.substr(dotPos + 1);
-                                        if (this->db_.validateToken(username, token)) {
-                                            this->authenticated_ = true;
-                                            cmd_result = ZestDB::responseToJson({ ResultType::Code::SUCCESS, Messages::AUTH_SUCCESS, 0 });
-                                        } else {
-                                            cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
-                                            should_close = true;
-                                        }
-                                    } else {
-                                        cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
-                                        should_close = true;
-                                    }
-                                } else {
-                                    cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
-                                    should_close = true;
-                                }
-                            } else {
-                                auto resp = this->db_.execCmd(cmd);
-                                cmd_result = ZestDB::responseToJson(resp);
-                            }
-
-                            if (!final_result.empty()) {
-                                final_result += "\r\n\r\n";
-                            }
-                            final_result += cmd_result;
+                    while (offset < payload_size && !should_close) {
+                        if (offset + 4 > payload_size) {
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
+                            break;
                         }
 
-                        this->queue_write(final_result + "\n", should_close);
+                        uint32_t cmd_size;
+                        std::memcpy(&cmd_size, &payload[offset], 4);
+                        cmd_size = ntohl(cmd_size);
+                        offset += 4;
 
-                        if (!should_close) {
-                            this->do_read_size();
+                        if (offset + cmd_size > payload_size) {
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
+                            break;
                         }
+
+                        std::string cmd_result = this->handle_command(payload.substr(offset, cmd_size), should_close);
+                        offset += cmd_size;
+
+                        if (!final_result.empty()) {
+                            final_result += "\r\n\r\n";
+                        }
+                        final_result += cmd_result;
+                    }
+
+                    this->queue_write(final_result + "\n", should_close);
+
+                    if (!should_close) {
+                        this->do_read_size();
                     }
                 });
             },
             stream_);
+    }
+
+    std::string Session::handle_command(const std::string& cmd, bool& should_close) {
+        if (!this->authenticated_) {
+            const std::string authPrefix = "Authorization: ";
+            const size_t dotPos = cmd.find('.', authPrefix.size());
+            should_close = true;
+            if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
+                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+            }
+
+            std::string username = cmd.substr(authPrefix.size(), dotPos - authPrefix.size());
+            if (!this->db_.authAllowed(username)) {
+                ZestLog(LogLevel::WARNING, std::format("Session: user {} is locked out after too many failed authentications ({})", username, this->remote_ip_));
+                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+            }
+            if (!this->db_.authenticate(username, cmd.substr(dotPos + 1))) {
+                this->db_.recordAuthResult(username, false);
+                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+            }
+
+            this->db_.recordAuthResult(username, true);
+            this->authenticated_ = true;
+            this->username_ = std::move(username);
+            should_close = false;
+            return ZestDB::responseToJson({ ResultType::Code::SUCCESS, Messages::AUTH_SUCCESS, 0 });
+        }
+
+        std::optional<Role> role = this->db_.roleOf(this->username_);
+        if (!role) {
+            should_close = true;
+            return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::SESSION_REVOKED, 0 });
+        }
+
+        try {
+            return ZestDB::responseToJson(this->db_.execCmd(cmd, *role));
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::ERROR, std::format("Session: command failed with an exception: {}", e.what()));
+            return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::INTERNAL_ERROR, 0 });
+        }
     }
 
     void Session::queue_write(const std::string& message, bool closeAfter) {
@@ -179,6 +218,7 @@ namespace Zest {
     }
 
     void Session::close_stream() {
+        this->timer_.cancel();
         std::visit(
             [](auto& s) {
                 std::error_code ec;
@@ -188,11 +228,16 @@ namespace Zest {
     }
 
     Server::Server(asio::io_context& io_context, uint16_t port, ZestDB& db)
-        : ssl_context_(asio::ssl::context::tls_server),
+        : io_context_(io_context),
+          ssl_context_(asio::ssl::context::tls_server),
           acceptor_(io_context, tcp::endpoint(tcp::v4(), port)),
-          db_(db) {
+          accept_retry_timer_(io_context),
+          db_(db),
+          useSSL_(db.settings.useSSL),
+          maxConnections_(db.settings.MaxConnections),
+          limits_{ std::chrono::seconds(db.settings.AuthTimeout), std::chrono::seconds(db.settings.IdleTimeout) } {
         ZestLog(LogLevel::INFO, std::format("Server: listening on port {}", port));
-        if (db.settings.useSSL) {
+        if (this->useSSL_) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 |
                                      asio::ssl::context::single_dh_use);
             ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath);
@@ -202,14 +247,34 @@ namespace Zest {
     }
 
     void Server::do_accept() {
-        this->acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
-            if (!ec) {
-                if (this->db_.settings.useSSL) {
-                    asio::ssl::stream<tcp::socket> ssl_sock(std::move(socket), this->ssl_context_);
-                    std::make_shared<Session>(std::move(ssl_sock), this->db_)->start();
+        this->acceptor_.async_accept(asio::make_strand(this->io_context_), [this](std::error_code ec, tcp::socket socket) {
+            if (ec == asio::error::operation_aborted) {
+                return;
+            }
+            if (ec) {
+                ZestLog(LogLevel::WARNING, std::format("Server: accept failed: {}", ec.message()));
+                this->accept_retry_timer_.expires_after(std::chrono::milliseconds(100));
+                this->accept_retry_timer_.async_wait([this](std::error_code timerError) {
+                    if (!timerError) {
+                        this->do_accept();
+                    }
+                });
+                return;
+            }
+
+            if (this->activeSessions_->load() >= this->maxConnections_) {
+                ZestLog(LogLevel::WARNING, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
+                std::error_code ignored;
+                socket.close(ignored);
+            } else {
+                auto executor = socket.get_executor();
+                std::shared_ptr<Session> session;
+                if (this->useSSL_) {
+                    session = std::make_shared<Session>(asio::ssl::stream<tcp::socket>(std::move(socket), this->ssl_context_), this->db_, this->limits_, this->activeSessions_);
                 } else {
-                    std::make_shared<Session>(std::move(socket), this->db_)->start();
+                    session = std::make_shared<Session>(std::move(socket), this->db_, this->limits_, this->activeSessions_);
                 }
+                asio::dispatch(executor, [session] { session->start(); });
             }
             this->do_accept();
         });

@@ -17,19 +17,19 @@ namespace Zest {
             return false;
         }
 
-        struct GnuFileBuf : std::filebuf {
-            int get_fd() {
-                return this->_M_file.fd();
+        struct FdAccess : std::filebuf {
+            static int fd(std::filebuf& fb) {
+                return (fb.*(&FdAccess::_M_file)).fd();
             }
         };
 
-        auto* buf = static_cast<GnuFileBuf*>(fs.rdbuf());
+        std::filebuf* buf = fs.rdbuf();
         if (!buf || !fs.is_open()) {
             ZestLog(LogLevel::ERROR, "Stream is not open or invalid buffer.");
             return false;
         }
 
-        int fd = buf->get_fd();
+        int fd = FdAccess::fd(*buf);
         if (fd == -1) {
             ZestLog(LogLevel::ERROR, "Invalid file descriptor (-1).");
             return false;

@@ -93,15 +93,15 @@ namespace Zest {
 
             ZestLog(LogLevel::INFO, "Starting the compactor...");
 
-            while (this->settings.isRunning && !stopToken.stop_requested()) {
+            while (!stopToken.stop_requested()) {
                 unsigned int interval;
                 {
                     std::shared_lock<std::shared_mutex> settingsLock(this->readMtx);
                     interval = this->settings.CompactingInterval;
                 }
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [stopToken] { return stopToken.stop_requested(); });
 
-                if (stopToken.stop_requested() || !this->settings.isRunning) {
+                if (stopToken.stop_requested()) {
                     break;
                 }
 
@@ -309,7 +309,7 @@ namespace Zest {
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addGetByStats(false, latency);
 
-        return { ResultType::Code::SUCCESS, resultArray.dump(), matchCount };
+        return { ResultType::Code::SUCCESS, resultArray.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), matchCount };
     }
 
     ResultType Shard::setBy(ValidationRule& valid, const std::string& value) {
@@ -405,12 +405,18 @@ namespace Zest {
         return keys;
     }
 
-    void Shard::flush() {
+    bool Shard::flushData() {
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         if (this->storageManager->flush() && this->indexManager->flush()) {
+            return true;
+        }
+        ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed", this->shardId));
+        return false;
+    }
+
+    void Shard::flush() {
+        if (this->flushData()) {
             this->wal->clear();
-        } else {
-            ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed, keeping the WAL", this->shardId));
         }
     }
 
@@ -418,11 +424,10 @@ namespace Zest {
         if (!this->isStopped.load()) {
             ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
 
-            this->settings.isRunning = false;
             this->compactorThread.request_stop();
             this->threadCV.notify_all();
 
-            this->flush();
+            this->flushData();
 
             this->isStopped.store(true);
         }

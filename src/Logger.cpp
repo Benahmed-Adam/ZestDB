@@ -55,8 +55,19 @@ namespace Zest {
 
         std::string timestamp = std::format("{:%F %T}", now);
 
+        std::string safeMessage;
+        safeMessage.reserve(message.size());
+        for (char ch : message) {
+            const auto c = static_cast<unsigned char>(ch);
+            if (c < 0x20 || c == 0x7f) {
+                safeMessage += std::format("\\x{:02x}", c);
+            } else {
+                safeMessage += static_cast<char>(c);
+            }
+        }
+
         std::ostringstream logEntry;
-        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << message << "\x1b[0m" << std::endl;
+        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << safeMessage << "\x1b[0m" << std::endl;
 
         std::lock_guard<std::mutex> lock(logMutex);
 

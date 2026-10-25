@@ -28,8 +28,13 @@ namespace Zest {
         ResultType delBy(ValidationRule& valid);
         std::vector<std::string> matchingKeys(const ValidationRule& valid);
 
+        bool flushData();
         void flush();
         void stop();
+
+        std::shared_mutex& mutex() {
+            return this->readMtx;
+        }
 
         int getShardId() const {
             return this->shardId;

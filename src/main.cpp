@@ -4,6 +4,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "Logger.hpp"
 #include "ZestDB.hpp"
@@ -11,7 +12,7 @@
 void populate(Zest::ZestDB* db) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 1000000 && db->settings.isRunning; ++i) {
+    for (int i = 0; i < 1000000 && db->isRunning(); ++i) {
         db->execCmd(std::format("s key_{} val_{}", i, i));
     }
 
@@ -23,7 +24,7 @@ void populate(Zest::ZestDB* db) {
 
 void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard) {
     std::string line;
-    while (db->settings.isRunning) {
+    while (db->isRunning()) {
         std::cout << "zestdb> ";
         if (!std::getline(std::cin, line)) {
             break;
@@ -43,8 +44,11 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
             db->stop();
             break;
         } else {
-            auto resp = db->execCmd(line);
-            std::cout << Zest::ZestDB::responseToJson(resp) << std::endl;
+            try {
+                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line)) << std::endl;
+            } catch (const std::exception& e) {
+                Zest::ZestLog(Zest::LogLevel::ERROR, std::format("Command failed with an exception: {}", e.what()));
+            }
         }
     }
 }
@@ -72,12 +76,17 @@ int main(int argc, char** argv) {
 
     std::thread cmdThread(cmd, &db, &work);
 
-    std::thread ioThread([&db]() { db.ioCtx.run(); });
+    std::vector<std::thread> ioThreads;
+    for (unsigned int i = 0; i < std::max(1u, std::thread::hardware_concurrency()); i++) {
+        ioThreads.emplace_back([&db]() { db.ioCtx.run(); });
+    }
 
     db.srv->listen("0.0.0.0", db.settings.WebPort);
 
     cmdThread.join();
-    ioThread.join();
+    for (auto& t : ioThreads) {
+        t.join();
+    }
     if (popThread.joinable()) {
         popThread.join();
     }

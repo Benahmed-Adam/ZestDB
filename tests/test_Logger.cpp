@@ -1,4 +1,6 @@
 #include <catch2/catch_all.hpp>
+#include <iostream>
+#include <sstream>
 
 #include "Logger.hpp"
 
@@ -34,4 +36,14 @@ TEST_CASE("ZestLog with empty message", "[logger]") {
 
 TEST_CASE("ZestLog with special characters", "[logger]") {
     REQUIRE_NOTHROW(ZestLog(LogLevel::WARNING, "test\nnewline\ttab"));
+}
+
+TEST_CASE("ZestLog escapes control characters", "[logger]") {
+    std::ostringstream captured;
+    auto* old = std::cout.rdbuf(captured.rdbuf());
+    ZestLog(LogLevel::WARNING, "key \x1b[2J\nforged line");
+    std::cout.rdbuf(old);
+    const std::string out = captured.str();
+    REQUIRE(out.find("\\x1b[2J\\x0aforged line") != std::string::npos);
+    REQUIRE(out.find("\x1b[2J") == std::string::npos);
 }

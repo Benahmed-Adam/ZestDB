@@ -2,6 +2,8 @@
 
 #include <asio.hpp>
 #include <asio/ssl.hpp>
+#include <atomic>
+#include <chrono>
 #include <deque>
 #include <iostream>
 #include <memory>
@@ -19,13 +21,21 @@ namespace Zest {
 
     class Session : public std::enable_shared_from_this<Session> {
     public:
-        Session(ZestStream stream, ZestDB& db);
+        struct Limits {
+            std::chrono::seconds authTimeout;
+            std::chrono::seconds idleTimeout;
+        };
+
+        Session(ZestStream stream, ZestDB& db, Limits limits, std::shared_ptr<std::atomic<size_t>> activeSessions);
+        ~Session();
         void start();
 
     private:
         void do_read_size();
         void do_read_command(uint32_t size);
+        std::string handle_command(const std::string& cmd, bool& should_close);
 
+        void arm_timer();
         void queue_write(const std::string& message, bool closeAfter = false);
         void do_write();
 
@@ -35,8 +45,14 @@ namespace Zest {
         static constexpr uint32_t MAX_PAYLOAD_SIZE = 64 * 1024 * 1024;
 
         ZestStream stream_;
+        asio::steady_timer timer_;
         asio::streambuf buffer_;
         ZestDB& db_;
+        Limits limits_;
+        std::shared_ptr<std::atomic<size_t>> activeSessions_;
+
+        std::string remote_ip_;
+        std::string username_;
         bool authenticated_ = false;
 
         std::deque<std::string> write_queue_;
@@ -50,9 +66,16 @@ namespace Zest {
     private:
         void do_accept();
 
+        asio::io_context& io_context_;
         asio::ssl::context ssl_context_;
         tcp::acceptor acceptor_;
+        asio::steady_timer accept_retry_timer_;
         ZestDB& db_;
+
+        bool useSSL_;
+        size_t maxConnections_;
+        Session::Limits limits_;
+        std::shared_ptr<std::atomic<size_t>> activeSessions_ = std::make_shared<std::atomic<size_t>>(0);
     };
 
 } // namespace Zest
