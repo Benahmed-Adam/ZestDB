@@ -108,3 +108,13 @@ TEST_CASE_METHOD(DataSegmentFixture, "DataSegment flush without changes", "[data
     DataSegment seg(settings, 1);
     REQUIRE_NOTHROW(seg.flush());
 }
+
+TEST_CASE_METHOD(DataSegmentFixture, "DataSegment read past the end does not break later reads and writes", "[datasegment]") {
+    DataSegment seg(settings, 1);
+    seg.write("hello");
+    seg.read(0, 100);
+    REQUIRE(seg.read(0, 5) == "hello");
+    unsigned long offset = seg.write("world");
+    REQUIRE(offset == 5);
+    REQUIRE(seg.read(offset, 5) == "world");
+}

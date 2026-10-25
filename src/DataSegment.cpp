@@ -62,6 +62,7 @@ namespace Zest {
             return this->settings.SegSize + 1;
         }
 
+        this->segment.clear();
         this->segment.seekp(static_cast<std::streamoff>(startOffset), std::ios::beg);
 
         if (!this->segment.good()) {
@@ -86,6 +87,8 @@ namespace Zest {
     std::string DataSegment::read(unsigned long offset, unsigned int size) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
+        // A read past the end leaves eof/fail set, which would make every later seek on this stream fail
+        this->segment.clear();
         this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 
         if (!this->segment.good()) {
