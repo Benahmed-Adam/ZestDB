@@ -78,7 +78,28 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, mergedArray.dump(), totalMatches };
     }
 
+    std::vector<std::string> ShardManager::firstMatchingKeys(const ValidationRule& valid) {
+        std::vector<std::string> keys;
+        for (auto& shard : this->shards) {
+            std::vector<std::string> shardKeys = shard->matchingKeys(valid);
+            keys.insert(keys.end(), std::make_move_iterator(shardKeys.begin()), std::make_move_iterator(shardKeys.end()));
+        }
+        std::sort(keys.begin(), keys.end());
+        if (keys.size() > valid.limit) {
+            keys.resize(valid.limit);
+        }
+        return keys;
+    }
+
     ResultType ShardManager::setBy(ValidationRule& valid, const std::string& value) {
+        if (valid.limit != UINT_MAX) {
+            long long updated = 0;
+            for (const auto& key : this->firstMatchingKeys(valid)) {
+                updated += this->set(key, value).code == ResultType::Code::SUCCESS;
+            }
+            return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", updated), updated };
+        }
+
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -106,6 +127,14 @@ namespace Zest {
     }
 
     ResultType ShardManager::delBy(ValidationRule& valid) {
+        if (valid.limit != UINT_MAX) {
+            long long deleted = 0;
+            for (const auto& key : this->firstMatchingKeys(valid)) {
+                deleted += this->del(key).code == ResultType::Code::SUCCESS;
+            }
+            return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", deleted), deleted };
+        }
+
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -161,7 +190,7 @@ namespace Zest {
             allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }
 
-        std::sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.timestamp < b.timestamp; });
+        std::stable_sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.seq < b.seq; });
 
         for (const auto& entry : allWalEntries) {
             ZestLog(LogLevel::DEBUG, std::format("WAL replay command: {}", entry.cmd));
@@ -170,13 +199,12 @@ namespace Zest {
         }
 
         this->flush();
-        this->clearAllWAL();
     }
 
-    void ShardManager::appendToWAL(const std::string& key, const std::string& command) {
+    bool ShardManager::appendToWAL(const std::string& key, const std::string& command) {
         int shardId = this->getShardId(key);
         auto& shard = this->getShards()[static_cast<size_t>(shardId)];
-        shard->getWAL().append(command);
+        return shard->getWAL().append(command);
     }
 
     void ShardManager::reloadSettings(Settings& set) {

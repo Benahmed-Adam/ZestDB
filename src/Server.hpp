@@ -45,7 +45,7 @@ namespace Zest {
 
     class Server {
     public:
-        Server(asio::io_context& io_context, short port, ZestDB& db);
+        Server(asio::io_context& io_context, uint16_t port, ZestDB& db);
 
     private:
         void do_accept();

@@ -38,6 +38,7 @@ namespace Zest {
 
         ResultType execCmd(const std::string& command);
         bool validateToken(const std::string& username, const std::string& token) const;
+        bool isAddressAllowed(const std::string& ip);
         void stop();
 
         Settings settings;
@@ -52,12 +53,13 @@ namespace Zest {
         bool validateValue(std::string_view value) const;
         bool isJsonValid(std::string_view value) const;
         void flush();
+        void flushLocked();
         void replayWAL();
         std::string help() const;
         CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
-        void appendToWAL(const std::string& key, const std::string& command);
+        bool appendToWAL(const std::string& key, const std::string& command);
 
-        Settings loadConfig();
+        Settings loadConfig(std::unordered_map<std::string, std::string>& usersOut);
         ResultType reloadConfig();
         void setConfig();
         std::string getConfig() const;
@@ -65,6 +67,7 @@ namespace Zest {
         bool createArchive();
 
         std::unordered_map<std::string, std::string> users;
+        mutable std::shared_mutex usersMtx;
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<Server> socket;
 

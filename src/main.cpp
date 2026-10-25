@@ -11,11 +11,8 @@
 void populate(Zest::ZestDB* db) {
     auto start = std::chrono::high_resolution_clock::now();
 
-    for (int i = 0; i < 1000000; ++i) {
-        std::string key = "key_" + std::to_string(i);
-        std::string value = "val_" + std::to_string(i);
-
-        db->set(key, value);
+    for (int i = 0; i < 1000000 && db->settings.isRunning; ++i) {
+        db->execCmd(std::format("s key_{} val_{}", i, i));
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -68,9 +65,9 @@ int main(int argc, char** argv) {
         }
     });
 
+    std::thread popThread;
     if (argc > 1 && std::string(argv[1]) == "pop") {
-        std::thread t(populate, &db);
-        t.detach();
+        popThread = std::thread(populate, &db);
     }
 
     std::thread cmdThread(cmd, &db, &work);
@@ -81,6 +78,9 @@ int main(int argc, char** argv) {
 
     cmdThread.join();
     ioThread.join();
+    if (popThread.joinable()) {
+        popThread.join();
+    }
 
     return 0;
 }

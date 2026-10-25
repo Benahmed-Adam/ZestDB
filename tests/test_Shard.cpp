@@ -1,7 +1,9 @@
 #include <atomic>
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <functional>
 #include <format>
+#include <fstream>
 #include <thread>
 
 #include "Shard.hpp"
@@ -221,4 +223,61 @@ TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disabl
     shard.set("key2", "value2");
     REQUIRE(shard.get("key1").response == "value1");
     REQUIRE(shard.get("key2").response == "value2");
+}
+
+static size_t segmentFiles(const fs::path& segDir) {
+    return static_cast<size_t>(std::distance(fs::directory_iterator(segDir), fs::directory_iterator()));
+}
+
+static bool waitFor(const std::function<bool()>& condition) {
+    for (int i = 0; i < 50 && !condition(); i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return condition();
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard does not return a value truncated on disk", "[shard]") {
+    {
+        Shard shard(settings, 0);
+        shard.set("key1", "a value long enough to truncate");
+    }
+    fs::resize_file(testDir / "shards" / "0" / "seg" / "1.seg", 5);
+    Shard shard(settings, 0);
+    REQUIRE(shard.get("key1").code == ResultType::Code::ERROR);
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard compactor removes dead segments once every key is deleted", "[shard]") {
+    settings.SegSize = 64;
+    settings.CompactingInterval = 1;
+    Shard shard(settings, 0);
+    for (int i = 0; i < 20; i++) {
+        shard.set(std::format("k{}", i), "0123456789");
+    }
+    for (int i = 0; i < 20; i++) {
+        shard.del(std::format("k{}", i));
+    }
+    const fs::path segDir = testDir / "shards" / "0" / "seg";
+    REQUIRE(waitFor([&] { return segmentFiles(segDir) == 0; }));
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard compactor reclaims mostly dead segments and keeps their live values", "[shard]") {
+    settings.SegSize = 64;
+    settings.CompactingInterval = 1;
+    const fs::path seg1 = testDir / "shards" / "0" / "seg" / "1.seg";
+    {
+        Shard shard(settings, 0);
+        for (int i = 0; i < 20; i++) {
+            shard.set(std::format("k{}", i), std::format("old_{:05}", i));
+        }
+        for (int i = 1; i < 20; i++) {
+            shard.set(std::format("k{}", i), std::format("new_{:05}", i));
+        }
+        REQUIRE(waitFor([&] { return !fs::exists(seg1); }));
+        REQUIRE(shard.get("k0").response == "old_00000");
+    }
+    Shard reopened(settings, 0);
+    REQUIRE(reopened.get("k0").response == "old_00000");
+    for (int i = 1; i < 20; i++) {
+        REQUIRE(reopened.get(std::format("k{}", i)).response == std::format("new_{:05}", i));
+    }
 }

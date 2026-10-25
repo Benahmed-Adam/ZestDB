@@ -1,5 +1,6 @@
 #include "StorageManager.hpp"
 
+#include <charconv>
 #include <format>
 #include <mutex>
 #include <unordered_set>
@@ -17,12 +18,18 @@ namespace Zest {
     void StorageManager::boot() {
         int nb = 0;
         for (auto& entry : std::filesystem::directory_iterator(this->settings.DbPath / "seg")) {
-            std::string ext = entry.path().extension();
-            if (ext == ".seg") {
-                uint32_t segId = static_cast<uint32_t>(std::stoi(entry.path().filename()));
-                this->segments[segId] = std::make_unique<DataSegment>(this->settings, segId);
-                nb++;
+            if (entry.path().extension() != ".seg") {
+                continue;
             }
+            std::string stem = entry.path().stem().string();
+            uint32_t segId;
+            auto [end, ec] = std::from_chars(stem.data(), stem.data() + stem.size(), segId);
+            if (ec != std::errc() || end != stem.data() + stem.size()) {
+                ZestLog(LogLevel::WARNING, std::format("StorageManager - Ignoring unexpected file: {}", entry.path().string()));
+                continue;
+            }
+            this->segments[segId] = std::make_unique<DataSegment>(this->settings, segId);
+            nb++;
         }
 
         if (nb == 0) {
@@ -115,10 +122,16 @@ namespace Zest {
         }
     }
 
-    void StorageManager::flush() {
+    bool StorageManager::flush() {
+        bool ok = true;
         for (auto& [id, seg] : this->segments) {
-            seg->flush();
+            ok = seg->flush() && ok;
         }
+        return ok;
+    }
+
+    uint32_t StorageManager::currentSegmentId() const {
+        return this->latestSegmentId.load();
     }
 
 } // namespace Zest

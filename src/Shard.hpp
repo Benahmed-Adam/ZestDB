@@ -26,6 +26,7 @@ namespace Zest {
         ResultType getBy(ValidationRule& valid);
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
+        std::vector<std::string> matchingKeys(const ValidationRule& valid);
 
         void flush();
         void stop();
@@ -56,6 +57,7 @@ namespace Zest {
         void boot();
         void fillCache();
         void verifyIndexEntries();
+        void compactSegments(std::vector<IndexEntry> entries);
 
         std::unique_ptr<WAL> wal;
         std::unique_ptr<IndexManager> indexManager;

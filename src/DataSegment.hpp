@@ -19,7 +19,7 @@ namespace Zest {
         uint32_t getSegmentId() const;
         unsigned long getWritePosition() const;
         void refreshFullStatus();
-        void flush();
+        bool flush();
 
     private:
         void openSegment();

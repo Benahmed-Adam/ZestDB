@@ -19,7 +19,8 @@ namespace Zest {
         IndexEntry append(const std::string& value);
         std::string read(const IndexEntry& entry);
         void removeUnusedSegments(const std::vector<uint32_t>& usedSegmentIds);
-        void flush();
+        bool flush();
+        uint32_t currentSegmentId() const;
 
     private:
         void boot();

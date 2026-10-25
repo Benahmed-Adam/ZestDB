@@ -87,7 +87,6 @@ namespace Zest {
     std::string DataSegment::read(unsigned long offset, unsigned int size) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
-        // A read past the end leaves eof/fail set, which would make every later seek on this stream fail
         this->segment.clear();
         this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 
@@ -101,12 +100,10 @@ namespace Zest {
 
         this->segment.read(&res[0], size);
 
-        if (!this->segment.good() && !this->segment.eof()) {
-            ZestLog(LogLevel::ERROR, "DataSegment::read - read failed");
+        if (static_cast<unsigned int>(this->segment.gcount()) != size) {
+            ZestLog(LogLevel::ERROR, std::format("DataSegment::read - expected {} bytes at offset {} in segment {}, got {}", size, offset, this->segmentId, this->segment.gcount()));
             return "";
         }
-
-        res.resize(static_cast<std::string::size_type>(this->segment.gcount()));
         return res;
     }
 
@@ -118,13 +115,16 @@ namespace Zest {
         return this->segmentId;
     }
 
-    void DataSegment::flush() {
+    bool DataSegment::flush() {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         if (this->canFlush) {
-            flush_and_fsync(this->segment);
+            if (!flush_and_fsync(this->segment)) {
+                return false;
+            }
             this->canFlush = false;
         }
+        return true;
     }
 
 } // namespace Zest

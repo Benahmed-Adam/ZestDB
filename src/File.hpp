@@ -1,12 +1,21 @@
+#pragma once
+
+#include <cerrno>
+#include <cstring>
 #include <ext/stdio_filebuf.h>
 #include <fstream>
+#include <unistd.h>
 
 #include "Logger.hpp"
 
 namespace Zest {
 
-    inline void flush_and_fsync(std::fstream& fs) {
+    inline bool flush_and_fsync(std::fstream& fs) {
         fs.flush();
+        if (!fs.good()) {
+            ZestLog(LogLevel::ERROR, "flush_and_fsync - flush failed");
+            return false;
+        }
 
         struct GnuFileBuf : std::filebuf {
             int get_fd() {
@@ -15,16 +24,22 @@ namespace Zest {
         };
 
         auto* buf = static_cast<GnuFileBuf*>(fs.rdbuf());
-        if (buf && fs.is_open()) {
-            int fd = buf->get_fd();
-            if (fd != -1) {
-                ZestLog(LogLevel::DEBUG, "Flushing and syncing file descriptor: " + std::to_string(fd));
-                ::fdatasync(fd);
-            } else {
-                ZestLog(LogLevel::ERROR, "Invalid file descriptor (-1).");
-            }
-        } else {
+        if (!buf || !fs.is_open()) {
             ZestLog(LogLevel::ERROR, "Stream is not open or invalid buffer.");
+            return false;
         }
+
+        int fd = buf->get_fd();
+        if (fd == -1) {
+            ZestLog(LogLevel::ERROR, "Invalid file descriptor (-1).");
+            return false;
+        }
+
+        ZestLog(LogLevel::DEBUG, "Flushing and syncing file descriptor: " + std::to_string(fd));
+        if (::fdatasync(fd) != 0) {
+            ZestLog(LogLevel::ERROR, std::string("fdatasync failed: ") + std::strerror(errno));
+            return false;
+        }
+        return true;
     }
 } // namespace Zest

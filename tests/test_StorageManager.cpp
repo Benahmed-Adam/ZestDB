@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include "Settings.hpp"
 #include "StorageManager.hpp"
@@ -101,4 +102,17 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager append multiple values r
     REQUIRE(sm.read(e1) == "val1");
     REQUIRE(sm.read(e2) == "val2");
     REQUIRE(sm.read(e3) == "val3");
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager ignores .seg files that are not numbered", "[storagemanager]") {
+    {
+        StorageManager sm(settings);
+        sm.append("value");
+    }
+    for (const char* name : { "backup.seg", "12abc.seg" }) {
+        std::ofstream(testDir / "seg" / name) << "junk";
+    }
+    std::unique_ptr<StorageManager> sm;
+    REQUIRE_NOTHROW(sm = std::make_unique<StorageManager>(settings));
+    REQUIRE(sm->read({ "", 0, 1, 5, false }) == "value");
 }

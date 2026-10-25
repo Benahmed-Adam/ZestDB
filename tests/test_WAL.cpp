@@ -1,7 +1,9 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include "WAL.hpp"
+#include "File.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -61,7 +63,7 @@ TEST_CASE_METHOD(WALFixture, "WAL getCmds empty WAL", "[wal]") {
     REQUIRE(cmds.empty());
 }
 
-TEST_CASE_METHOD(WALFixture, "WAL getCmds multiple entries ordered by timestamp", "[wal]") {
+TEST_CASE_METHOD(WALFixture, "WAL getCmds multiple entries ordered by sequence", "[wal]") {
     WAL wal(settings, walPath);
     wal.append("cmd1");
     wal.append("cmd2");
@@ -69,7 +71,7 @@ TEST_CASE_METHOD(WALFixture, "WAL getCmds multiple entries ordered by timestamp"
     auto cmds = wal.getCmds();
     REQUIRE(cmds.size() == 3);
     for (size_t i = 1; i < cmds.size(); i++) {
-        REQUIRE(cmds[i].timestamp >= cmds[i - 1].timestamp);
+        REQUIRE(cmds[i].seq > cmds[i - 1].seq);
     }
 }
 
@@ -111,4 +113,53 @@ TEST_CASE_METHOD(WALFixture, "WAL append reaches the file without fsyncOnWrite",
     WAL wal(settings, walPath);
     wal.append("s key value");
     REQUIRE(fs::file_size(walPath) > 0);
+}
+
+TEST_CASE_METHOD(WALFixture, "WAL sequence numbers order entries across WAL files", "[wal]") {
+    WAL a(settings, walPath);
+    WAL b(settings, testDir / "WAL2");
+    REQUIRE(a.append("a1"));
+    REQUIRE(b.append("b1"));
+    REQUIRE(a.append("a2"));
+    auto ca = a.getCmds();
+    auto cb = b.getCmds();
+    REQUIRE(ca.size() == 2);
+    REQUIRE(cb.size() == 1);
+    REQUIRE(ca[0].seq < cb[0].seq);
+    REQUIRE(cb[0].seq < ca[1].seq);
+}
+
+TEST_CASE_METHOD(WALFixture, "WAL replays a record larger than 1 MB and the ones after it", "[wal]") {
+    WAL wal(settings, walPath);
+    std::string big(2 * 1024 * 1024, 'x');
+    REQUIRE(wal.append(big));
+    REQUIRE(wal.append("after"));
+    auto cmds = wal.getCmds();
+    REQUIRE(cmds.size() == 2);
+    REQUIRE(cmds[0].cmd == big);
+    REQUIRE(cmds[1].cmd == "after");
+}
+
+TEST_CASE_METHOD(WALFixture, "WAL stops on a truncated record instead of allocating its announced size", "[wal]") {
+    {
+        WAL wal(settings, walPath);
+        REQUIRE(wal.append("ok"));
+    }
+    {
+        std::ofstream raw(walPath, std::ios::binary | std::ios::app);
+        uint32_t hugeSize = 0xFFFFFFF0;
+        raw.write(reinterpret_cast<const char*>(&hugeSize), sizeof(hugeSize));
+    }
+    WAL wal(settings, walPath);
+    auto cmds = wal.getCmds();
+    REQUIRE(cmds.size() == 1);
+    REQUIRE(cmds[0].cmd == "ok");
+}
+
+TEST_CASE_METHOD(WALFixture, "flush_and_fsync reports a stream that is not open", "[wal]") {
+    std::fstream closed;
+    REQUIRE_FALSE(flush_and_fsync(closed));
+    std::fstream open(walPath, std::ios::out | std::ios::binary);
+    open << "data";
+    REQUIRE(flush_and_fsync(open));
 }

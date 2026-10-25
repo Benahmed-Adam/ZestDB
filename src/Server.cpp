@@ -15,11 +15,17 @@ namespace Zest {
     }
 
     void Session::start() {
-        std::string remote_ip = std::visit([](auto& s) { return s.lowest_layer().remote_endpoint().address().to_string(); }, stream_);
+        std::error_code endpointError;
+        tcp::endpoint remote = std::visit([&endpointError](auto& s) { return s.lowest_layer().remote_endpoint(endpointError); }, stream_);
+        if (endpointError) {
+            ZestLog(LogLevel::INFO, std::format("Session: client left before the session started: {}", endpointError.message()));
+            this->close_stream();
+            return;
+        }
+        std::string remote_ip = remote.address().to_string();
+        unsigned short int remote_port = remote.port();
 
-        unsigned short int remote_port = std::visit([](auto& s) { return s.lowest_layer().remote_endpoint().port(); }, stream_);
-
-        if (!std::regex_match(remote_ip, this->db_.settings.NetworkValidation)) {
+        if (!this->db_.isAddressAllowed(remote_ip)) {
             ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", remote_ip));
             this->queue_write("unauthorized", true);
             return;
@@ -112,6 +118,9 @@ namespace Zest {
                                             cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
                                             should_close = true;
                                         }
+                                    } else {
+                                        cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+                                        should_close = true;
                                     }
                                 } else {
                                     cmd_result = ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
@@ -178,13 +187,14 @@ namespace Zest {
             this->stream_);
     }
 
-    Server::Server(asio::io_context& io_context, short port, ZestDB& db)
-        : ssl_context_(asio::ssl::context::sslv23),
-          acceptor_(io_context, tcp::endpoint(tcp::v4(), static_cast<asio::ip::port_type>(port))),
+    Server::Server(asio::io_context& io_context, uint16_t port, ZestDB& db)
+        : ssl_context_(asio::ssl::context::tls_server),
+          acceptor_(io_context, tcp::endpoint(tcp::v4(), port)),
           db_(db) {
         ZestLog(LogLevel::INFO, std::format("Server: listening on port {}", port));
         if (db.settings.useSSL) {
-            ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::sslv23);
+            ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 |
+                                     asio::ssl::context::single_dh_use);
             ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath);
             ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath, asio::ssl::context::pem);
         }

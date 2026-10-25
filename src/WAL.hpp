@@ -1,6 +1,6 @@
 #pragma once
 
-#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -12,14 +12,14 @@ namespace Zest {
 
     struct WalEntry {
         std::string cmd;
-        std::chrono::milliseconds timestamp;
+        uint64_t seq;
     };
 
     class WAL {
     public:
         WAL(Settings& set, const std::filesystem::path& walPath);
         void clear();
-        void append(const std::string& cmd);
+        bool append(const std::string& cmd);
         std::vector<WalEntry> getCmds();
 
     private:

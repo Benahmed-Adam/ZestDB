@@ -1,6 +1,6 @@
 #include "WAL.hpp"
 
-#include <algorithm>
+#include <atomic>
 #include <format>
 #include <iostream>
 
@@ -8,6 +8,8 @@
 #include "Logger.hpp"
 
 namespace Zest {
+
+    static std::atomic<uint64_t> nextSeq{ 0 };
 
     WAL::WAL(Settings& set, const std::filesystem::path& walPath)
         : settings(set),
@@ -34,30 +36,28 @@ namespace Zest {
         }
     }
 
-    void WAL::append(const std::string& cmd) {
+    bool WAL::append(const std::string& cmd) {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->wal.is_open()) {
             ZestLog(LogLevel::ERROR, "WAL::append - WAL not open");
-            return;
+            return false;
         }
-        uint32_t size = cmd.size();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
+        this->wal.clear();
+        this->canClear = true;
+
+        uint32_t size = static_cast<uint32_t>(cmd.size());
+        uint64_t seq = nextSeq.fetch_add(1);
 
         this->wal.write(reinterpret_cast<const char*>(&size), sizeof(size));
         this->wal.write(cmd.c_str(), static_cast<long int>(size));
-        this->wal.write(reinterpret_cast<const char*>(&timestamp), sizeof(timestamp));
+        this->wal.write(reinterpret_cast<const char*>(&seq), sizeof(seq));
         this->wal.put('\n');
 
-        if (this->settings.fsyncOnWrite) {
-            flush_and_fsync(this->wal);
-        } else {
-            this->wal.flush();
-        }
-
-        if (!this->wal.good()) {
+        bool ok = this->settings.fsyncOnWrite ? flush_and_fsync(this->wal) : this->wal.flush().good();
+        if (!ok) {
             ZestLog(LogLevel::ERROR, "WAL::append - Write failed");
         }
-        this->canClear = true;
+        return ok;
     }
 
     std::vector<WalEntry> WAL::getCmds() {
@@ -70,19 +70,21 @@ namespace Zest {
         }
 
         this->wal.clear();
+        this->wal.seekg(0, std::ios::end);
+        const std::streamoff fileSize = this->wal.tellg();
         this->wal.seekg(0, std::ios::beg);
 
         uint32_t size;
-        std::chrono::milliseconds timestamp;
+        uint64_t seq;
         while (this->wal.read(reinterpret_cast<char*>(&size), sizeof(size))) {
-            if (size > 1000000) {
-                ZestLog(LogLevel::WARNING, "WAL::getCmds - Invalid size, stopping");
+            if (static_cast<std::streamoff>(size) > fileSize - this->wal.tellg()) {
+                ZestLog(LogLevel::WARNING, "WAL::getCmds - Truncated record, stopping");
                 break;
             }
             std::string cmd(size, '\0');
             if (this->wal.read(&cmd[0], static_cast<long int>(size))) {
-                if (this->wal.read(reinterpret_cast<char*>(&timestamp), sizeof(timestamp))) {
-                    res.push_back({ std::move(cmd), timestamp });
+                if (this->wal.read(reinterpret_cast<char*>(&seq), sizeof(seq))) {
+                    res.push_back({ std::move(cmd), seq });
                 } else {
                     break;
                 }
@@ -94,8 +96,6 @@ namespace Zest {
                 this->wal.get();
             }
         }
-
-        std::sort(res.begin(), res.end(), [](const WalEntry& a, const WalEntry& b) { return a.timestamp < b.timestamp; });
 
         this->wal.clear();
         this->wal.seekg(0, std::ios::end);

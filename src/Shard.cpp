@@ -8,6 +8,7 @@
 #include <regex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "Logger.hpp"
@@ -93,33 +94,19 @@ namespace Zest {
             ZestLog(LogLevel::INFO, "Starting the compactor...");
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.CompactingInterval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                unsigned int interval;
+                {
+                    std::shared_lock<std::shared_mutex> settingsLock(this->readMtx);
+                    interval = this->settings.CompactingInterval;
+                }
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
                 }
 
                 std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
-                std::vector<IndexEntry> entries = indexManager->compact();
-
-                if (entries.empty()) {
-                    ZestLog(LogLevel::DEBUG, "Compactor - index is empty, skipping segment cleanup");
-                    continue;
-                }
-
-                std::vector<uint32_t> usedSegmentIds;
-                for (const auto& entry : entries) {
-                    if (!entry.isTombstone && entry.segmentId != INVALID_SEGMENT_ID) {
-                        if (std::find(usedSegmentIds.begin(), usedSegmentIds.end(), entry.segmentId) == usedSegmentIds.end()) {
-                            usedSegmentIds.push_back(entry.segmentId);
-                        }
-                    }
-                }
-
-                if (!usedSegmentIds.empty()) {
-                    storageManager->removeUnusedSegments(usedSegmentIds);
-                }
-
+                this->compactSegments(indexManager->compact());
                 ZestLog(LogLevel::DEBUG, "Compactor - compaction done, waiting...");
             }
             ZestLog(LogLevel::INFO, "Stopping the compactor...");
@@ -130,6 +117,44 @@ namespace Zest {
         if (cacheThread.joinable()) {
             cacheThread.join();
         }
+    }
+
+    void Shard::compactSegments(std::vector<IndexEntry> entries) {
+        std::unordered_map<uint32_t, uint64_t> liveBytes;
+        for (const auto& entry : entries) {
+            liveBytes[entry.segmentId] += entry.size;
+        }
+
+        const uint32_t current = this->storageManager->currentSegmentId();
+        bool moved = false;
+        for (auto& entry : entries) {
+            if (entry.segmentId == current || liveBytes[entry.segmentId] * 2 >= this->settings.SegSize) {
+                continue;
+            }
+            std::string value = this->storageManager->read(entry);
+            if (value.empty()) {
+                continue;
+            }
+            IndexEntry relocated = this->storageManager->append(value);
+            if (relocated.segmentId == INVALID_SEGMENT_ID) {
+                continue;
+            }
+            relocated.key = entry.key;
+            this->indexManager->insert(relocated);
+            entry = relocated;
+            moved = true;
+        }
+
+        if (moved && !(this->storageManager->flush() && this->indexManager->flush())) {
+            ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed after relocating values, keeping the old segments", this->shardId));
+            return;
+        }
+
+        std::vector<uint32_t> usedSegmentIds;
+        for (const auto& entry : entries) {
+            usedSegmentIds.push_back(entry.segmentId);
+        }
+        this->storageManager->removeUnusedSegments(usedSegmentIds);
     }
 
     void Shard::fillCache() {
@@ -150,6 +175,9 @@ namespace Zest {
             seenKeys.insert(entries[i].key);
 
             std::string value = this->storageManager->read(entries[i]);
+            if (value.empty()) {
+                continue;
+            }
             this->cache->put(entries[i], value);
             numKeysInserted++;
         }
@@ -176,6 +204,9 @@ namespace Zest {
 
         if (entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone) {
             std::string value = this->storageManager->read(entry);
+            if (value.empty()) {
+                return { ResultType::Code::ERROR, Messages::READ_FAILED, 0 };
+            }
 
             this->cache->put(entry, value);
 
@@ -266,6 +297,9 @@ namespace Zest {
                     }
                 }
                 std::string value = this->storageManager->read(entry);
+                if (value.empty()) {
+                    continue;
+                }
                 resultArray.push_back(nlohmann::json::object({ { entry.key, value } }));
                 matchCount++;
             }
@@ -364,11 +398,20 @@ namespace Zest {
         return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", matchCount), matchCount };
     }
 
+    std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+        std::vector<std::string> keys = this->indexManager->keys();
+        std::erase_if(keys, [&valid](const std::string& key) { return !valid.func(key); });
+        return keys;
+    }
+
     void Shard::flush() {
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
-        this->indexManager->flush();
-        this->storageManager->flush();
-        this->wal->clear();
+        if (this->storageManager->flush() && this->indexManager->flush()) {
+            this->wal->clear();
+        } else {
+            ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed, keeping the WAL", this->shardId));
+        }
     }
 
     void Shard::stop() {
@@ -419,6 +462,7 @@ namespace Zest {
         fs::path indexPath = shardPath / "INDEX";
         fs::path walPath = shardPath / "WAL";
 
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
         this->settings = set;
 
         this->settings.DbPath = shardPath;

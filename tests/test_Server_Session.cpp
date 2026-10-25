@@ -101,3 +101,9 @@ TEST_CASE_METHOD(SessionFixture, "Session refuses an oversized payload before au
     Client c;
     REQUIRE(c.sendRaw(be32(0xFFFFFFFF)).find(Messages::PAYLOAD_TOO_LARGE) != std::string::npos);
 }
+
+TEST_CASE_METHOD(SessionFixture, "Session closes the connection on an Authorization without a token", "[session]") {
+    Client c;
+    REQUIRE(c.send("Authorization: bob").find(Messages::AUTH_FAILED) != std::string::npos);
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).empty());
+}

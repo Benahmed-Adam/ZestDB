@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <climits>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <regex>
@@ -55,6 +56,8 @@ namespace Zest {
         static constexpr const char* INVALID_VALUE = "The value does not respect the value validation rule !";
         static constexpr const char* MISSING_ARGUMENTS = "Not enough arguments provided !";
         static constexpr const char* UPDATE_SUCCESSFUL = "Values successfuly updated !";
+        static constexpr const char* READ_FAILED = "Failed to read the value from disk !";
+        static constexpr const char* WAL_WRITE_FAILED = "The write was applied but could not be logged in the WAL !";
         static constexpr const char* PAYLOAD_TOO_LARGE = "Payload too large !";
         static constexpr const char* INVALID_LIMIT = "Invalid limit ! lim expects a positive integer";
         static constexpr const char* INVALID_MODE = "Invalid mode ! Use a mode between re, sw, ct, ew";
@@ -74,8 +77,8 @@ namespace Zest {
         unsigned int CacheSize;
         unsigned int CompactingInterval;
         unsigned int FlushInterval;
-        short DBPort;
-        short WebPort;
+        uint16_t DBPort;
+        uint16_t WebPort;
 
         std::regex NetworkValidation;
         std::string NetworkValidationStr;

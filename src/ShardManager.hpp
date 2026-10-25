@@ -27,7 +27,7 @@ namespace Zest {
         void stop();
         void clearAllWAL();
         void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
-        void appendToWAL(const std::string& key, const std::string& command);
+        bool appendToWAL(const std::string& key, const std::string& command);
 
         void reloadSettings(Settings& set);
 
@@ -37,6 +37,7 @@ namespace Zest {
 
     private:
         int getShardId(const std::string& key) const;
+        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid);
 
         Settings settings;
         int numShards;

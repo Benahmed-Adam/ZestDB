@@ -14,13 +14,7 @@ namespace Zest {
         ZestLog(LogLevel::INFO, "Opening INDEX file...");
         this->indexPath = set.IndexPath;
 
-        std::filesystem::path indexTmpPath(this->settings.DbPath / "INDEX.tmp");
-
-        if (std::filesystem::exists(indexTmpPath) && std::filesystem::file_size(indexTmpPath) > 0) {
-            std::filesystem::remove(this->indexPath);
-            std::filesystem::copy_file(indexTmpPath, this->indexPath);
-            std::filesystem::remove(indexTmpPath);
-        }
+        std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
 
         this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
         if (!this->index.is_open()) {
@@ -46,8 +40,8 @@ namespace Zest {
 
         this->index.seekg(0, std::ios::beg);
 
-        while (this->index.tellg() < fsize) {
-            std::streamoff position = this->index.tellg();
+        std::streamoff position = 0;
+        while (position < fsize) {
             IndexEntry entry;
             if (!entry.deserialize(this->index))
                 break;
@@ -55,12 +49,22 @@ namespace Zest {
             if (!entry.isTombstone) {
                 this->memoryTree[entry.key] = position;
             }
+            position = this->index.tellg();
+        }
+
+        this->index.clear();
+        if (position < fsize) {
+            ZestLog(LogLevel::WARNING, std::format("IndexManager - Truncating {} unreadable bytes at the end of the INDEX", fsize - position));
+            this->index.close();
+            std::filesystem::resize_file(this->indexPath, static_cast<std::uintmax_t>(position));
+            this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
         }
         ZestLog(LogLevel::INFO, "IndexManager - Loaded entries into memory tree.");
     }
 
     IndexEntry IndexManager::search(const std::string& key) {
         std::unique_lock<std::mutex> lock(this->mtx);
+        this->index.clear();
 
         auto it = this->memoryTree.find(key);
         if (it != this->memoryTree.end()) {
@@ -79,6 +83,7 @@ namespace Zest {
 
     void IndexManager::update(const std::string& key, const IndexEntry& entry) {
         std::unique_lock<std::mutex> lock(this->mtx);
+        this->index.clear();
 
         auto it = this->memoryTree.find(key);
         if (it != this->memoryTree.end()) {
@@ -95,6 +100,7 @@ namespace Zest {
 
     void IndexManager::insert(const IndexEntry& entry) {
         std::unique_lock<std::mutex> lock(this->mtx);
+        this->index.clear();
 
         auto it = this->memoryTree.find(entry.key);
         if (it != this->memoryTree.end()) {
@@ -118,6 +124,7 @@ namespace Zest {
     std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()>& stopEarly) {
         std::vector<IndexEntry> res;
         std::unique_lock<std::mutex> lock(this->mtx);
+        this->index.clear();
 
         res.reserve(this->memoryTree.size());
 
@@ -143,56 +150,65 @@ namespace Zest {
         return res;
     }
 
+    std::vector<std::string> IndexManager::keys() {
+        std::unique_lock<std::mutex> lock(this->mtx);
+        std::vector<std::string> res;
+        res.reserve(this->memoryTree.size());
+        for (const auto& [key, offset] : this->memoryTree) {
+            res.push_back(key);
+        }
+        return res;
+    }
+
     std::vector<IndexEntry> IndexManager::compact() {
         ZestLog(LogLevel::DEBUG, "Starting index compaction...");
-        std::filesystem::copy_file(this->settings.IndexPath, this->settings.DbPath / "INDEX.tmp", std::filesystem::copy_options::overwrite_existing);
 
         std::vector<IndexEntry> entries = this->getAll();
+        std::erase_if(entries, [](const IndexEntry& e) { return e.isTombstone || e.segmentId == INVALID_SEGMENT_ID; });
 
         std::unique_lock<std::mutex> lock(this->mtx);
 
-        this->index.close();
-        this->index.open(this->indexPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
+        const std::filesystem::path tmpPath = this->settings.DbPath / "INDEX.tmp";
+        std::fstream tmp(tmpPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
+        std::unordered_map<std::string, std::streamoff> newTree;
+        for (const auto& entry : entries) {
+            newTree[entry.key] = tmp.tellp();
+            entry.serialize(tmp);
+        }
 
-        if (!this->index.is_open()) {
-            ZestLog(LogLevel::ERROR, "Compact failed: could not reopen index file.");
+        std::error_code ec;
+        if (!tmp.good() || !flush_and_fsync(tmp)) {
+            ZestLog(LogLevel::ERROR, "Compact failed: could not write INDEX.tmp, keeping the current INDEX");
+            tmp.close();
+            std::filesystem::remove(tmpPath, ec);
+            return entries;
+        }
+        tmp.close();
+
+        this->index.close();
+        std::filesystem::rename(tmpPath, this->indexPath, ec);
+        this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
+        if (ec || !this->index.is_open()) {
+            ZestLog(LogLevel::ERROR, std::format("Compact failed: could not replace the INDEX: {}", ec.message()));
             return entries;
         }
 
-        this->memoryTree.clear();
-
-        std::vector<IndexEntry> result;
-
-        for (const auto& entry : entries) {
-            if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
-                continue;
-            }
-            std::streamoff newPos = this->index.tellp();
-
-            entry.serialize(this->index);
-            if (this->index.good()) {
-                this->memoryTree[entry.key] = newPos;
-                result.push_back(entry);
-            } else {
-                ZestLog(LogLevel::ERROR, std::format("Compact - Failed to write entry for key: {}", entry.key));
-            }
-        }
-
-        flush_and_fsync(this->index);
+        this->memoryTree = std::move(newTree);
         this->canFlush = false;
         ZestLog(LogLevel::DEBUG, "Index compaction completed successfully.");
-
-        std::filesystem::remove(this->settings.DbPath / "INDEX.tmp");
-        return result;
+        return entries;
     }
 
-    void IndexManager::flush() {
+    bool IndexManager::flush() {
         std::unique_lock<std::mutex> lock(this->mtx);
 
         if (this->canFlush) {
-            flush_and_fsync(this->index);
+            if (!flush_and_fsync(this->index)) {
+                return false;
+            }
             this->canFlush = false;
         }
+        return true;
     }
 
 } // namespace Zest

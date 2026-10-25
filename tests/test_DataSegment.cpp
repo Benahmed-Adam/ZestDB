@@ -69,11 +69,10 @@ TEST_CASE_METHOD(DataSegmentFixture, "DataSegment getSegmentId", "[datasegment]"
     REQUIRE(seg.getSegmentId() == 42);
 }
 
-TEST_CASE_METHOD(DataSegmentFixture, "DataSegment read beyond EOF returns partial", "[datasegment]") {
+TEST_CASE_METHOD(DataSegmentFixture, "DataSegment read beyond EOF returns nothing instead of a truncated value", "[datasegment]") {
     DataSegment seg(settings, 1);
     unsigned long offset = seg.write("hi");
-    std::string readBack = seg.read(offset, 100);
-    REQUIRE(readBack == "hi");
+    REQUIRE(seg.read(offset, 100).empty());
 }
 
 TEST_CASE_METHOD(DataSegmentFixture, "DataSegment multiple writes", "[datasegment]") {

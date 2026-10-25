@@ -1,10 +1,14 @@
 #include <catch2/catch_all.hpp>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <libzippp/libzippp.h>
+#include <thread>
 
 #include "ZestDB.hpp"
 #include "lib/json.hpp"
+#include "WAL.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -396,4 +400,111 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby regex without catastrophic bac
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby regex refuses back-references", "[commands]") {
     REQUIRE(db->execCmd(R"(gb re (a)\1)").response == Messages::INVALID_REGEX);
+}
+
+class TempDbDir {
+public:
+    fs::path dir;
+    fs::path originalCwd = fs::current_path();
+
+    TempDbDir(const std::string& name, const std::string& extraConfig, int port) {
+        dir = fs::temp_directory_path() / name;
+        fs::remove_all(dir);
+        fs::create_directories(dir);
+        writeConfig(std::format("DbPath: {}\nMaxKeySize: 255\nDBPort: {}\nWebPort: {}\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n{}", (dir / "db").string(), port, port + 1, (dir / "archive").string(), extraConfig));
+        fs::current_path(dir);
+    }
+
+    void writeConfig(const std::string& text) {
+        std::ofstream(dir / "config.yaml") << text;
+    }
+
+    ~TempDbDir() {
+        fs::current_path(originalCwd);
+        fs::remove_all(dir);
+    }
+};
+
+TEST_CASE("ZestDB WAL replay keeps writes that today's config would reject", "[commands]") {
+    TempDbDir tmp("zestdb_test_replay_policy", "readOnly: true\nMaxValueSize: 5\n", 29531);
+    fs::create_directories(tmp.dir / "db" / "shards" / "0");
+    {
+        Settings s;
+        s.fsyncOnWrite = false;
+        WAL wal(s, tmp.dir / "db" / "shards" / "0" / "WAL");
+        REQUIRE(wal.append("s replayed a value longer than five"));
+    }
+    ZestDB db;
+    REQUIRE(db.get("replayed").response == "a value longer than five");
+}
+
+TEST_CASE("ZestDB reload with a broken config keeps the users", "[commands]") {
+    TempDbDir tmp("zestdb_test_reload_users", "users:\n  - user: alice\n    password: secret\n", 29533);
+    ZestDB db;
+    REQUIRE(db.validateToken("alice", sha256("alicesecret")));
+    tmp.writeConfig("users: [\n  - user: {\n");
+    REQUIRE(db.execCmd("r").code == ResultType::Code::ERROR);
+    REQUIRE(db.validateToken("alice", sha256("alicesecret")));
+}
+
+TEST_CASE("ZestDB accepts ports above 32767", "[commands]") {
+    TempDbDir tmp("zestdb_test_high_port", "", 40123);
+    ZestDB db;
+    auto cfg = nlohmann::json::parse(db.execCmd("gcfg").response);
+    REQUIRE(cfg["DBPort"] == 40123);
+    REQUIRE(cfg["WebPort"] == 40124);
+}
+
+TEST_CASE("ZestDB refuses an interval of 0 seconds in the config", "[commands]") {
+    TempDbDir tmp("zestdb_test_zero_interval", "FlushInterval: 0\n", 29535);
+    REQUIRE_THROWS(ZestDB());
+}
+
+TEST_CASE("ZestDB archives do not contain previous archives", "[commands]") {
+    TempDbDir tmp("zestdb_test_archive_nesting", "", 29537);
+    tmp.writeConfig(std::format("DbPath: {}\nDBPort: 29537\nWebPort: 29538\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n", tmp.dir.string(), (tmp.dir / "archive").string()));
+    ZestDB db;
+    db.execCmd("s key value");
+    REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+
+    for (const auto& file : fs::directory_iterator(tmp.dir / "archive")) {
+        libzippp::ZipArchive zip(file.path().string());
+        REQUIRE(zip.open(libzippp::ZipArchive::ReadOnly));
+        for (const auto& entry : zip.getEntries()) {
+            REQUIRE_FALSE(entry.getName().ends_with(".zip"));
+        }
+        zip.close();
+    }
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby/delby with lim pick the smallest matching keys", "[commands]") {
+    for (const char* k : { "k5", "k2", "k9", "k1", "k7", "k3" }) {
+        db->set(k, "old");
+    }
+    REQUIRE(db->execCmd("sb sw k new lim 3").affectedRows == 3);
+    for (const char* k : { "k1", "k2", "k3" }) {
+        REQUIRE(db->get(k).response == "new");
+    }
+    for (const char* k : { "k5", "k7", "k9" }) {
+        REQUIRE(db->get(k).response == "old");
+    }
+    REQUIRE(db->execCmd("db sw k lim 2").affectedRows == 2);
+    REQUIRE(db->get("k1").code == ResultType::Code::ERROR);
+    REQUIRE(db->get("k2").code == ResultType::Code::ERROR);
+    REQUIRE(db->get("k3").response == "new");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set does not store trailing whitespace", "[commands]") {
+    db->execCmd("s key1 value  \r\n");
+    REQUIRE(db->get("key1").response == "value");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg refuses negative numbers and zero intervals", "[commands]") {
+    REQUIRE(db->execCmd("scfg cachesize -1").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg segsize -1").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg flushinterval 0").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg archivecreationdelay 0").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg compactinginterval 0").code == ResultType::Code::ERROR);
 }

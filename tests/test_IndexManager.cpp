@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <filesystem>
+#include <fstream>
 
 #include "IndexManager.hpp"
 
@@ -178,4 +179,58 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert after tombstone keeps
     REQUIRE(im2.search("b").offset == 10);
     REQUIRE(im2.search("a_much_longer_key").offset == 20);
     REQUIRE(im2.search("a").segmentId == INVALID_SEGMENT_ID);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager ignores a leftover INDEX.tmp from an interrupted compaction", "[indexmanager]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("keep", 1, 7));
+        im.flush();
+    }
+    {
+        std::ofstream tmp(testDir / "INDEX.tmp", std::ios::binary);
+        tmp << "partial garbage";
+    }
+    IndexManager im(settings);
+    REQUIRE(im.search("keep").offset == 7);
+    REQUIRE_FALSE(fs::exists(testDir / "INDEX.tmp"));
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager truncates a torn record so later inserts survive a restart", "[indexmanager]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("a", 1, 1));
+        im.flush();
+    }
+    {
+        std::ofstream raw(settings.IndexPath, std::ios::binary | std::ios::app);
+        raw << "torn";
+    }
+    {
+        IndexManager im(settings);
+        REQUIRE(im.search("a").offset == 1);
+        im.insert(makeEntry("b", 1, 2));
+        im.flush();
+    }
+    IndexManager im(settings);
+    REQUIRE(im.search("a").offset == 1);
+    REQUIRE(im.search("b").offset == 2);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager rejects an absurd key length instead of allocating it", "[indexmanager]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("a", 1, 1));
+        im.flush();
+    }
+    {
+        std::ofstream raw(settings.IndexPath, std::ios::binary | std::ios::app);
+        uint32_t klen = 0xFFFFFFFF;
+        raw.write(reinterpret_cast<const char*>(&klen), sizeof(klen));
+        std::string rest(17, '\0');
+        raw.write(rest.data(), static_cast<std::streamsize>(rest.size()));
+    }
+    std::unique_ptr<IndexManager> im;
+    REQUIRE_NOTHROW(im = std::make_unique<IndexManager>(settings));
+    REQUIRE(im->search("a").offset == 1);
 }

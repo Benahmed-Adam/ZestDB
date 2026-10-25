@@ -62,7 +62,7 @@ namespace Zest {
 #pragma pack(pop)
 
             Header header;
-            if (!is.read(reinterpret_cast<char*>(&header), sizeof(header))) {
+            if (!is.read(reinterpret_cast<char*>(&header), sizeof(header)) || header.klen > MAX_KEY_SIZE) {
                 return false;
             }
 
@@ -90,8 +90,9 @@ namespace Zest {
         void update(const std::string& key, const IndexEntry& entry);
         void insert(const IndexEntry& entry);
         std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX, const std::function<bool()>& stopEarly = {});
+        std::vector<std::string> keys();
         std::vector<IndexEntry> compact();
-        void flush();
+        bool flush();
 
     private:
         std::filesystem::path indexPath;

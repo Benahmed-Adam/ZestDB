@@ -76,8 +76,12 @@ namespace Zest {
             std::unique_lock<std::mutex> lock(this->flushThreadMtx);
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
-
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.FlushInterval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
+                unsigned int interval;
+                {
+                    std::shared_lock<std::shared_mutex> settingsLock(this->writeMtx);
+                    interval = this->settings.FlushInterval;
+                }
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
@@ -92,8 +96,8 @@ namespace Zest {
         this->saveThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->saveThreadMtx);
 
-            bool first_iteration = true;
             unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
+            unsigned int delay = 0;
             std::optional<fs::file_time_type> most_recent_time;
 
             if (!fs::exists(this->settings.ArchiveStoragePath) || !fs::is_directory(this->settings.ArchiveStoragePath)) {
@@ -121,28 +125,26 @@ namespace Zest {
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - most_recent_system).count();
 
                 if (elapsed >= 0 && static_cast<unsigned int>(elapsed) < archiveCreationDelay) {
-                    this->settings.ArchiveCreationDelay = archiveCreationDelay - static_cast<unsigned int>(elapsed);
-                } else {
-                    this->settings.ArchiveCreationDelay = 0;
+                    delay = archiveCreationDelay - static_cast<unsigned int>(elapsed);
                 }
-            } else {
-                this->settings.ArchiveCreationDelay = 0;
             }
 
             while (this->settings.isRunning && !stopToken.stop_requested()) {
 
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(this->settings.ArchiveCreationDelay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
-
-                if (first_iteration) {
-                    this->settings.ArchiveCreationDelay = archiveCreationDelay;
-                    first_iteration = false;
-                }
+                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(delay), [this, stopToken] { return stopToken.stop_requested() || !this->settings.isRunning; });
 
                 if (stopToken.stop_requested() || !this->settings.isRunning) {
                     break;
                 }
 
-                if (this->settings.AutoArchiveSaving) {
+                bool autoSave;
+                {
+                    std::shared_lock<std::shared_mutex> settingsLock(this->writeMtx);
+                    autoSave = this->settings.AutoArchiveSaving;
+                    delay = this->settings.ArchiveCreationDelay;
+                }
+
+                if (autoSave) {
                     lock.unlock();
                     ZestLog(LogLevel::INFO, this->createArchive() ? "Autosave completed" : "An error occured during zip creation");
                     lock.lock();
@@ -197,7 +199,7 @@ namespace Zest {
     }
 
     void ZestDB::boot() {
-        this->settings = std::move(this->loadConfig());
+        this->settings = this->loadConfig(this->users);
         setLoggerDebugMode(this->settings.isDebug);
 
         if (!this->settings.useSSL && !this->users.empty()) {
@@ -216,10 +218,9 @@ namespace Zest {
         return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : def;
     }
 
-    Settings ZestDB::loadConfig() {
+    Settings ZestDB::loadConfig(std::unordered_map<std::string, std::string>& usersOut) {
         Settings result;
-
-        this->users.clear();
+        std::unordered_map<std::string, std::string> parsedUsers;
 
         const fs::path current_path = fs::current_path().string();
         const std::string configName = "config.yaml";
@@ -247,8 +248,14 @@ namespace Zest {
             result.CacheSize = getOr<unsigned int>(node, "CacheSize", 1000);
             result.CompactingInterval = getOr<unsigned int>(node, "CompactingInterval", 3600);
             result.FlushInterval = getOr<unsigned int>(node, "FlushInterval", 120);
-            result.DBPort = getOr<short>(node, "DBPort", 7321);
-            result.WebPort = getOr<short>(node, "WebPort", 1237);
+            int dbPort = getOr<int>(node, "DBPort", 7321);
+            int webPort = getOr<int>(node, "WebPort", 1237);
+            if (dbPort < 1 || dbPort > 65535 || webPort < 1 || webPort > 65535) {
+                ZestLog(LogLevel::CRITICAL, "DBPort and WebPort must be between 1 and 65535");
+                throw std::runtime_error("Port out of range");
+            }
+            result.DBPort = static_cast<uint16_t>(dbPort);
+            result.WebPort = static_cast<uint16_t>(webPort);
 
             result.NetworkValidationStr = getOr<std::string>(node, "NetworkValidation", ".*");
             if (result.NetworkValidationStr.empty()) {
@@ -286,9 +293,9 @@ namespace Zest {
                 for (const auto& user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
                     if (user_node.contains("tokenHash")) {
-                        this->users[username] = user_node["tokenHash"].get_value<std::string>();
+                        parsedUsers[username] = user_node["tokenHash"].get_value<std::string>();
                     } else {
-                        this->users[username] = sha256(sha256(username + user_node["password"].get_value<std::string>()));
+                        parsedUsers[username] = sha256(sha256(username + user_node["password"].get_value<std::string>()));
                     }
                 }
             }
@@ -309,9 +316,9 @@ namespace Zest {
             result.MaxKeySize = MAX_KEY_SIZE;
         }
 
-        if (result.DBPort < 0 || result.WebPort < 0) {
-            ZestLog(LogLevel::CRITICAL, "Ports cant be lower that zero");
-            throw std::runtime_error("Port < 0");
+        if (result.FlushInterval == 0 || result.CompactingInterval == 0 || result.ArchiveCreationDelay == 0) {
+            ZestLog(LogLevel::CRITICAL, "FlushInterval, CompactingInterval and ArchiveCreationDelay must be at least 1 second");
+            throw std::runtime_error("Interval of 0 seconds");
         }
 
         if (result.DBPort == result.WebPort) {
@@ -319,13 +326,15 @@ namespace Zest {
             throw std::runtime_error("DBPort == WebPort");
         }
 
+        usersOut = std::move(parsedUsers);
         return result;
     }
 
     ResultType ZestDB::reloadConfig() {
         try {
             Settings oldSettings = this->settings;
-            Settings s = this->loadConfig();
+            std::unordered_map<std::string, std::string> newUsers;
+            Settings s = this->loadConfig(newUsers);
 
             if (s.DbPath != oldSettings.DbPath || s.ArchiveStoragePath != oldSettings.ArchiveStoragePath || s.IndexPath != oldSettings.IndexPath || s.WalPath != oldSettings.WalPath || s.SSLCertPath != oldSettings.SSLCertPath ||
                 s.SSLKeyPath != oldSettings.SSLKeyPath) {
@@ -342,6 +351,10 @@ namespace Zest {
             }
 
             this->settings = std::move(s);
+            {
+                std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+                this->users = std::move(newUsers);
+            }
             setLoggerDebugMode(this->settings.isDebug);
             this->shardManager->reloadSettings(this->settings);
             this->threadCV.notify_all();
@@ -375,8 +388,8 @@ namespace Zest {
         node["CacheSize"] = this->settings.CacheSize;
         node["CompactingInterval"] = this->settings.CompactingInterval;
         node["FlushInterval"] = this->settings.FlushInterval;
-        node["DBPort"] = this->settings.DBPort;
-        node["WebPort"] = this->settings.WebPort;
+        node["DBPort"] = static_cast<int>(this->settings.DBPort);
+        node["WebPort"] = static_cast<int>(this->settings.WebPort);
         node["NetworkValidation"] = this->settings.NetworkValidationStr;
         node["isDebug"] = this->settings.isDebug;
         node["jsonOnly"] = this->settings.jsonOnly;
@@ -421,6 +434,9 @@ namespace Zest {
     }
 
     bool ZestDB::createArchive() {
+        std::unique_lock<std::shared_mutex> lock(this->writeMtx);
+        this->flushLocked();
+
         std::string folder_to_zip = this->settings.DbPath.string();
 
         if (!fs::exists(folder_to_zip) || !fs::is_directory(folder_to_zip)) {
@@ -444,7 +460,14 @@ namespace Zest {
             return false;
         }
 
-        for (const auto& entry : fs::recursive_directory_iterator(folder_to_zip)) {
+        std::error_code ec;
+        const fs::path archiveDir = fs::weakly_canonical(this->settings.ArchiveStoragePath, ec);
+        for (auto it = fs::recursive_directory_iterator(folder_to_zip); it != fs::recursive_directory_iterator(); ++it) {
+            const auto& entry = *it;
+            if (entry.is_directory() && fs::weakly_canonical(entry.path(), ec) == archiveDir) {
+                it.disable_recursion_pending();
+                continue;
+            }
             if (fs::is_regular_file(entry.path())) {
                 fs::path relative_path = fs::relative(entry.path(), folder_to_zip);
 
@@ -468,13 +491,20 @@ namespace Zest {
     }
 
     bool ZestDB::validateToken(const std::string& username, const std::string& token) const {
-        if (this->users.find(username) == this->users.end()) {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        auto it = this->users.find(username);
+        if (it == this->users.end()) {
             return false;
         }
 
-        const std::string& expected = this->users.at(username);
+        const std::string& expected = it->second;
         const std::string actual = sha256(token);
         return actual.size() == expected.size() && CRYPTO_memcmp(actual.data(), expected.data(), actual.size()) == 0;
+    }
+
+    bool ZestDB::isAddressAllowed(const std::string& ip) {
+        std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+        return std::regex_match(ip, this->settings.NetworkValidation);
     }
 
     bool ZestDB::validateKey(std::string_view key) const {
@@ -506,11 +536,13 @@ namespace Zest {
     }
 
     ResultType ZestDB::set(const std::string& key, const std::string& value) {
-        if (this->settings.readOnly) {
+        const bool enforce = !this->replaying.load();
+
+        if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
 
-        if (!this->validateKey(key)) {
+        if (enforce && !this->validateKey(key)) {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
         }
 
@@ -518,11 +550,11 @@ namespace Zest {
             return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
         }
 
-        if (!this->validateValue(value)) {
+        if (enforce && !this->validateValue(value)) {
             return { ResultType::Code::ERROR, Messages::INVALID_VALUE };
         }
 
-        if (this->settings.jsonOnly) {
+        if (enforce && this->settings.jsonOnly) {
             if (!this->isJsonValid(value)) {
                 return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
             }
@@ -532,11 +564,13 @@ namespace Zest {
     }
 
     ResultType ZestDB::del(const std::string& key) {
-        if (this->settings.readOnly) {
+        const bool enforce = !this->replaying.load();
+
+        if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
 
-        if (!this->validateKey(key)) {
+        if (enforce && !this->validateKey(key)) {
             return { ResultType::Code::ERROR, Messages::INVALID_KEY };
         }
 
@@ -548,7 +582,9 @@ namespace Zest {
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value) {
-        if (this->settings.readOnly) {
+        const bool enforce = !this->replaying.load();
+
+        if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
 
@@ -556,11 +592,11 @@ namespace Zest {
             return { ResultType::Code::ERROR, Messages::VALUE_EMPTY };
         }
 
-        if (!this->validateValue(value)) {
+        if (enforce && !this->validateValue(value)) {
             return { ResultType::Code::ERROR, Messages::INVALID_VALUE };
         }
 
-        if (this->settings.jsonOnly) {
+        if (enforce && this->settings.jsonOnly) {
             if (!this->isJsonValid(value)) {
                 return { ResultType::Code::ERROR, Messages::JSON_ONLY_ERROR };
             }
@@ -570,7 +606,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid) {
-        if (this->settings.readOnly) {
+        if (!this->replaying.load() && this->settings.readOnly) {
             return { ResultType::Code::ERROR, Messages::READ_ONLY_ERROR };
         }
 
@@ -610,12 +646,12 @@ namespace Zest {
         return { valid, validMode };
     }
 
-    void ZestDB::appendToWAL(const std::string& key, const std::string& command) {
+    bool ZestDB::appendToWAL(const std::string& key, const std::string& command) {
         if (this->replaying.load()) {
-            return;
+            return true;
         }
 
-        this->shardManager->appendToWAL(key, command);
+        return this->shardManager->appendToWAL(key, command);
     }
 
     std::string toLowerStr(std::string_view str) {
@@ -624,7 +660,8 @@ namespace Zest {
         return result;
     }
 
-    bool parseUInt(std::string_view str, unsigned int& out) {
+    template <typename T>
+    static bool parseUInt(std::string_view str, T& out) {
         auto [end, ec] = std::from_chars(str.data(), str.data() + str.size(), out);
         return ec == std::errc() && end == str.data() + str.size();
     }
@@ -636,6 +673,7 @@ namespace Zest {
             return { ResultType::Code::ERROR, Messages::NO_COMMAND_GIVEN };
         }
         sv.remove_prefix(start);
+        sv.remove_suffix(sv.size() - 1 - sv.find_last_not_of(" \t\r\n"));
 
         std::vector<std::string_view> words;
         size_t pos = 0;
@@ -665,9 +703,12 @@ namespace Zest {
         }
 
         const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db";
-        std::shared_lock<std::shared_mutex> writeLock(this->writeMtx, std::defer_lock);
-        if (isWrite) {
-            writeLock.lock();
+        std::shared_lock<std::shared_mutex> sharedLock(this->writeMtx, std::defer_lock);
+        std::unique_lock<std::shared_mutex> uniqueLock(this->writeMtx, std::defer_lock);
+        if (cmd == "r" || cmd == "scfg") {
+            uniqueLock.lock();
+        } else if (cmd != "f" && cmd != "save") {
+            sharedLock.lock();
         }
 
         if (cmd == "g") {
@@ -682,7 +723,7 @@ namespace Zest {
             } else if (words.size() < 3) {
                 result.response = Messages::MISSING_VALUE;
             } else {
-                result = this->set(std::string(words[1]), command.substr(static_cast<size_t>(words[2].data() - command.data())));
+                result = this->set(std::string(words[1]), std::string(sv.substr(static_cast<size_t>(words[2].data() - sv.data()))));
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
@@ -722,18 +763,18 @@ namespace Zest {
                 unsigned int limit = UINT_MAX;
                 bool limitOk = true;
 
-                size_t valStart = static_cast<size_t>(words[3].data() - command.data());
-                size_t valEnd = command.size();
+                size_t valStart = static_cast<size_t>(words[3].data() - sv.data());
+                size_t valEnd = sv.size();
                 if (words.size() >= 6 && toLowerStr(words[words.size() - 2]) == "lim") {
                     limitOk = parseUInt(words.back(), limit);
                     std::string_view lastValueWord = words[words.size() - 3];
-                    valEnd = static_cast<size_t>(lastValueWord.data() + lastValueWord.size() - command.data());
+                    valEnd = static_cast<size_t>(lastValueWord.data() + lastValueWord.size() - sv.data());
                 }
 
                 if (!limitOk) {
                     result.response = Messages::INVALID_LIMIT;
                 } else {
-                    std::string value = command.substr(valStart, valEnd - valStart);
+                    std::string value(sv.substr(valStart, valEnd - valStart));
 
                     auto [valid, validMode] = this->createValidationRule(mode, pattern);
                     if (!validMode) {
@@ -787,69 +828,63 @@ namespace Zest {
 
             bool valueSet = false;
 
+            unsigned long ulongVal = 0;
+            unsigned int uintVal = 0;
+
             if (param == "segsize") {
-                try {
-                    unsigned long val = std::stoul(std::string(valueStr));
-                    if (val <= this->settings.MaxValueSize) {
-                        result.response = "SegSize must be greater than MaxValueSize";
-                        return result;
-                    }
-                    this->settings.SegSize = val;
-                    valueSet = true;
-                } catch (...) {
+                if (!parseUInt(valueStr, ulongVal)) {
                     result.response = "Invalid SegSize value";
                     return result;
                 }
+                if (ulongVal <= this->settings.MaxValueSize) {
+                    result.response = "SegSize must be greater than MaxValueSize";
+                    return result;
+                }
+                this->settings.SegSize = ulongVal;
+                valueSet = true;
             } else if (param == "maxkeysize") {
-                try {
-                    unsigned int val = std::stoul(std::string(valueStr));
-                    if (val > MAX_KEY_SIZE) {
-                        result.response = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
-                        return result;
-                    }
-                    this->settings.MaxKeySize = val;
-                    valueSet = true;
-                } catch (...) {
+                if (!parseUInt(valueStr, uintVal)) {
                     result.response = "Invalid MaxKeySize value";
                     return result;
                 }
+                if (uintVal > MAX_KEY_SIZE) {
+                    result.response = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
+                    return result;
+                }
+                this->settings.MaxKeySize = uintVal;
+                valueSet = true;
             } else if (param == "maxvaluesize") {
-                try {
-                    unsigned int val = std::stoul(std::string(valueStr));
-                    if (val >= this->settings.SegSize) {
-                        result.response = "MaxValueSize must be less than SegSize";
-                        return result;
-                    }
-                    this->settings.MaxValueSize = val;
-                    valueSet = true;
-                } catch (...) {
+                if (!parseUInt(valueStr, uintVal)) {
                     result.response = "Invalid MaxValueSize value";
                     return result;
                 }
+                if (uintVal >= this->settings.SegSize) {
+                    result.response = "MaxValueSize must be less than SegSize";
+                    return result;
+                }
+                this->settings.MaxValueSize = uintVal;
+                valueSet = true;
             } else if (param == "cachesize") {
-                try {
-                    this->settings.CacheSize = std::stoul(std::string(valueStr));
-                    valueSet = true;
-                } catch (...) {
+                if (!parseUInt(valueStr, uintVal)) {
                     result.response = "Invalid CacheSize value";
                     return result;
                 }
+                this->settings.CacheSize = uintVal;
+                valueSet = true;
             } else if (param == "compactinginterval") {
-                try {
-                    this->settings.CompactingInterval = std::stoul(std::string(valueStr));
-                    valueSet = true;
-                } catch (...) {
-                    result.response = "Invalid CompactingInterval value";
+                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                    result.response = "Invalid CompactingInterval value (at least 1 second)";
                     return result;
                 }
+                this->settings.CompactingInterval = uintVal;
+                valueSet = true;
             } else if (param == "flushinterval") {
-                try {
-                    this->settings.FlushInterval = std::stoul(std::string(valueStr));
-                    valueSet = true;
-                } catch (...) {
-                    result.response = "Invalid FlushInterval value";
+                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                    result.response = "Invalid FlushInterval value (at least 1 second)";
                     return result;
                 }
+                this->settings.FlushInterval = uintVal;
+                valueSet = true;
             } else if (param == "networkvalidationstr") {
                 try {
                     std::string valueStrStr(valueStr);
@@ -907,13 +942,12 @@ namespace Zest {
                     return result;
                 }
             } else if (param == "archivecreationdelay") {
-                try {
-                    this->settings.ArchiveCreationDelay = std::stoul(std::string(valueStr));
-                    valueSet = true;
-                } catch (...) {
-                    result.response = "Invalid ArchiveCreationDelay value";
+                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                    result.response = "Invalid ArchiveCreationDelay value (at least 1 second)";
                     return result;
                 }
+                this->settings.ArchiveCreationDelay = uintVal;
+                valueSet = true;
             } else if (param == "autoarchivesaving") {
                 if (valueStr == "true" || valueStr == "1") {
                     this->settings.AutoArchiveSaving = true;
@@ -954,8 +988,8 @@ namespace Zest {
 
         if (!this->replaying.load()) {
             if (result.code == ResultType::Code::SUCCESS && isWrite) {
-                if (words.size() >= 2) {
-                    this->appendToWAL(std::string(words[1]), command);
+                if (words.size() >= 2 && !this->appendToWAL(std::string(words[1]), command)) {
+                    result = { ResultType::Code::ERROR, Messages::WAL_WRITE_FAILED, result.affectedRows };
                 }
             }
         }
@@ -1034,8 +1068,12 @@ namespace Zest {
     }
 
     void ZestDB::flush() {
-        ZestLog(LogLevel::DEBUG, "Flushing all shards...");
         std::unique_lock<std::shared_mutex> lock(this->writeMtx);
+        this->flushLocked();
+    }
+
+    void ZestDB::flushLocked() {
+        ZestLog(LogLevel::DEBUG, "Flushing all shards...");
         this->isFlushing.store(true);
         this->shardManager->flush();
         this->isFlushing.store(false);
@@ -1046,6 +1084,9 @@ namespace Zest {
         this->replaying.store(true);
         this->shardManager->replayAllWAL([this](const std::string& cmd) {
             auto resp = this->execCmd(cmd);
+            if (resp.code == ResultType::Code::ERROR) {
+                ZestLog(LogLevel::WARNING, std::format("WAL replay: '{}' failed: {}", cmd, resp.response));
+            }
             return responseToJson(resp);
         });
         this->replaying.store(false);
