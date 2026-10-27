@@ -58,10 +58,10 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager read non-existent segmen
 }
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager segment rotation", "[storagemanager]") {
-    Settings small;
-    small.DbPath = testDir;
-    small.SegSize = 10;
-    StorageManager sm(small);
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 10;
+    StorageManager sm(smallSettings);
     sm.append("1234567890");
     auto e2 = sm.append("new");
     REQUIRE(e2.segmentId == 2);
@@ -83,10 +83,10 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager flush", "[storagemanager
 }
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager rotates to new segment when remaining space is too small", "[storagemanager]") {
-    Settings small;
-    small.DbPath = testDir;
-    small.SegSize = 10;
-    StorageManager sm(small);
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 10;
+    StorageManager sm(smallSettings);
 
     sm.append("12345678");
     auto e2 = sm.append("abcd");

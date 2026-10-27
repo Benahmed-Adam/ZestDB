@@ -33,7 +33,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager set and get", "[shardmanager
     ShardManager sm(settings, 4);
     sm.set("key1", "value1");
     auto result = sm.get("key1");
-    REQUIRE(result.code == ResultType::Code::SUCCESS);
+    REQUIRE(result.code == ResultType::Code::Success);
     REQUIRE(result.response == "value1");
 }
 
@@ -42,13 +42,13 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager del", "[shardmanager]") {
     sm.set("key1", "value1");
     sm.del("key1");
     auto result = sm.get("key1");
-    REQUIRE(result.code == ResultType::Code::ERROR);
+    REQUIRE(result.code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager get non-existent", "[shardmanager]") {
     ShardManager sm(settings, 4);
     auto result = sm.get("ghost");
-    REQUIRE(result.code == ResultType::Code::ERROR);
+    REQUIRE(result.code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager getBy parallel merged results", "[shardmanager]") {
@@ -60,7 +60,7 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager getBy parallel merged result
     vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     auto result = sm.getBy(vr);
-    REQUIRE(result.code == ResultType::Code::SUCCESS);
+    REQUIRE(result.code == ResultType::Code::Success);
     REQUIRE(result.affectedRows == 2);
 }
 
@@ -85,9 +85,9 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager delBy parallel", "[shardmana
     vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     sm.delBy(vr);
-    REQUIRE(sm.get("abc_1").code == ResultType::Code::ERROR);
-    REQUIRE(sm.get("abc_2").code == ResultType::Code::ERROR);
-    REQUIRE(sm.get("xyz_1").code == ResultType::Code::SUCCESS);
+    REQUIRE(sm.get("abc_1").code == ResultType::Code::Error);
+    REQUIRE(sm.get("abc_2").code == ResultType::Code::Error);
+    REQUIRE(sm.get("xyz_1").code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager flush", "[shardmanager]") {

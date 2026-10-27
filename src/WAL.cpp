@@ -14,7 +14,7 @@ namespace Zest {
     WAL::WAL(Settings& set, const std::filesystem::path& walPath)
         : settings(set),
           canClear(true) {
-        ZestLog(LogLevel::INFO, "Opening WAL file...");
+        ZestLog(LogLevel::Info, "Opening WAL file...");
         this->WalPath = walPath;
 
         this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
@@ -33,13 +33,14 @@ namespace Zest {
             this->wal.close();
             this->wal.open(this->WalPath, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
             this->canClear = false;
+            this->dirty = false;
         }
     }
 
     bool WAL::append(const std::string& cmd) {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->wal.is_open()) {
-            ZestLog(LogLevel::ERROR, "WAL::append - WAL not open");
+            ZestLog(LogLevel::Error, "WAL::append - WAL not open");
             return false;
         }
         this->wal.clear();
@@ -52,12 +53,28 @@ namespace Zest {
         this->wal.write(cmd.c_str(), static_cast<long int>(size));
         this->wal.write(reinterpret_cast<const char*>(&seq), sizeof(seq));
         this->wal.put('\n');
+        this->dirty = true;
 
-        bool ok = this->settings.fsyncOnWrite ? flush_and_fsync(this->wal) : this->wal.flush().good();
-        if (!ok) {
-            ZestLog(LogLevel::ERROR, "WAL::append - Write failed");
+        if (!this->wal.good()) {
+            ZestLog(LogLevel::Error, "WAL::append - Write failed");
+            return false;
         }
-        return ok;
+        return true;
+    }
+
+    // Appends stay in the stream buffer until sync(): callers sync once per batch instead of once per command
+    bool WAL::sync() {
+        std::lock_guard<std::mutex> lock(this->mtx);
+        if (!this->dirty) {
+            return true;
+        }
+        bool ok = this->settings.fsyncOnWrite ? flush_and_fsync(this->wal, this->WalPath) : this->wal.flush().good();
+        if (!ok) {
+            ZestLog(LogLevel::Error, "WAL::sync - Write failed");
+            return false;
+        }
+        this->dirty = false;
+        return true;
     }
 
     void WAL::advanceSequence(uint64_t next) {
@@ -71,7 +88,7 @@ namespace Zest {
         std::vector<WalEntry> res;
 
         if (!this->wal.is_open()) {
-            ZestLog(LogLevel::ERROR, "WAL::getCmds - WAL not open");
+            ZestLog(LogLevel::Error, "WAL::getCmds - WAL not open");
             return res;
         }
 
@@ -84,7 +101,7 @@ namespace Zest {
         uint64_t seq;
         while (this->wal.read(reinterpret_cast<char*>(&size), sizeof(size))) {
             if (static_cast<std::streamoff>(size) > fileSize - this->wal.tellg()) {
-                ZestLog(LogLevel::WARNING, "WAL::getCmds - Truncated record, stopping");
+                ZestLog(LogLevel::Warning, "WAL::getCmds - Truncated record, stopping");
                 break;
             }
             std::string cmd(size, '\0');

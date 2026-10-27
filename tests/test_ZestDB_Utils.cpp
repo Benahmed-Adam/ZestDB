@@ -29,38 +29,38 @@ TEST_CASE("sha256 long string", "[sha256]") {
 }
 
 TEST_CASE("responseToJson plain string", "[utils]") {
-    ResultType r{ ResultType::Code::SUCCESS, "hello", 0 };
+    ResultType r{ ResultType::Code::Success, "hello", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"code\":0") != std::string::npos);
     REQUIRE(json.find("\"response\":\"hello\"") != std::string::npos);
 }
 
 TEST_CASE("responseToJson JSON array", "[utils]") {
-    ResultType r{ ResultType::Code::SUCCESS, "[{\"k\":\"v\"}]", 1 };
+    ResultType r{ ResultType::Code::Success, "[{\"k\":\"v\"}]", 1 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"affectedRows\":1") != std::string::npos);
 }
 
 TEST_CASE("responseToJson JSON object", "[utils]") {
-    ResultType r{ ResultType::Code::SUCCESS, "{\"key\":\"val\"}", 0 };
+    ResultType r{ ResultType::Code::Success, "{\"key\":\"val\"}", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"code\":0") != std::string::npos);
 }
 
 TEST_CASE("responseToJson empty response", "[utils]") {
-    ResultType r{ ResultType::Code::ERROR, "", 0 };
+    ResultType r{ ResultType::Code::Error, "", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"response\":\"\"") != std::string::npos);
 }
 
 TEST_CASE("responseToJson affectedRows", "[utils]") {
-    ResultType r{ ResultType::Code::SUCCESS, "ok", 42 };
+    ResultType r{ ResultType::Code::Success, "ok", 42 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"affectedRows\":42") != std::string::npos);
 }
 
 TEST_CASE("responseToJson value that only looks like JSON", "[utils]") {
-    ResultType r{ ResultType::Code::SUCCESS, "{not json", 1 };
+    ResultType r{ ResultType::Code::Success, "{not json", 1 };
     std::string json;
     REQUIRE_NOTHROW(json = ZestDB::responseToJson(r));
     REQUIRE(json.find("\"response\":\"{not json\"") != std::string::npos);

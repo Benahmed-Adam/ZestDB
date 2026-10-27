@@ -27,9 +27,11 @@ namespace Zest {
         std::atomic<unsigned long> currentOffset;
         Settings& settings;
         std::fstream segment;
+        std::filesystem::path path;
         std::mutex mtx;
 
         bool canFlush;
+        bool atWriteEnd = false;
     };
 
 } // namespace Zest

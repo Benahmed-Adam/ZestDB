@@ -54,7 +54,7 @@ public:
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "ValidationRule regex mode valid", "[validation]") {
     auto result = db->execCmd("gb re ^test$");
-    REQUIRE(result.code == ResultType::Code::SUCCESS);
+    REQUIRE(result.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule re valid regex", "[validation]") {
@@ -102,7 +102,7 @@ TEST_CASE_METHOD(ZestDBValidationFixture, "createValidationRule ew mode key shor
 }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "isJsonValid valid JSON", "[validation]") {
-    REQUIRE(db->execCmd("gcfg").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("gcfg").code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBValidationFixture, "ResultType default values", "[validation]") {

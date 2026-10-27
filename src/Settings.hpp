@@ -24,8 +24,8 @@ namespace Zest {
 
     struct ResultType {
         enum class Code {
-            SUCCESS,
-            ERROR
+            Success,
+            Error
         };
         Code code;
         std::string response;

@@ -53,9 +53,8 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 
 ### In-Memory Index
 - An index file maps every key to its location (segment id, offset, size) on disk.
-- The index is loaded into an in-memory `unordered_map` for O(1) lookups.
-- Updates to an existing key mark the previous index entry as a tombstone and append the new entry, keeping the index append-friendly.
-- New and updated entries are always appended (index records are variable-length, so tombstone slots are not reused); compaction reclaims the space.
+- Every live entry (segment, offset, size) is kept in an in-memory `unordered_map`: lookups and pattern scans never read the index file.
+- The index file is an append-only log: a set appends the new entry, a delete appends a tombstone, and loading replays the log in order (the last record for a key wins). Writes are sequential and buffered, with no seek.
 - Periodic compaction rewrites the index file, dropping all tombstones and unreachable entries.
 
 ### LRU Caching
@@ -76,7 +75,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - A verification pass on boot detects and removes index entries that no longer point to valid on-disk data.
 
 ### Network Server
-- Custom asynchronous TCP server built on Asio, running on one IO thread per CPU core (each session is serialized on its own strand) and handling batched commands.
+- Custom asynchronous TCP server built on Asio, with one `io_context` per CPU core: each session stays on one thread, so requests are never handed between threads. Batched commands are acknowledged after a single WAL write (group commit).
 - Batch framing: a single request can carry multiple commands packed with 4-byte length prefixes, with one JSON response per command.
 - Per-request JSON output with `code`, `response` and `affectedRows` fields.
 - Authentication via a `Authorization: <user>.<sha256(user+password)>` handshake command before any data operation, with per-user roles (`read`, `write`, `admin`) checked on every command, so a `reload` that removes a user or changes its role applies to open sessions.
@@ -147,7 +146,7 @@ ZestDB follows a layered design where each layer is independently testable:
 
 ### Threading Model
 - Main thread: command parsing and dispatch.
-- Asio IO threads (one per CPU core): TCP/SSL sessions, each on its own strand. The HTTP stats server has its own threads.
+- Asio IO threads (one `io_context` per CPU core, the first one also accepts connections): each TCP/SSL session stays on one thread. The HTTP stats server has its own threads.
 - Per-shard compactor threads: index and segment compaction.
 - Global flush thread: periodic disk synchronization.
 - Global archive (save) thread: periodic database zipping.
@@ -329,8 +328,19 @@ Multiple commands in one request are answered with responses separated by `\r\n\
 ## Build
 
 ### Requirements
-- Linux with GCC (C++20, libstdc++): the storage layer uses `fdatasync` and libstdc++'s file buffer.
-- CMake 3.25+, `make`, and Perl 5 when OpenSSL has to be built.
+- A C++20 compiler: GCC or Clang on Linux/macOS, MSVC (Visual Studio 2022) or MinGW on Windows.
+- CMake 3.25+, `make` for the Makefile shortcuts (Linux/macOS), and Perl 5 when OpenSSL has to be built (plus NASM with MSVC).
+
+On Windows, use CMake directly (the Makefile relies on Unix tools), from a PowerShell where the **x64** MSVC environment is loaded (the default "Developer PowerShell" is x86):
+```powershell
+& "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+cmake -S . -B build\msvc -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR="C:/Program Files/OpenSSL-Win64"
+cmake --build build\msvc --parallel
+$env:PATH = "C:\Program Files\OpenSSL-Win64\bin;$env:PATH"   # the OpenSSL DLLs, needed to run zestdb.exe and the tests
+ctest --test-dir build\msvc --output-on-failure
+```
+OpenSSL 3 and 4 both work.
+Building OpenSSL from source there needs Strawberry Perl and NASM; installing OpenSSL 3 beforehand (and setting `OPENSSL_ROOT_DIR` if CMake does not find it) avoids that step.
 
 No library has to be installed: on the first build, CMake (`FetchContent`) downloads and builds pinned versions of the dependencies. OpenSSL is the exception: an installed OpenSSL 3 (e.g. `libssl-dev`) is used when found, otherwise it is built from source.
 
@@ -463,56 +473,46 @@ Every script accepts `--host`, `--port`, `--user`, `--password` (default `bob` /
 
 ### Results
 
-Measured with the commands above, client and server on the same machine (WSL2 Ubuntu, localhost), with the default `config.yaml` (32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`). Numbers depend on the hardware: use them to compare runs, not as absolute figures.
+Measured with `bench_kv.py --entries 100000 --batches 1,100,10000`, `bench_bulk.py --entries 100000 --repeat 3` and `bench_concurrency.py --clients 1,4,8 --ops 20000`, client and server on the same machine (WSL2 Ubuntu, localhost, 12 cores), 32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`, automatic archiving off. Numbers depend on the hardware: use them to compare runs, not as absolute figures.
 
 #### SET / GET (`bench_kv.py`)
 
 | Mode | Entries | Batch | Throughput (ops/s) | Avg per command (ms) | p99 per batch (ms) |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| SET | 100,000 | 1 | 15,790 | 0.061 | 0.211 |
-| GET | 100,000 | 1 | 17,241 | 0.056 | 0.130 |
-| SET | 100,000 | 100 | 145,738 | 0.0067 | 1.222 |
-| GET | 100,000 | 100 | 223,517 | 0.0043 | 0.766 |
-| SET | 100,000 | 10,000 | 189,725 | 0.0051 | 64.471 |
-| GET | 100,000 | 10,000 | 290,103 | 0.0033 | 39.699 |
-| SET | 1,000,000 | 1 | 14,788 | 0.066 | 0.154 |
-| GET | 1,000,000 | 1 | 19,028 | 0.051 | 0.141 |
-| SET | 1,000,000 | 100 | 148,466 | 0.0065 | 0.967 |
-| GET | 1,000,000 | 100 | 220,280 | 0.0044 | 0.690 |
-| SET | 1,000,000 | 10,000 | 177,507 | 0.0055 | 287.957 |
-| GET | 1,000,000 | 10,000 | 286,212 | 0.0034 | 42.548 |
+| SET | 100,000 | 1 | 18,280 | 0.0526 | 0.104 |
+| GET | 100,000 | 1 | 18,405 | 0.0523 | 0.096 |
+| SET | 100,000 | 100 | 391,200 | 0.0024 | 0.341 |
+| GET | 100,000 | 100 | 324,445 | 0.0029 | 0.511 |
+| SET | 100,000 | 10,000 | 527,633 | 0.0017 | 19.545 |
+| GET | 100,000 | 10,000 | 405,564 | 0.0023 | 25.438 |
 
-- **Batching matters most**: one command per request is bound by the network round trip (~15-19k ops/s). Batches of 100 already give ~10x more, and batches of 10,000 reach ~180k SET/s and ~290k GET/s.
-- **Volume has little effect**: throughput at 1 million keys is close to throughput at 100,000 keys.
-- **No errors** across the 6.6 million operations.
-- **Occasional SET outliers** of 150-290 ms (worst case, while the median stays around 0.05 ms per command), most likely when a periodic flush runs.
+- **Batching matters most**: one command per request is bound by the network round trip (~18k ops/s); batches of 100 give ~20x more, batches of 10,000 reach ~530k SET/s and ~400k GET/s.
+- **No errors** across the 1.2 million operations.
 
 #### Pattern commands (`bench_bulk.py`, 100,000 keys)
 
 | Scenario | Command | Rows | Median (ms) |
 | --- | --- | ---: | ---: |
-| getby prefix, lim 100 | `gb sw bench_user: lim 100` | 100 | 2.73 |
-| getby prefix, all | `gb sw bench_user:` | 50,000 | 55.03 |
-| getby contains | `gb ct :12` | 1,111 | 17.03 |
-| getby suffix | `gb ew 99` | 1,000 | 16.72 |
-| getby regex | `gb re bench_user:\d*8` | 10,000 | 31.11 |
-| getby regex, no match | `gb re (a+)+$` | 0 | 16.16 |
-| setby prefix, lim 1000 | `sb sw bench_order: updated lim 1000` | 1,000 | 5.58 |
-| setby prefix, all | `sb sw bench_order: updated` | 50,000 | 47.31 |
-| delby prefix, lim 1000 | `db sw bench_order: lim 1000` | 1,000 | 5.28 |
-| delby prefix, all | `db sw bench_` | 99,000 | 249.91 |
+| getby prefix, lim 100 | `gb sw bench_user: lim 100` | 100 | 0.60 |
+| getby prefix, all | `gb sw bench_user:` | 50,000 | 24.30 |
+| getby contains | `gb ct :12` | 1,111 | 3.29 |
+| getby suffix | `gb ew 99` | 1,000 | 2.75 |
+| getby regex | `gb re bench_user:\d*8` | 10,000 | 14.82 |
+| getby regex, no match | `gb re (a+)+$` | 0 | 3.95 |
+| setby prefix, lim 1000 | `sb sw bench_order: updated lim 1000` | 1,000 | 5.96 |
+| setby prefix, all | `sb sw bench_order: updated` | 50,000 | 9.52 |
+| delby prefix, lim 1000 | `db sw bench_order: lim 1000` | 1,000 | 6.19 |
+| delby prefix, all | `db sw bench_` | 99,000 | 223.85 |
 
-- A pattern command scans the whole index (~16 ms for 100,000 keys even with no match); the rest of the cost grows with the number of rows returned or modified.
-- `lim` stops the scan early: 2.7 ms for 100 rows instead of 55 ms for all of them.
+- Keys are matched in memory (the whole index is kept in RAM), so a scan of 100,000 keys with no match costs ~4 ms; the rest of the cost grows with the number of rows read or modified.
 - The catastrophic-backtracking regex `(a+)+$` costs no more than a plain scan.
 
 #### Concurrent clients (`bench_concurrency.py`, 80% GET / 20% SET, batch 100)
 
 | Clients | Total ops | Throughput (ops/s) | Median batch (ms) | p99 batch (ms) |
 | ---: | ---: | ---: | ---: | ---: |
-| 1 | 50,000 | 281,195 | 0.315 | 0.786 |
-| 2 | 100,000 | 219,706 | 0.843 | 1.599 |
-| 4 | 200,000 | 205,477 | 1.849 | 2.873 |
-| 8 | 400,000 | 182,519 | 3.907 | 6.013 |
+| 1 | 20,000 | 594,873 | 0.140 | 0.381 |
+| 4 | 80,000 | 534,562 | 0.693 | 1.381 |
+| 8 | 160,000 | 565,666 | 1.351 | 2.064 |
 
-- These numbers were measured when the TCP server handled every session on a single Asio thread: adding clients did not add throughput, clients waited for each other and latency grew with their number. The server now runs one IO thread per core; these results have not been measured again since.
+- Each session runs on one of the server's IO threads (one `io_context` per core), so clients are served in parallel. The total stays around 550-600k ops/s here because the Python clients run on the same cores as the server: this measures the whole setup, not the server alone.

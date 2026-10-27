@@ -18,6 +18,7 @@ namespace Zest {
         StorageManager(Settings& set);
         IndexEntry append(const std::string& value);
         std::string read(const IndexEntry& entry);
+        bool contains(const IndexEntry& entry) const;
         void removeUnusedSegments(const std::vector<uint32_t>& usedSegmentIds);
         bool flush();
         uint32_t currentSegmentId() const;

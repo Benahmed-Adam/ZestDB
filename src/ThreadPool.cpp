@@ -34,7 +34,7 @@ namespace Zest {
                         try {
                             task();
                         } catch (const std::exception& e) {
-                            ZestLog(LogLevel::CRITICAL, std::format("Exception during the execution of "
+                            ZestLog(LogLevel::Critical, std::format("Exception during the execution of "
                                                                     "a task in the ThreadPool : {}",
                                                                     e.what()));
                         }

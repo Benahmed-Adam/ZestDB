@@ -112,6 +112,7 @@ TEST_CASE_METHOD(WALFixture, "WAL preserves command with newlines", "[wal]") {
 TEST_CASE_METHOD(WALFixture, "WAL append reaches the file without fsyncOnWrite", "[wal]") {
     WAL wal(settings, walPath);
     wal.append("s key value");
+    REQUIRE(wal.sync());
     REQUIRE(fs::file_size(walPath) > 0);
 }
 
@@ -158,10 +159,10 @@ TEST_CASE_METHOD(WALFixture, "WAL stops on a truncated record instead of allocat
 
 TEST_CASE_METHOD(WALFixture, "flush_and_fsync reports a stream that is not open", "[wal]") {
     std::fstream closed;
-    REQUIRE_FALSE(flush_and_fsync(closed));
+    REQUIRE_FALSE(flush_and_fsync(closed, walPath));
     std::fstream open(walPath, std::ios::out | std::ios::binary);
     open << "data";
-    REQUIRE(flush_and_fsync(open));
+    REQUIRE(flush_and_fsync(open, walPath));
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL sequence continues after the entries found at replay", "[wal]") {

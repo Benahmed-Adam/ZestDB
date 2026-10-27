@@ -56,38 +56,40 @@ namespace Zest {
             futures.push_back(threadPool->enqueue([rawShard, &valid]() { return rawShard->getBy(valid); }));
         }
 
-        nlohmann::json mergedArray = nlohmann::json::array();
+        // Each shard returns a JSON array and the shared counter already caps the total at the limit: join the arrays as text instead of parsing them again
+        std::string merged = "[";
         long long totalMatches = 0;
         for (auto& f : futures) {
             ResultType r = f.get();
-            if (r.code == ResultType::Code::SUCCESS) {
-                nlohmann::json shardArray = nlohmann::json::parse(r.response);
-                for (auto& item : shardArray) {
-                    if (valid.limit != UINT_MAX && mergedArray.size() >= static_cast<size_t>(valid.limit))
-                        break;
-                    mergedArray.push_back(std::move(item));
+            if (r.code == ResultType::Code::Success && r.response.size() > 2) {
+                if (merged.size() > 1) {
+                    merged += ',';
                 }
+                merged.append(r.response, 1, r.response.size() - 2);
                 totalMatches += r.affectedRows;
             }
         }
-        threadPool->waitAll();
+        merged += ']';
         valid.globalMatchCount = nullptr;
-        if (valid.limit != UINT_MAX && totalMatches > static_cast<long long>(valid.limit)) {
-            totalMatches = static_cast<long long>(valid.limit);
-        }
-        return { ResultType::Code::SUCCESS, mergedArray.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), totalMatches };
+        return { ResultType::Code::Success, std::move(merged), totalMatches };
     }
 
     std::vector<std::string> ShardManager::firstMatchingKeys(const ValidationRule& valid) {
-        std::vector<std::string> keys;
+        std::vector<std::future<std::vector<std::string>>> perShard;
         for (auto& shard : this->shards) {
-            std::vector<std::string> shardKeys = shard->matchingKeys(valid);
+            Shard* rawShard = shard.get();
+            perShard.push_back(this->threadPool->enqueue([rawShard, &valid]() { return rawShard->matchingKeys(valid); }));
+        }
+        std::vector<std::string> keys;
+        for (auto& f : perShard) {
+            std::vector<std::string> shardKeys = f.get();
             keys.insert(keys.end(), std::make_move_iterator(shardKeys.begin()), std::make_move_iterator(shardKeys.end()));
         }
-        std::sort(keys.begin(), keys.end());
         if (keys.size() > valid.limit) {
+            std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);
         }
+        std::sort(keys.begin(), keys.end());
         return keys;
     }
 
@@ -95,9 +97,9 @@ namespace Zest {
         if (valid.limit != UINT_MAX) {
             long long updated = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
-                updated += this->set(key, value).code == ResultType::Code::SUCCESS;
+                updated += this->set(key, value).code == ResultType::Code::Success;
             }
-            return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", updated), updated };
+            return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", updated), updated };
         }
 
         std::atomic<unsigned int> globalCount(0);
@@ -114,25 +116,24 @@ namespace Zest {
         long long totalUpdated = 0;
         for (auto& f : futures) {
             ResultType r = f.get();
-            if (r.code == ResultType::Code::SUCCESS) {
+            if (r.code == ResultType::Code::Success) {
                 totalUpdated += r.affectedRows;
             }
         }
-        threadPool->waitAll();
         valid.globalMatchCount = nullptr;
         if (valid.limit != UINT_MAX && totalUpdated > static_cast<long long>(valid.limit)) {
             totalUpdated = static_cast<long long>(valid.limit);
         }
-        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
+        return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
     }
 
     ResultType ShardManager::delBy(ValidationRule& valid) {
         if (valid.limit != UINT_MAX) {
             long long deleted = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
-                deleted += this->del(key).code == ResultType::Code::SUCCESS;
+                deleted += this->del(key).code == ResultType::Code::Success;
             }
-            return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", deleted), deleted };
+            return { ResultType::Code::Success, std::format("Successfully deleted {} entries", deleted), deleted };
         }
 
         std::atomic<unsigned int> globalCount(0);
@@ -149,25 +150,30 @@ namespace Zest {
         long long totalDeleted = 0;
         for (auto& f : futures) {
             ResultType r = f.get();
-            if (r.code == ResultType::Code::SUCCESS) {
+            if (r.code == ResultType::Code::Success) {
                 totalDeleted += r.affectedRows;
             }
         }
-        threadPool->waitAll();
         valid.globalMatchCount = nullptr;
         if (valid.limit != UINT_MAX && totalDeleted > static_cast<long long>(valid.limit)) {
             totalDeleted = static_cast<long long>(valid.limit);
         }
-        return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
+        return { ResultType::Code::Success, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
     }
 
     void ShardManager::flush() {
-        bool ok = true;
+        // Shards flush in parallel: callers hold the global write lock, so the stall is the slowest shard's fsync, not their sum
+        std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {
-            ok = shard->flushData() && ok;
+            Shard* rawShard = shard.get();
+            results.push_back(this->threadPool->enqueue([rawShard]() { return rawShard->flushData(); }));
+        }
+        bool ok = true;
+        for (auto& result : results) {
+            ok = result.get() && ok;
         }
         if (!ok) {
-            ZestLog(LogLevel::ERROR, "ShardManager - a shard failed to flush, keeping every WAL");
+            ZestLog(LogLevel::Error, "ShardManager - a shard failed to flush, keeping every WAL");
             return;
         }
         this->clearAllWAL();
@@ -211,12 +217,20 @@ namespace Zest {
         }
 
         for (const auto& entry : allWalEntries) {
-            ZestLog(LogLevel::DEBUG, std::format("WAL replay command: {}", entry.cmd));
+            ZestLog(LogLevel::Debug, std::format("WAL replay command: {}", entry.cmd));
             std::string result = execCmdFunc(entry.cmd);
-            ZestLog(LogLevel::DEBUG, std::format("WAL replay result: {}", result));
+            ZestLog(LogLevel::Debug, std::format("WAL replay result: {}", result));
         }
 
         this->flush();
+    }
+
+    bool ShardManager::syncWAL() {
+        bool ok = true;
+        for (auto& shard : this->shards) {
+            ok = shard->getWAL().sync() && ok;
+        }
+        return ok;
     }
 
     bool ShardManager::appendToWAL(const std::string& key, const std::string& command) {

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -35,7 +36,8 @@ namespace Zest {
         void do_read_command(uint32_t size);
         std::string handle_command(const std::string& cmd, bool& should_close);
 
-        void arm_timer();
+        void touch();
+        void watch_deadline();
         void queue_write(const std::string& message, bool closeAfter = false);
         void do_write();
 
@@ -46,6 +48,7 @@ namespace Zest {
 
         ZestStream stream_;
         asio::steady_timer timer_;
+        std::chrono::steady_clock::time_point deadline_;
         asio::streambuf buffer_;
         ZestDB& db_;
         Limits limits_;
@@ -62,11 +65,21 @@ namespace Zest {
     class Server {
     public:
         Server(asio::io_context& io_context, uint16_t port, ZestDB& db);
+        ~Server();
+        void stop();
 
     private:
         void do_accept();
+        static std::vector<std::unique_ptr<asio::io_context>> makeWorkers();
 
-        asio::io_context& io_context_;
+        // One io_context per thread: a session stays on one thread, so no strand and no hand-off between threads per request.
+        // The acceptor lives in workers_[0] and is declared after it: every pending operation belongs to the server and is torn down with it.
+        std::vector<std::unique_ptr<asio::io_context>> workers_;
+        std::vector<asio::executor_work_guard<asio::io_context::executor_type>> workGuards_;
+        std::vector<std::thread> workerThreads_;
+        size_t nextWorker_ = 0;
+        std::atomic<bool> stopped_ = false;
+
         asio::ssl::context ssl_context_;
         tcp::acceptor acceptor_;
         asio::steady_timer accept_retry_timer_;

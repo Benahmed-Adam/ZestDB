@@ -39,12 +39,12 @@ TEST_CASE_METHOD(DataSegmentFixture, "DataSegment write and read", "[datasegment
 }
 
 TEST_CASE_METHOD(DataSegmentFixture, "DataSegment segment full returns SegSize+1", "[datasegment]") {
-    Settings small;
-    small.DbPath = testDir;
-    small.SegSize = 5;
-    DataSegment seg(small, 1);
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 5;
+    DataSegment seg(smallSettings, 1);
     unsigned long result = seg.write("123456");
-    REQUIRE(result == small.SegSize + 1);
+    REQUIRE(result == smallSettings.SegSize + 1);
 }
 
 TEST_CASE_METHOD(DataSegmentFixture, "DataSegment write empty string", "[datasegment]") {
@@ -55,10 +55,10 @@ TEST_CASE_METHOD(DataSegmentFixture, "DataSegment write empty string", "[dataseg
 }
 
 TEST_CASE_METHOD(DataSegmentFixture, "DataSegment isFull states", "[datasegment]") {
-    Settings small;
-    small.DbPath = testDir;
-    small.SegSize = 5;
-    DataSegment seg(small, 1);
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 5;
+    DataSegment seg(smallSettings, 1);
     REQUIRE_FALSE(seg.isFull());
     seg.write("1234");
     REQUIRE_FALSE(seg.isFull());

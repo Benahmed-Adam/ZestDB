@@ -43,7 +43,8 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
 
-        ResultType execCmd(const std::string& command, Role role = Role::Admin);
+        ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
+        bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
         std::optional<Role> authenticate(const std::string& username, const std::string& token) const;
         std::optional<Role> roleOf(const std::string& username) const;

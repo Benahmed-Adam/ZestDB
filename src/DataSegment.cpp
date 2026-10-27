@@ -25,6 +25,7 @@ namespace Zest {
 
     void DataSegment::openSegment() {
         std::filesystem::path segPath = this->settings.DbPath / "seg" / std::format("{}.seg", this->segmentId);
+        this->path = segPath;
 
         bool fileExists = std::filesystem::exists(segPath);
 
@@ -37,7 +38,7 @@ namespace Zest {
         }
 
         if (!this->segment.is_open()) {
-            ZestLog(LogLevel::ERROR, std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
+            ZestLog(LogLevel::Error, std::format("DataSegment::DataSegment - failed to open segment: {}", segPath.string()));
         }
     }
 
@@ -62,19 +63,23 @@ namespace Zest {
             return this->settings.SegSize + 1;
         }
 
-        this->segment.clear();
-        this->segment.seekp(static_cast<std::streamoff>(startOffset), std::ios::beg);
-
-        if (!this->segment.good()) {
-            ZestLog(LogLevel::ERROR, "DataSegment::write - seek failed");
-            return this->settings.SegSize + 1;
+        // Seeking flushes the stream buffer: only seek when a read moved the position, so consecutive appends stay buffered
+        if (!this->atWriteEnd) {
+            this->segment.clear();
+            this->segment.seekp(static_cast<std::streamoff>(startOffset), std::ios::beg);
+            if (!this->segment.good()) {
+                ZestLog(LogLevel::Error, "DataSegment::write - seek failed");
+                return this->settings.SegSize + 1;
+            }
+            this->atWriteEnd = true;
         }
 
         this->segment.write(value.c_str(), static_cast<std::streamsize>(value.size()));
         this->canFlush = true;
 
         if (!this->segment.good()) {
-            ZestLog(LogLevel::ERROR, "DataSegment::write - write failed");
+            ZestLog(LogLevel::Error, "DataSegment::write - write failed");
+            this->atWriteEnd = false;
             return this->settings.SegSize + 1;
         }
 
@@ -88,10 +93,11 @@ namespace Zest {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         this->segment.clear();
+        this->atWriteEnd = false;
         this->segment.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 
         if (!this->segment.good()) {
-            ZestLog(LogLevel::ERROR, "DataSegment::read - seek failed");
+            ZestLog(LogLevel::Error, "DataSegment::read - seek failed");
             return "";
         }
 
@@ -101,7 +107,7 @@ namespace Zest {
         this->segment.read(&res[0], size);
 
         if (static_cast<unsigned int>(this->segment.gcount()) != size) {
-            ZestLog(LogLevel::ERROR, std::format("DataSegment::read - expected {} bytes at offset {} in segment {}, got {}", size, offset, this->segmentId, this->segment.gcount()));
+            ZestLog(LogLevel::Error, std::format("DataSegment::read - expected {} bytes at offset {} in segment {}, got {}", size, offset, this->segmentId, this->segment.gcount()));
             return "";
         }
         return res;
@@ -119,7 +125,7 @@ namespace Zest {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         if (this->canFlush) {
-            if (!flush_and_fsync(this->segment)) {
+            if (!flush_and_fsync(this->segment, this->path)) {
                 return false;
             }
             this->canFlush = false;

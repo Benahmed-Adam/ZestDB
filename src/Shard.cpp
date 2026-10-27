@@ -1,5 +1,6 @@
 #include "Shard.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -34,7 +35,7 @@ namespace Zest {
         fs::path walPath = shardPath / "WAL";
 
         if (!fs::exists(indexPath)) {
-            ZestLog(LogLevel::INFO, std::format("Creating INDEX for shard {} at {}", shardId, indexPath.string()));
+            ZestLog(LogLevel::Info, std::format("Creating INDEX for shard {} at {}", shardId, indexPath.string()));
 
             if (auto parent = indexPath.parent_path(); !fs::exists(parent)) {
                 fs::create_directories(parent);
@@ -42,7 +43,7 @@ namespace Zest {
 
             std::ofstream idx(indexPath);
             if (!idx) {
-                ZestLog(LogLevel::ERROR, std::format("Failed to create INDEX for shard {}", shardId));
+                ZestLog(LogLevel::Error, std::format("Failed to create INDEX for shard {}", shardId));
                 throw std::runtime_error("Failed to create INDEX for shard");
             }
         }
@@ -52,7 +53,7 @@ namespace Zest {
         }
 
         if (!fs::exists(walPath)) {
-            ZestLog(LogLevel::INFO, std::format("Creating the WAL at {}", walPath.string()));
+            ZestLog(LogLevel::Info, std::format("Creating the WAL at {}", walPath.string()));
 
             if (auto parent = walPath.parent_path(); !fs::exists(parent)) {
                 fs::create_directories(parent);
@@ -60,7 +61,7 @@ namespace Zest {
 
             std::ofstream walFile(walPath);
             if (!walFile) {
-                ZestLog(LogLevel::ERROR, std::format("Failed to create WAL at {}", walPath.string()));
+                ZestLog(LogLevel::Error, std::format("Failed to create WAL at {}", walPath.string()));
                 throw std::runtime_error("Failed to create WAL");
             }
         }
@@ -78,7 +79,7 @@ namespace Zest {
 
         this->verifyIndexEntries();
 
-        ZestLog(LogLevel::INFO, std::format("Shard {} initialized successfully", this->shardId));
+        ZestLog(LogLevel::Info, std::format("Shard {} initialized successfully", this->shardId));
 
         std::promise<void> cachePromise;
         std::future<void> cacheFuture = cachePromise.get_future();
@@ -91,7 +92,7 @@ namespace Zest {
         this->compactorThread = std::jthread([this](std::stop_token stopToken) {
             std::unique_lock<std::mutex> lock(this->compactorThreadMtx);
 
-            ZestLog(LogLevel::INFO, "Starting the compactor...");
+            ZestLog(LogLevel::Info, "Starting the compactor...");
 
             while (!stopToken.stop_requested()) {
                 unsigned int interval;
@@ -107,9 +108,9 @@ namespace Zest {
 
                 std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
                 this->compactSegments(indexManager->compact());
-                ZestLog(LogLevel::DEBUG, "Compactor - compaction done, waiting...");
+                ZestLog(LogLevel::Debug, "Compactor - compaction done, waiting...");
             }
-            ZestLog(LogLevel::INFO, "Stopping the compactor...");
+            ZestLog(LogLevel::Info, "Stopping the compactor...");
         });
 
         cacheFuture.wait();
@@ -146,7 +147,7 @@ namespace Zest {
         }
 
         if (moved && !(this->storageManager->flush() && this->indexManager->flush())) {
-            ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed after relocating values, keeping the old segments", this->shardId));
+            ZestLog(LogLevel::Error, std::format("Shard {} - flush failed after relocating values, keeping the old segments", this->shardId));
             return;
         }
 
@@ -181,7 +182,7 @@ namespace Zest {
             this->cache->put(entries[i], value);
             numKeysInserted++;
         }
-        ZestLog(LogLevel::INFO, std::format("Shard {} cache filled with {} keys", shardId, numKeysInserted));
+        ZestLog(LogLevel::Info, std::format("Shard {} cache filled with {} keys", shardId, numKeysInserted));
     }
 
     ResultType Shard::get(const std::string& key) {
@@ -196,7 +197,7 @@ namespace Zest {
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addGetStats(false, latency);
-            return { ResultType::Code::SUCCESS, cacheEntry.value, 1 };
+            return { ResultType::Code::Success, cacheEntry.value, 1 };
         }
 
         IndexEntry entry;
@@ -205,7 +206,7 @@ namespace Zest {
         if (entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone) {
             std::string value = this->storageManager->read(entry);
             if (value.empty()) {
-                return { ResultType::Code::ERROR, Messages::READ_FAILED, 0 };
+                return { ResultType::Code::Error, Messages::READ_FAILED, 0 };
             }
 
             this->cache->put(entry, value);
@@ -213,13 +214,13 @@ namespace Zest {
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addGetStats(true, latency);
-            return { ResultType::Code::SUCCESS, value, 1 };
+            return { ResultType::Code::Success, value, 1 };
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addGetStats(true, latency);
-        return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
+        return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
     }
 
     ResultType Shard::set(const std::string& key, const std::string& value) {
@@ -229,13 +230,13 @@ namespace Zest {
         IndexEntry entry = this->storageManager->append(value);
 
         if (entry.segmentId == INVALID_SEGMENT_ID) {
-            ZestLog(LogLevel::ERROR, std::format("Shard::set - FAILED to write key: {} in shard {} "
+            ZestLog(LogLevel::Error, std::format("Shard::set - FAILED to write key: {} in shard {} "
                                                  "- segment id {}",
                                                  key, shardId, entry.segmentId));
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addSetStats(false, latency);
-            return { ResultType::Code::ERROR, "Failed to write: segment full", 0 };
+            return { ResultType::Code::Error, "Failed to write: segment full", 0 };
         }
 
         entry.key = key;
@@ -247,7 +248,7 @@ namespace Zest {
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetStats(false, latency);
-        return { ResultType::Code::SUCCESS, Messages::SUCCESS_SET, 1 };
+        return { ResultType::Code::Success, Messages::SUCCESS_SET, 1 };
     }
 
     ResultType Shard::del(const std::string& key) {
@@ -266,20 +267,20 @@ namespace Zest {
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addDelStats(false, latency);
-            return { ResultType::Code::SUCCESS, Messages::SUCCESS_DEL, 1 };
+            return { ResultType::Code::Success, Messages::SUCCESS_DEL, 1 };
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(false, latency);
-        return { ResultType::Code::ERROR, Messages::KEY_NOT_FOUND, 0 };
+        return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
     }
 
     ResultType Shard::getBy(ValidationRule& valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->findMatching(valid.func, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         nlohmann::json resultArray = nlohmann::json::array();
         int matchCount = 0;
@@ -288,35 +289,33 @@ namespace Zest {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            if (valid.func(entry.key)) {
-                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
-                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
-                    if (prev >= valid.limit) {
-                        valid.globalMatchCount->fetch_sub(1);
-                        break;
-                    }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                if (prev >= valid.limit) {
+                    valid.globalMatchCount->fetch_sub(1);
+                    break;
                 }
-                std::string value = this->storageManager->read(entry);
-                if (value.empty()) {
-                    continue;
-                }
-                resultArray.push_back(nlohmann::json::object({ { entry.key, value } }));
-                matchCount++;
             }
+            std::string value = this->storageManager->read(entry);
+            if (value.empty()) {
+                continue;
+            }
+            resultArray.push_back(nlohmann::json::object({ { entry.key, value } }));
+            matchCount++;
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addGetByStats(false, latency);
 
-        return { ResultType::Code::SUCCESS, resultArray.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), matchCount };
+        return { ResultType::Code::Success, resultArray.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), matchCount };
     }
 
     ResultType Shard::setBy(ValidationRule& valid, const std::string& value) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->findMatching(valid.func, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 
@@ -324,48 +323,46 @@ namespace Zest {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            if (valid.func(entry.key)) {
-                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
-                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
-                    if (prev >= valid.limit) {
-                        valid.globalMatchCount->fetch_sub(1);
-                        break;
-                    }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                if (prev >= valid.limit) {
+                    valid.globalMatchCount->fetch_sub(1);
+                    break;
                 }
-                IndexEntry newEntry = this->storageManager->append(value);
-
-                if (newEntry.segmentId == INVALID_SEGMENT_ID) {
-                    if (valid.limit != UINT_MAX && valid.globalMatchCount) {
-                        valid.globalMatchCount->fetch_sub(1);
-                    }
-                    ZestLog(LogLevel::ERROR, std::format("Shard::setBy - FAILED to write for key: "
-                                                         "{} - segment full",
-                                                         entry.key));
-                    continue;
-                }
-
-                newEntry.key = entry.key;
-
-                this->indexManager->insert(newEntry);
-
-                this->cache->put(newEntry, value);
-
-                matchCount++;
             }
+            IndexEntry newEntry = this->storageManager->append(value);
+
+            if (newEntry.segmentId == INVALID_SEGMENT_ID) {
+                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                    valid.globalMatchCount->fetch_sub(1);
+                }
+                ZestLog(LogLevel::Error, std::format("Shard::setBy - FAILED to write for key: "
+                                                     "{} - segment full",
+                                                     entry.key));
+                continue;
+            }
+
+            newEntry.key = entry.key;
+
+            this->indexManager->insert(newEntry);
+
+            this->cache->put(newEntry, value);
+
+            matchCount++;
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetByStats(false, latency);
 
-        return { ResultType::Code::SUCCESS, std::format("Value successfully modified for {} entries", matchCount), matchCount };
+        return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", matchCount), matchCount };
     }
 
     ResultType Shard::delBy(ValidationRule& valid) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
-        entries = this->indexManager->getAll(UINT_MAX, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
+        entries = this->indexManager->findMatching(valid.func, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         int matchCount = 0;
 
@@ -373,35 +370,40 @@ namespace Zest {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
-            if (valid.func(entry.key)) {
-                if (valid.limit != UINT_MAX && valid.globalMatchCount) {
-                    unsigned int prev = valid.globalMatchCount->fetch_add(1);
-                    if (prev >= valid.limit) {
-                        valid.globalMatchCount->fetch_sub(1);
-                        break;
-                    }
+            if (valid.limit != UINT_MAX && valid.globalMatchCount) {
+                unsigned int prev = valid.globalMatchCount->fetch_add(1);
+                if (prev >= valid.limit) {
+                    valid.globalMatchCount->fetch_sub(1);
+                    break;
                 }
-                IndexEntry tombstoneEntry = entry;
-                tombstoneEntry.isTombstone = true;
-
-                this->indexManager->update(entry.key, tombstoneEntry);
-                this->cache->remove(entry.key);
-
-                matchCount++;
             }
+            IndexEntry tombstoneEntry = entry;
+            tombstoneEntry.isTombstone = true;
+
+            this->indexManager->update(entry.key, tombstoneEntry);
+            this->cache->remove(entry.key);
+
+            matchCount++;
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelByStats(false, latency);
 
-        return { ResultType::Code::SUCCESS, std::format("Successfully deleted {} entries", matchCount), matchCount };
+        return { ResultType::Code::Success, std::format("Successfully deleted {} entries", matchCount), matchCount };
     }
 
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
-        std::vector<std::string> keys = this->indexManager->keys();
-        std::erase_if(keys, [&valid](const std::string& key) { return !valid.func(key); });
+        std::vector<std::string> keys;
+        for (auto& entry : this->indexManager->findMatching(valid.func)) {
+            keys.push_back(std::move(entry.key));
+        }
+        // Only this shard's smallest keys can be among the global smallest ones
+        if (keys.size() > valid.limit) {
+            std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
+            keys.resize(valid.limit);
+        }
         return keys;
     }
 
@@ -410,7 +412,7 @@ namespace Zest {
         if (this->storageManager->flush() && this->indexManager->flush()) {
             return true;
         }
-        ZestLog(LogLevel::ERROR, std::format("Shard {} - flush failed", this->shardId));
+        ZestLog(LogLevel::Error, std::format("Shard {} - flush failed", this->shardId));
         return false;
     }
 
@@ -422,7 +424,7 @@ namespace Zest {
 
     void Shard::stop() {
         if (!this->isStopped.load()) {
-            ZestLog(LogLevel::INFO, std::format("Exiting shard {}...", shardId));
+            ZestLog(LogLevel::Info, std::format("Exiting shard {}...", shardId));
 
             this->compactorThread.request_stop();
             this->threadCV.notify_all();
@@ -434,7 +436,7 @@ namespace Zest {
     }
 
     void Shard::verifyIndexEntries() {
-        ZestLog(LogLevel::INFO, std::format("Shard {} - Verifying index entries...", this->shardId));
+        ZestLog(LogLevel::Info, std::format("Shard {} - Verifying index entries...", this->shardId));
 
         std::vector<IndexEntry> entries = this->indexManager->getAll();
         int verifiedCount = 0;
@@ -445,10 +447,9 @@ namespace Zest {
                 continue;
             }
 
-            std::string storedValue = this->storageManager->read(entry);
-
-            if (storedValue.empty()) {
-                ZestLog(LogLevel::WARNING, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, entry.key));
+            // The segment's size is enough to detect values lost in a crash, without reading every value at boot
+            if (!this->storageManager->contains(entry)) {
+                ZestLog(LogLevel::Warning, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, entry.key));
 
                 IndexEntry tombstoneEntry = entry;
                 tombstoneEntry.isTombstone = true;
@@ -459,7 +460,7 @@ namespace Zest {
             }
         }
 
-        ZestLog(LogLevel::INFO, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
+        ZestLog(LogLevel::Info, std::format("Shard {} - Index verification complete: {} valid, {} removed", this->shardId, verifiedCount, removedCount));
     }
 
     void Shard::reloadSettings(Settings& set) {

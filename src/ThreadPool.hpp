@@ -6,6 +6,7 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace Zest {
@@ -16,7 +17,7 @@ namespace Zest {
         ~ThreadPool();
 
         template <typename F>
-        std::future<typename std::result_of<F()>::type> enqueue(F&& task);
+        std::future<std::invoke_result_t<F>> enqueue(F&& task);
 
         void waitAll();
 
@@ -36,8 +37,8 @@ namespace Zest {
     };
 
     template <typename F>
-    std::future<typename std::result_of<F()>::type> ThreadPool::enqueue(F&& task) {
-        using returnType = typename std::result_of<F()>::type;
+    std::future<std::invoke_result_t<F>> ThreadPool::enqueue(F&& task) {
+        using returnType = std::invoke_result_t<F>;
 
         auto taskPtr = std::make_shared<std::packaged_task<returnType()>>(std::forward<F>(task));
         std::future<returnType> result = taskPtr->get_future();

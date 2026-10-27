@@ -17,15 +17,15 @@ namespace Zest {
 
     std::string levelToString(LogLevel level) {
         switch (level) {
-        case LogLevel::INFO:
+        case LogLevel::Info:
             return "INFO";
-        case LogLevel::DEBUG:
+        case LogLevel::Debug:
             return "DEBUG";
-        case LogLevel::WARNING:
+        case LogLevel::Warning:
             return "WARNING";
-        case LogLevel::ERROR:
+        case LogLevel::Error:
             return "ERROR";
-        case LogLevel::CRITICAL:
+        case LogLevel::Critical:
             return "CRITICAL";
         default:
             return "UNKNOWN";
@@ -34,13 +34,13 @@ namespace Zest {
 
     std::string levelToColorCode(LogLevel level) {
         switch (level) {
-        case LogLevel::DEBUG:
+        case LogLevel::Debug:
             return "\x1b[36m";
-        case LogLevel::WARNING:
+        case LogLevel::Warning:
             return "\x1b[33m";
-        case LogLevel::ERROR:
+        case LogLevel::Error:
             return "\x1b[31m";
-        case LogLevel::CRITICAL:
+        case LogLevel::Critical:
             return "\x1b[35m";
         default:
             return "\x1b[0m";
@@ -48,7 +48,7 @@ namespace Zest {
     }
 
     void ZestLog(LogLevel level, const std::string& message) {
-        if (!isDebug && level == LogLevel::DEBUG)
+        if (!isDebug && level == LogLevel::Debug)
             return;
 
         auto now = std::chrono::system_clock::now();

@@ -47,10 +47,10 @@ TEST_CASE("Messages constants are defined", "[server]") {
 }
 
 TEST_CASE("ResultType SUCCESS and ERROR codes", "[server]") {
-    ResultType ok{ ResultType::Code::SUCCESS, "ok", 0 };
-    ResultType err{ ResultType::Code::ERROR, "fail", 0 };
-    REQUIRE(ok.code == ResultType::Code::SUCCESS);
-    REQUIRE(err.code == ResultType::Code::ERROR);
+    ResultType ok{ ResultType::Code::Success, "ok", 0 };
+    ResultType err{ ResultType::Code::Error, "fail", 0 };
+    REQUIRE(ok.code == ResultType::Code::Success);
+    REQUIRE(err.code == ResultType::Code::Error);
 }
 
 TEST_CASE("ResultType default affectedRows is zero", "[server]") {

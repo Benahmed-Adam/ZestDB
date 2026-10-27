@@ -19,7 +19,7 @@ void populate(Zest::ZestDB* db) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
 
-    Zest::ZestLog(Zest::LogLevel::INFO, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
+    Zest::ZestLog(Zest::LogLevel::Info, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
 void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard) {
@@ -47,7 +47,7 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
             try {
                 std::cout << Zest::ZestDB::responseToJson(db->execCmd(line)) << std::endl;
             } catch (const std::exception& e) {
-                Zest::ZestLog(Zest::LogLevel::ERROR, std::format("Command failed with an exception: {}", e.what()));
+                Zest::ZestLog(Zest::LogLevel::Error, std::format("Command failed with an exception: {}", e.what()));
             }
         }
     }
@@ -62,10 +62,10 @@ int main(int argc, char** argv) {
 
     signals.async_wait([&](const asio::error_code& error, int) {
         if (!error) {
-            Zest::ZestLog(Zest::LogLevel::WARNING, "Interrupt signal detected, exiting...");
+            Zest::ZestLog(Zest::LogLevel::Warning, "Interrupt signal detected, exiting...");
             work.reset();
             db.stop();
-            Zest::ZestLog(Zest::LogLevel::WARNING, "Press Enter to quit");
+            Zest::ZestLog(Zest::LogLevel::Warning, "Press Enter to quit");
         }
     });
 
@@ -76,17 +76,13 @@ int main(int argc, char** argv) {
 
     std::thread cmdThread(cmd, &db, &work);
 
-    std::vector<std::thread> ioThreads;
-    for (unsigned int i = 0; i < std::max(1u, std::thread::hardware_concurrency()); i++) {
-        ioThreads.emplace_back([&db]() { db.ioCtx.run(); });
-    }
+    // Accepts connections and handles signals; sessions run on the server's own IO threads
+    std::thread ioThread([&db]() { db.ioCtx.run(); });
 
     db.srv->listen("0.0.0.0", db.settings.WebPort);
 
     cmdThread.join();
-    for (auto& t : ioThreads) {
-        t.join();
-    }
+    ioThread.join();
     if (popThread.joinable()) {
         popThread.join();
     }

@@ -23,3 +23,16 @@ jobs:
       run: make
     - name: run tests
       run: make tests
+
+  build-windows:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: cmake -S . -B build -DOPENSSL_ROOT_DIR="C:/Program Files/OpenSSL"
+    - name: build
+      run: cmake --build build --config Release --parallel
+    - name: run tests
+      run: ctest --test-dir build -C Release --output-on-failure

@@ -61,12 +61,12 @@ public:
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd empty input", "[commands]") {
     auto r = db->execCmd("");
-    REQUIRE(r.code == ResultType::Code::ERROR);
+    REQUIRE(r.code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd whitespace only", "[commands]") {
     auto r = db->execCmd("   \t  ");
-    REQUIRE(r.code == ResultType::Code::ERROR);
+    REQUIRE(r.code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd unknown command", "[commands]") {
@@ -76,14 +76,14 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd unknown command", "[commands]") {
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd help", "[commands]") {
     auto r = db->execCmd("h");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set and get", "[commands]") {
     auto s = db->execCmd("s key1 value1");
-    REQUIRE(s.code == ResultType::Code::SUCCESS);
+    REQUIRE(s.code == ResultType::Code::Success);
     auto g = db->execCmd("g key1");
-    REQUIRE(g.code == ResultType::Code::SUCCESS);
+    REQUIRE(g.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd get missing key", "[commands]") {
@@ -110,7 +110,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set preserves spaces in value", "[co
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd del existing key", "[commands]") {
     db->execCmd("s key1 val");
     auto r = db->execCmd("d key1");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd del missing key", "[commands]") {
@@ -127,7 +127,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby valid re", "[commands]") {
     db->execCmd("s test_1 v1");
     db->execCmd("s test_2 v2");
     auto r = db->execCmd("gb re test_.*");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
 }
 
@@ -141,7 +141,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby with lim", "[commands]") {
     db->execCmd("s a2 v2");
     db->execCmd("s a3 v3");
     auto r = db->execCmd("gb sw a lim 2");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
 }
 
@@ -154,7 +154,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby valid", "[commands]") {
     db->execCmd("s abc_1 old");
     db->execCmd("s abc_2 old");
     auto r = db->execCmd("sb sw abc_ newval");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby preserves spaces in value", "[commands]") {
@@ -174,7 +174,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby valid", "[commands]") {
     db->execCmd("s abc_2 v2");
     db->execCmd("s xyz_1 v3");
     auto r = db->execCmd("db sw abc_");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
 }
 
@@ -185,19 +185,19 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby invalid mode", "[commands]") {
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd case insensitive", "[commands]") {
     auto r = db->execCmd("S key1 value1");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     auto g = db->execCmd("G key1");
-    REQUIRE(g.code == ResultType::Code::SUCCESS);
+    REQUIRE(g.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getconfig", "[commands]") {
     auto r = db->execCmd("gcfg");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd flush", "[commands]") {
     auto r = db->execCmd("f");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.response.find("Flush successful") != std::string::npos);
 }
 
@@ -208,7 +208,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg missing args", "[commands]") {
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg segsize valid", "[commands]") {
     auto r = db->execCmd("scfg segsize 200000");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg segsize too small", "[commands]") {
@@ -218,7 +218,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg segsize too small", "[commands]
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxkeysize valid", "[commands]") {
     auto r = db->execCmd("scfg maxkeysize 128");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxkeysize too large", "[commands]") {
@@ -228,7 +228,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxkeysize too large", "[comman
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxvaluesize valid", "[commands]") {
     auto r = db->execCmd("scfg maxvaluesize 5000");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxvaluesize too large", "[commands]") {
@@ -238,17 +238,17 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg maxvaluesize too large", "[comm
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg cachesize", "[commands]") {
     auto r = db->execCmd("scfg cachesize 5000");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg isdebug true", "[commands]") {
     auto r = db->execCmd("scfg isdebug true");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg isdebug false", "[commands]") {
     auto r = db->execCmd("scfg isdebug 0");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg isdebug invalid", "[commands]") {
@@ -271,7 +271,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby with lim", "[commands]") {
     db->execCmd("s a2 v2");
     db->execCmd("s a3 v3");
     auto r = db->execCmd("db sw a lim 1");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 1);
 }
 
@@ -290,7 +290,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd readonly blocks del", "[commands]") 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd readonly allows get", "[commands]") {
     db->execCmd("scfg readonly true");
     auto r = db->execCmd("g key1");
-    REQUIRE(r.code == ResultType::Code::ERROR);
+    REQUIRE(r.code == ResultType::Code::Error);
     REQUIRE(r.response.find("read-only") == std::string::npos);
 }
 
@@ -303,7 +303,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd jsononly blocks non-json", "[command
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd jsononly allows json", "[commands]") {
     db->execCmd("scfg jsononly true");
     auto r = db->execCmd("s key1 {\"a\":1}");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby lim counts matches, not scanned keys", "[commands]") {
@@ -320,7 +320,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd invalid lim is an error, not an exce
     for (const char* cmd : { "gb sw a lim abc", "sb sw a val lim x", "db sw a lim -1" }) {
         ResultType r;
         REQUIRE_NOTHROW(r = db->execCmd(cmd));
-        REQUIRE(r.code == ResultType::Code::ERROR);
+        REQUIRE(r.code == ResultType::Code::Error);
         REQUIRE(r.response == Messages::INVALID_LIMIT);
     }
 }
@@ -337,14 +337,14 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby value equal to pattern", "[com
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd accepts long command names", "[commands]") {
-    REQUIRE(db->execCmd("set key1 v1").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("set key1 v1").code == ResultType::Code::Success);
     REQUIRE(db->execCmd("GET key1").response == "v1");
     REQUIRE(db->execCmd("getby sw key").affectedRows == 1);
     REQUIRE(db->execCmd("setby sw key v2").affectedRows == 1);
     REQUIRE(db->execCmd("delby sw key").affectedRows == 1);
-    REQUIRE(db->execCmd("del key1").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("flush").code == ResultType::Code::SUCCESS);
-    REQUIRE(db->execCmd("help").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("del key1").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("flush").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("help").code == ResultType::Code::Success);
 }
 
 TEST_CASE("ZestDB missing config fields fall back to defaults", "[commands]") {
@@ -393,7 +393,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby regex without catastrophic bac
     db->set(std::string(30, 'a') + "b", "v");
     auto start = std::chrono::steady_clock::now();
     auto r = db->execCmd("gb re (a+)+$");
-    REQUIRE(r.code == ResultType::Code::SUCCESS);
+    REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 0);
     REQUIRE(std::chrono::steady_clock::now() - start < std::chrono::seconds(1));
 }
@@ -443,7 +443,7 @@ TEST_CASE("ZestDB reload with a broken config keeps the users", "[commands]") {
     ZestDB db;
     REQUIRE(db.validateToken("alice", sha256("alicesecret")));
     tmp.writeConfig("users: [\n  - user: {\n");
-    REQUIRE(db.execCmd("r").code == ResultType::Code::ERROR);
+    REQUIRE(db.execCmd("r").code == ResultType::Code::Error);
     REQUIRE(db.validateToken("alice", sha256("alicesecret")));
 }
 
@@ -465,9 +465,9 @@ TEST_CASE("ZestDB archives do not contain previous archives", "[commands]") {
     tmp.writeConfig(std::format("DbPath: {}\nDBPort: 29537\nWebPort: 29538\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n", tmp.dir.string(), (tmp.dir / "archive").string()));
     ZestDB db;
     db.execCmd("s key value");
-    REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+    REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+    REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
 
     for (const auto& file : fs::directory_iterator(tmp.dir / "archive")) {
         libzippp::ZipArchive zip(file.path().string());
@@ -491,8 +491,8 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby/delby with lim pick the smalle
         REQUIRE(db->get(k).response == "old");
     }
     REQUIRE(db->execCmd("db sw k lim 2").affectedRows == 2);
-    REQUIRE(db->get("k1").code == ResultType::Code::ERROR);
-    REQUIRE(db->get("k2").code == ResultType::Code::ERROR);
+    REQUIRE(db->get("k1").code == ResultType::Code::Error);
+    REQUIRE(db->get("k2").code == ResultType::Code::Error);
     REQUIRE(db->get("k3").response == "new");
 }
 
@@ -502,30 +502,30 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set keeps trailing spaces but not th
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg refuses negative numbers and zero intervals", "[commands]") {
-    REQUIRE(db->execCmd("scfg cachesize -1").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("scfg segsize -1").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("scfg flushinterval 0").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("scfg archivecreationdelay 0").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("scfg compactinginterval 0").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg cachesize -1").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("scfg segsize -1").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("scfg flushinterval 0").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("scfg archivecreationdelay 0").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("scfg compactinginterval 0").code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "responses stay valid JSON for values that are not UTF-8", "[commands]") {
-    REQUIRE(db->execCmd(std::string("s k \xff")).code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd(std::string("s k \xff")).code == ResultType::Code::Success);
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("g k")));
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("gb sw k")));
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd(std::string("scfg \xff x"))));
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg cannot toggle useSSL at runtime", "[commands]") {
-    REQUIRE(db->execCmd("scfg usessl true").code == ResultType::Code::ERROR);
-    REQUIRE(db->execCmd("scfg usessl false").code == ResultType::Code::ERROR);
+    REQUIRE(db->execCmd("scfg usessl true").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("scfg usessl false").code == ResultType::Code::Error);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd refuses regexes that would blow up the regex compiler", "[commands]") {
     REQUIRE(db->execCmd("gb re " + std::string(50000, '(') + "a" + std::string(50000, ')')).response == Messages::INVALID_REGEX);
     REQUIRE(db->execCmd("gb re ((a{1000}){1000}){1000}").response == Messages::INVALID_REGEX);
-    REQUIRE(db->execCmd("gb re a{50}b{50}").code == ResultType::Code::SUCCESS);
-    REQUIRE(db->execCmd("gb re (ab|cd)+[a-z]{3}").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("gb re a{50}b{50}").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("gb re (ab|cd)+[a-z]{3}").code == ResultType::Code::Success);
 }
 
 TEST_CASE("ZestDB keeps only the configured number of archives", "[commands]") {
@@ -533,7 +533,7 @@ TEST_CASE("ZestDB keeps only the configured number of archives", "[commands]") {
     ZestDB db;
     db.execCmd("s key value");
     for (int i = 0; i < 3; i++) {
-        REQUIRE(db.execCmd("save").code == ResultType::Code::SUCCESS);
+        REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
     }
     size_t zips = 0;
     for (const auto& entry : fs::directory_iterator(tmp.dir / "archive")) {

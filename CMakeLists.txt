@@ -57,7 +57,9 @@ target_include_directories(libzippp SYSTEM PUBLIC ${CMAKE_BINARY_DIR}/include ${
 target_link_libraries(libzippp PUBLIC libzip::zip)
 
 add_library(asio INTERFACE)
-target_include_directories(asio SYSTEM INTERFACE ${asio_SOURCE_DIR}/asio/include)
+# Depending on the CMake version, extracting the archive strips one or two folder levels
+find_path(ASIO_INCLUDE_DIR asio.hpp PATHS ${asio_SOURCE_DIR}/asio/include ${asio_SOURCE_DIR}/include NO_DEFAULT_PATH NO_CACHE REQUIRED)
+target_include_directories(asio SYSTEM INTERFACE ${ASIO_INCLUDE_DIR})
 
 FetchContent_Declare(Catch2
     URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.1.tar.gz
@@ -71,14 +73,26 @@ list(REMOVE_ITEM ZEST_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(zestcore STATIC ${ZEST_SOURCES})
 target_include_directories(zestcore PUBLIC src)
 target_link_libraries(zestcore PUBLIC asio OpenSSL::SSL OpenSSL::Crypto libzippp Threads::Threads)
-target_compile_options(zestcore PUBLIC
-    -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -Wnon-virtual-dtor -Wno-deprecated-declarations
-    $<$<CONFIG:Release>:-O3>
-    $<$<CONFIG:Debug>:-g3 -O0>)
+if(MSVC)
+    target_compile_options(zestcore PUBLIC /W3 /permissive- /utf-8 /bigobj /Zc:__cplusplus)
+    # MSVC's std::regex backtracks (no libstdc++ __polynomial mode): cap the steps per match so a hostile pattern fails fast instead of spending ~1 s per key
+    target_compile_definitions(zestcore PUBLIC _REGEX_MAX_COMPLEXITY_COUNT=100000)
+else()
+    target_compile_options(zestcore PUBLIC
+        -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -Wnon-virtual-dtor -Wno-deprecated-declarations
+        $<$<CONFIG:Release>:-O3>
+        $<$<CONFIG:Debug>:-g3 -O0>)
+endif()
+if(WIN32)
+    # windows.h defines min/max and many short macros (ERROR, small...): keep it lean
+    target_compile_definitions(zestcore PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+    target_link_libraries(zestcore PUBLIC ws2_32 mswsock crypt32)
+endif()
 
 add_executable(zestdb src/main.cpp)
 target_link_libraries(zestdb PRIVATE zestcore)
-set_target_properties(zestdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+# $<0:> stops multi-config generators (Visual Studio) from adding a bin/<Config>/ subfolder
+set_target_properties(zestdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/$<0:>)
 
 option(ZESTDB_BUILD_TESTS "Build the Catch2 test suite" ON)
 if(ZESTDB_BUILD_TESTS)

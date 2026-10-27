@@ -5,11 +5,11 @@
 namespace Zest {
 
     enum class LogLevel {
-        INFO,
-        DEBUG,
-        WARNING,
-        ERROR,
-        CRITICAL
+        Info,
+        Debug,
+        Warning,
+        Error,
+        Critical
     };
 
     std::string levelToColorCode(LogLevel level);

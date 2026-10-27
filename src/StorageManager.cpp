@@ -25,7 +25,7 @@ namespace Zest {
             uint32_t segId;
             auto [end, ec] = std::from_chars(stem.data(), stem.data() + stem.size(), segId);
             if (ec != std::errc() || end != stem.data() + stem.size()) {
-                ZestLog(LogLevel::WARNING, std::format("StorageManager - Ignoring unexpected file: {}", entry.path().string()));
+                ZestLog(LogLevel::Warning, std::format("StorageManager - Ignoring unexpected file: {}", entry.path().string()));
                 continue;
             }
             this->segments[segId] = std::make_unique<DataSegment>(this->settings, segId);
@@ -75,7 +75,7 @@ namespace Zest {
         IndexEntry result = this->appendToSegment(seg, value);
 
         if (result.segmentId == INVALID_SEGMENT_ID) {
-            ZestLog(LogLevel::DEBUG, std::format("StorageManager::append - segment {} full, creating new segment", seg->getSegmentId()));
+            ZestLog(LogLevel::Debug, std::format("StorageManager::append - segment {} full, creating new segment", seg->getSegmentId()));
             uint32_t nextId = this->latestSegmentId.load() + 1;
 
             this->segments[nextId] = std::make_unique<DataSegment>(this->settings, nextId);
@@ -86,13 +86,18 @@ namespace Zest {
         return result;
     }
 
+    bool StorageManager::contains(const IndexEntry& entry) const {
+        auto it = this->segments.find(entry.segmentId);
+        return it != this->segments.end() && entry.offset + entry.size <= it->second->getWritePosition();
+    }
+
     std::string StorageManager::read(const IndexEntry& entry) {
         auto it = this->segments.find(entry.segmentId);
         if (it != this->segments.end()) {
             return it->second->read(entry.offset, entry.size);
         }
 
-        ZestLog(LogLevel::ERROR, std::format("StorageManager::read - segment not found: {}", entry.segmentId));
+        ZestLog(LogLevel::Error, std::format("StorageManager::read - segment not found: {}", entry.segmentId));
         return "";
     }
 
@@ -115,7 +120,7 @@ namespace Zest {
 
                 if (std::filesystem::exists(segPath)) {
                     if (!std::filesystem::remove(segPath)) {
-                        ZestLog(LogLevel::ERROR, std::format("StorageManager - Failed to remove file: {}", segPath.string()));
+                        ZestLog(LogLevel::Error, std::format("StorageManager - Failed to remove file: {}", segPath.string()));
                     }
                 }
             }

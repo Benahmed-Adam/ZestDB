@@ -30,6 +30,7 @@ namespace Zest {
         void clearAllWAL();
         void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
         bool appendToWAL(const std::string& key, const std::string& command);
+        bool syncWAL();
 
         void reloadSettings(Settings& set);
 

@@ -88,9 +88,13 @@ public:
     }
 
     std::string sendRaw(const std::string& bytes) {
-        asio::write(sock, asio::buffer(bytes));
-        asio::streambuf buf;
         asio::error_code ec;
+        // Writing to a socket the server already closed fails on Windows (connection reset) but succeeds on Linux: both mean "closed"
+        asio::write(sock, asio::buffer(bytes), ec);
+        if (ec) {
+            return "";
+        }
+        asio::streambuf buf;
         asio::read_until(sock, buf, '\n', ec);
         return std::string(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
     }
@@ -166,7 +170,7 @@ TEST_CASE_METHOD(SessionFixture, "Session is revoked when a reload removes its u
     REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(Messages::AUTH_SUCCESS) != std::string::npos);
     REQUIRE(c.send("s k v").find(Messages::SUCCESS_SET) != std::string::npos);
     writeConfig(false);
-    REQUIRE(db->execCmd("r").code == ResultType::Code::SUCCESS);
+    REQUIRE(db->execCmd("r").code == ResultType::Code::Success);
     REQUIRE(c.send("g k").find(Messages::SESSION_REVOKED) != std::string::npos);
 }
 

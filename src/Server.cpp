@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <format>
+#include <future>
 #include <istream>
 
 #include "Logger.hpp"
@@ -26,21 +27,22 @@ namespace Zest {
         std::error_code endpointError;
         tcp::endpoint remote = std::visit([&endpointError](auto& s) { return s.lowest_layer().remote_endpoint(endpointError); }, stream_);
         if (endpointError) {
-            ZestLog(LogLevel::INFO, std::format("Session: client left before the session started: {}", endpointError.message()));
+            ZestLog(LogLevel::Info, std::format("Session: client left before the session started: {}", endpointError.message()));
             this->close_stream();
             return;
         }
         this->remote_ip_ = remote.address().to_string();
 
         if (!this->db_.isAddressAllowed(this->remote_ip_)) {
-            ZestLog(LogLevel::WARNING, std::format("Session: Unauthorized IP: {}", this->remote_ip_));
+            ZestLog(LogLevel::Warning, std::format("Session: Unauthorized IP: {}", this->remote_ip_));
             this->queue_write("unauthorized", true);
             return;
         }
 
-        ZestLog(LogLevel::INFO, std::format("Session: client connected from {}:{}", this->remote_ip_, remote.port()));
+        ZestLog(LogLevel::Info, std::format("Session: client connected from {}:{}", this->remote_ip_, remote.port()));
 
-        this->arm_timer();
+        this->touch();
+        this->watch_deadline();
         if (std::holds_alternative<asio::ssl::stream<tcp::socket>>(stream_)) {
             auto& ssl_stream = std::get<asio::ssl::stream<tcp::socket>>(stream_);
             ssl_stream.async_handshake(asio::ssl::stream_base::server, [self = this->shared_from_this()](std::error_code ec) {
@@ -55,18 +57,28 @@ namespace Zest {
         }
     }
 
-    void Session::arm_timer() {
-        this->timer_.expires_after(this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
+    void Session::touch() {
+        this->deadline_ = std::chrono::steady_clock::now() + (this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
+    }
+
+    // A request only moves deadline_ forward: the timer is armed once and re-waits until the deadline really passes
+    void Session::watch_deadline() {
+        this->timer_.expires_at(this->deadline_);
         this->timer_.async_wait([self = this->shared_from_this()](std::error_code ec) {
-            if (!ec && self->timer_.expiry() <= std::chrono::steady_clock::now()) {
-                ZestLog(LogLevel::INFO, std::format("Session: {} timed out", self->remote_ip_));
+            if (ec) {
+                return;
+            }
+            if (std::chrono::steady_clock::now() >= self->deadline_) {
+                ZestLog(LogLevel::Info, std::format("Session: {} timed out", self->remote_ip_));
                 self->close_stream();
+            } else {
+                self->watch_deadline();
             }
         });
     }
 
     void Session::do_read_size() {
-        this->arm_timer();
+        this->touch();
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto& stream) {
@@ -77,14 +89,14 @@ namespace Zest {
                         is.read(reinterpret_cast<char*>(&payload_size), 4);
                         payload_size = ntohl(payload_size);
                         if (payload_size > (this->authenticated_ ? MAX_PAYLOAD_SIZE : MAX_UNAUTHENTICATED_PAYLOAD_SIZE)) {
-                            ZestLog(LogLevel::WARNING, std::format("Session: payload of {} bytes refused", payload_size));
-                            this->queue_write(ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::PAYLOAD_TOO_LARGE, 0 }) + "\n", true);
+                            ZestLog(LogLevel::Warning, std::format("Session: payload of {} bytes refused", payload_size));
+                            this->queue_write(ZestDB::responseToJson({ ResultType::Code::Error, Messages::PAYLOAD_TOO_LARGE, 0 }) + "\n", true);
                             return;
                         }
                         this->do_read_command(payload_size);
                     } else {
                         if (ec != asio::error::operation_aborted) {
-                            ZestLog(LogLevel::INFO, "Client disconnected");
+                            ZestLog(LogLevel::Info, "Client disconnected");
                         }
                         this->close_stream();
                     }
@@ -94,7 +106,6 @@ namespace Zest {
     }
 
     void Session::do_read_command(uint32_t payload_size) {
-        this->arm_timer();
         auto self(this->shared_from_this());
         std::visit(
             [this, self, payload_size](auto& stream) {
@@ -114,7 +125,7 @@ namespace Zest {
 
                     while (offset < payload_size && !should_close) {
                         if (offset + 4 > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::Error, Messages::MALFORMED_BATCH, 0 });
                             break;
                         }
 
@@ -124,7 +135,7 @@ namespace Zest {
                         offset += 4;
 
                         if (offset + cmd_size > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::MALFORMED_BATCH, 0 });
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::Error, Messages::MALFORMED_BATCH, 0 });
                             break;
                         }
 
@@ -137,7 +148,15 @@ namespace Zest {
                         final_result += cmd_result;
                     }
 
-                    this->queue_write(final_result + "\n", should_close);
+                    // The batch's WAL records reach the OS (or the disk with fsyncOnWrite) before anything is acknowledged
+                    if (!this->db_.syncWAL()) {
+                        ZestLog(LogLevel::Error, "Session: the WAL could not be written, closing without acknowledging the batch");
+                        this->close_stream();
+                        return;
+                    }
+
+                    final_result += '\n';
+                    this->queue_write(final_result, should_close);
 
                     if (!should_close) {
                         this->do_read_size();
@@ -153,37 +172,37 @@ namespace Zest {
             const size_t dotPos = cmd.find('.', authPrefix.size());
             should_close = true;
             if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
-                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
             }
 
             std::string username = cmd.substr(authPrefix.size(), dotPos - authPrefix.size());
             if (!this->db_.authAllowed(username)) {
-                ZestLog(LogLevel::WARNING, std::format("Session: user {} is locked out after too many failed authentications ({})", username, this->remote_ip_));
-                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+                ZestLog(LogLevel::Warning, std::format("Session: user {} is locked out after too many failed authentications ({})", username, this->remote_ip_));
+                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
             }
             if (!this->db_.authenticate(username, cmd.substr(dotPos + 1))) {
                 this->db_.recordAuthResult(username, false);
-                return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::AUTH_FAILED, 0 });
+                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
             }
 
             this->db_.recordAuthResult(username, true);
             this->authenticated_ = true;
             this->username_ = std::move(username);
             should_close = false;
-            return ZestDB::responseToJson({ ResultType::Code::SUCCESS, Messages::AUTH_SUCCESS, 0 });
+            return ZestDB::responseToJson({ ResultType::Code::Success, Messages::AUTH_SUCCESS, 0 });
         }
 
         std::optional<Role> role = this->db_.roleOf(this->username_);
         if (!role) {
             should_close = true;
-            return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::SESSION_REVOKED, 0 });
+            return ZestDB::responseToJson({ ResultType::Code::Error, Messages::SESSION_REVOKED, 0 });
         }
 
         try {
-            return ZestDB::responseToJson(this->db_.execCmd(cmd, *role));
+            return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false));
         } catch (const std::exception& e) {
-            ZestLog(LogLevel::ERROR, std::format("Session: command failed with an exception: {}", e.what()));
-            return ZestDB::responseToJson({ ResultType::Code::ERROR, Messages::INTERNAL_ERROR, 0 });
+            ZestLog(LogLevel::Error, std::format("Session: command failed with an exception: {}", e.what()));
+            return ZestDB::responseToJson({ ResultType::Code::Error, Messages::INTERNAL_ERROR, 0 });
         }
     }
 
@@ -227,32 +246,78 @@ namespace Zest {
             this->stream_);
     }
 
-    Server::Server(asio::io_context& io_context, uint16_t port, ZestDB& db)
-        : io_context_(io_context),
+    std::vector<std::unique_ptr<asio::io_context>> Server::makeWorkers() {
+        std::vector<std::unique_ptr<asio::io_context>> workers;
+        const unsigned int threads = std::max(1u, std::thread::hardware_concurrency());
+        for (unsigned int i = 0; i < threads; i++) {
+            workers.push_back(std::make_unique<asio::io_context>(1));
+        }
+        return workers;
+    }
+
+    Server::Server(asio::io_context&, uint16_t port, ZestDB& db)
+        : workers_(makeWorkers()),
           ssl_context_(asio::ssl::context::tls_server),
-          acceptor_(io_context, tcp::endpoint(tcp::v4(), port)),
-          accept_retry_timer_(io_context),
+          acceptor_(*workers_[0], tcp::endpoint(tcp::v4(), port)),
+          accept_retry_timer_(*workers_[0]),
           db_(db),
           useSSL_(db.settings.useSSL),
           maxConnections_(db.settings.MaxConnections),
           limits_{ std::chrono::seconds(db.settings.AuthTimeout), std::chrono::seconds(db.settings.IdleTimeout) } {
-        ZestLog(LogLevel::INFO, std::format("Server: listening on port {}", port));
+        for (auto& worker : this->workers_) {
+            this->workGuards_.push_back(asio::make_work_guard(*worker));
+        }
+        ZestLog(LogLevel::Info, std::format("Server: listening on port {} with {} IO threads", port, this->workers_.size()));
         if (this->useSSL_) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 |
                                      asio::ssl::context::single_dh_use);
-            ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath);
-            ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath, asio::ssl::context::pem);
+            ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath.string());
+            ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath.string(), asio::ssl::context::pem);
         }
         this->do_accept();
+        for (auto& worker : this->workers_) {
+            this->workerThreads_.emplace_back([&worker] { worker->run(); });
+        }
+    }
+
+    Server::~Server() {
+        this->stop();
+    }
+
+    void Server::stop() {
+        if (this->stopped_.exchange(true)) {
+            return;
+        }
+        // The acceptor is not thread-safe: close it from its own thread, and wait for that before stopping the workers
+        std::promise<void> closed;
+        asio::post(this->acceptor_.get_executor(), [this, &closed] {
+            std::error_code ignored;
+            this->acceptor_.close(ignored);
+            this->accept_retry_timer_.cancel();
+            closed.set_value();
+        });
+        closed.get_future().wait();
+        for (auto& guard : this->workGuards_) {
+            guard.reset();
+        }
+        for (auto& worker : this->workers_) {
+            worker->stop();
+        }
+        for (auto& t : this->workerThreads_) {
+            if (t.joinable() && t.get_id() != std::this_thread::get_id()) {
+                t.join();
+            }
+        }
     }
 
     void Server::do_accept() {
-        this->acceptor_.async_accept(asio::make_strand(this->io_context_), [this](std::error_code ec, tcp::socket socket) {
+        auto& worker = *this->workers_[this->nextWorker_++ % this->workers_.size()];
+        this->acceptor_.async_accept(worker.get_executor(), [this](std::error_code ec, tcp::socket socket) {
             if (ec == asio::error::operation_aborted) {
                 return;
             }
             if (ec) {
-                ZestLog(LogLevel::WARNING, std::format("Server: accept failed: {}", ec.message()));
+                ZestLog(LogLevel::Warning, std::format("Server: accept failed: {}", ec.message()));
                 this->accept_retry_timer_.expires_after(std::chrono::milliseconds(100));
                 this->accept_retry_timer_.async_wait([this](std::error_code timerError) {
                     if (!timerError) {
@@ -263,7 +328,7 @@ namespace Zest {
             }
 
             if (this->activeSessions_->load() >= this->maxConnections_) {
-                ZestLog(LogLevel::WARNING, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
+                ZestLog(LogLevel::Warning, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
                 std::error_code ignored;
                 socket.close(ignored);
             } else {
