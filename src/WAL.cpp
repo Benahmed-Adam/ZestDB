@@ -62,7 +62,6 @@ namespace Zest {
         return true;
     }
 
-    // Appends stay in the stream buffer until sync(): callers sync once per batch instead of once per command
     bool WAL::sync() {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->dirty) {

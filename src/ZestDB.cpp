@@ -29,7 +29,20 @@ namespace Zest {
 
     using json = nlohmann::json;
 
-    // Built by hand (keys in nlohmann's sorted order): this runs once per command and building a json object was its main cost
+    static bool copyPrefix(const fs::path& from, const fs::path& to, std::uintmax_t size) {
+        std::ifstream in(from, std::ios::binary);
+        std::ofstream out(to, std::ios::binary | std::ios::trunc);
+        std::vector<char> buffer(1 << 20);
+        while (size > 0) {
+            const auto chunk = static_cast<std::streamsize>(std::min<std::uintmax_t>(size, buffer.size()));
+            if (!in.read(buffer.data(), chunk) || !out.write(buffer.data(), chunk)) {
+                return false;
+            }
+            size -= static_cast<std::uintmax_t>(chunk);
+        }
+        return static_cast<bool>(out.flush());
+    }
+
     std::string ZestDB::responseToJson(const ResultType& resp) {
         std::string out = "{\"affectedRows\":";
         out += std::to_string(resp.affectedRows);
@@ -502,6 +515,8 @@ namespace Zest {
             fs::path folder_to_zip;
             fs::path archivePath;
             unsigned int retention;
+            std::vector<std::pair<fs::path, std::uintmax_t>> toCopy;
+            auto compactionLocks = this->shardManager->pauseCompaction();
             {
                 std::unique_lock<std::shared_mutex> lock(this->writeMtx);
                 this->flushLocked();
@@ -517,7 +532,6 @@ namespace Zest {
                 snapshot = archivePath / ".snapshot";
                 fs::remove_all(snapshot);
 
-                auto shardLocks = this->shardManager->lockAllShards();
                 const fs::path archiveDir = fs::weakly_canonical(archivePath);
                 for (auto it = fs::recursive_directory_iterator(folder_to_zip); it != fs::recursive_directory_iterator(); ++it) {
                     if (it->is_directory() && fs::weakly_canonical(it->path()) == archiveDir) {
@@ -527,10 +541,23 @@ namespace Zest {
                     if (it->is_regular_file()) {
                         fs::path target = snapshot / fs::relative(it->path(), folder_to_zip);
                         fs::create_directories(target.parent_path());
-                        fs::copy_file(it->path(), target);
+                        if (it->path().filename() == "WAL") {
+                            fs::copy_file(it->path(), target);
+                        } else {
+                            toCopy.emplace_back(it->path(), it->file_size());
+                        }
                     }
                 }
             }
+
+            for (const auto& [source, size] : toCopy) {
+                if (!copyPrefix(source, snapshot / fs::relative(source, folder_to_zip), size)) {
+                    ZestLog(LogLevel::Error, std::format("Error while copying : {}", source.string()));
+                    fs::remove_all(snapshot, ec);
+                    return false;
+                }
+            }
+            compactionLocks.clear();
 
             fs::path archive_full_path = archivePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", std::chrono::system_clock::now());
             libzippp::ZipArchive archive(archive_full_path.string());

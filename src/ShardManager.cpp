@@ -56,7 +56,6 @@ namespace Zest {
             futures.push_back(threadPool->enqueue([rawShard, &valid]() { return rawShard->getBy(valid); }));
         }
 
-        // Each shard returns a JSON array and the shared counter already caps the total at the limit: join the arrays as text instead of parsing them again
         std::string merged = "[";
         long long totalMatches = 0;
         for (auto& f : futures) {
@@ -162,7 +161,6 @@ namespace Zest {
     }
 
     void ShardManager::flush() {
-        // Shards flush in parallel: callers hold the global write lock, so the stall is the slowest shard's fsync, not their sum
         std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {
             Shard* rawShard = shard.get();
@@ -186,10 +184,10 @@ namespace Zest {
         }
     }
 
-    std::vector<std::shared_lock<std::shared_mutex>> ShardManager::lockAllShards() {
+    std::vector<std::shared_lock<std::shared_mutex>> ShardManager::pauseCompaction() {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
         for (auto& shard : this->shards) {
-            locks.emplace_back(shard->mutex());
+            locks.emplace_back(shard->compactionMutex());
         }
         return locks;
     }

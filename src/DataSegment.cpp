@@ -63,7 +63,6 @@ namespace Zest {
             return this->settings.SegSize + 1;
         }
 
-        // Seeking flushes the stream buffer: only seek when a read moved the position, so consecutive appends stay buffered
         if (!this->atWriteEnd) {
             this->segment.clear();
             this->segment.seekp(static_cast<std::streamoff>(startOffset), std::ios::beg);

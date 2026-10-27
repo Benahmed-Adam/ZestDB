@@ -17,7 +17,6 @@
 
 namespace Zest {
 
-    // Syncing a separate descriptor flushes the file's data too: the OS cache is per file, not per handle
     inline bool sync_to_disk(const std::filesystem::path& path) {
 #ifdef _WIN32
         HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);

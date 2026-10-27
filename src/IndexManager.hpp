@@ -107,7 +107,6 @@ namespace Zest {
         std::mutex mtx;
         Settings& settings;
 
-        // Every live entry is kept in memory: lookups never read the INDEX file, which is only appended to
         std::unordered_map<std::string, Location> memoryTree;
 
         bool canFlush;

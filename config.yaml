@@ -1,4 +1,4 @@
-DbPath: C:\Users\Adam\Documents\C++_Projects\ZestDB\DB # Path to the folder containing db files, can be relative or absolute
+DbPath: /home/test/DB # Path to the folder containing db files, can be relative or absolute
 SegSize: 67108864 # Max data segment size
 MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
@@ -20,9 +20,9 @@ useSSL: false # Use SSL ?
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute
 SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 
-ArchiveStoragePath: C:\Users\Adam\Documents\C++_Projects\ZestDB\DB\DBArchives
+ArchiveStoragePath: /home/test/DBArchives
 ArchiveCreationDelay: 100 # In seconds
-AutoArchiveSaving: true
+AutoArchiveSaving: false
 ArchiveRetention: 10 # Number of archives kept, the oldest are deleted (0 keeps all)
 
 MaxConnections: 1024 # Max simultaneous client connections

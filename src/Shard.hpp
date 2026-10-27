@@ -32,8 +32,8 @@ namespace Zest {
         void flush();
         void stop();
 
-        std::shared_mutex& mutex() {
-            return this->readMtx;
+        std::shared_mutex& compactionMutex() {
+            return this->compactionMtx;
         }
 
         int getShardId() const {
@@ -70,6 +70,7 @@ namespace Zest {
         std::unique_ptr<LRUCache> cache;
 
         std::shared_mutex readMtx;
+        std::shared_mutex compactionMtx;
 
         std::atomic<bool> isStopped = false;
         std::mutex compactorThreadMtx;

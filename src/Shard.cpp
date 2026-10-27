@@ -106,6 +106,7 @@ namespace Zest {
                     break;
                 }
 
+                std::unique_lock<std::shared_mutex> compactionLock(this->compactionMtx);
                 std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
                 this->compactSegments(indexManager->compact());
                 ZestLog(LogLevel::Debug, "Compactor - compaction done, waiting...");
@@ -399,7 +400,6 @@ namespace Zest {
         for (auto& entry : this->indexManager->findMatching(valid.func)) {
             keys.push_back(std::move(entry.key));
         }
-        // Only this shard's smallest keys can be among the global smallest ones
         if (keys.size() > valid.limit) {
             std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);
@@ -447,7 +447,6 @@ namespace Zest {
                 continue;
             }
 
-            // The segment's size is enough to detect values lost in a crash, without reading every value at boot
             if (!this->storageManager->contains(entry)) {
                 ZestLog(LogLevel::Warning, std::format("Shard {} - Removing invalid index entry for key: {}", this->shardId, entry.key));
 

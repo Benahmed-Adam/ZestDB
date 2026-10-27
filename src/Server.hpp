@@ -72,8 +72,6 @@ namespace Zest {
         void do_accept();
         static std::vector<std::unique_ptr<asio::io_context>> makeWorkers();
 
-        // One io_context per thread: a session stays on one thread, so no strand and no hand-off between threads per request.
-        // The acceptor lives in workers_[0] and is declared after it: every pending operation belongs to the server and is torn down with it.
         std::vector<std::unique_ptr<asio::io_context>> workers_;
         std::vector<asio::executor_work_guard<asio::io_context::executor_type>> workGuards_;
         std::vector<std::thread> workerThreads_;

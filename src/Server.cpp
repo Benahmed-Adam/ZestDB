@@ -61,7 +61,6 @@ namespace Zest {
         this->deadline_ = std::chrono::steady_clock::now() + (this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
     }
 
-    // A request only moves deadline_ forward: the timer is armed once and re-waits until the deadline really passes
     void Session::watch_deadline() {
         this->timer_.expires_at(this->deadline_);
         this->timer_.async_wait([self = this->shared_from_this()](std::error_code ec) {
@@ -148,7 +147,6 @@ namespace Zest {
                         final_result += cmd_result;
                     }
 
-                    // The batch's WAL records reach the OS (or the disk with fsyncOnWrite) before anything is acknowledged
                     if (!this->db_.syncWAL()) {
                         ZestLog(LogLevel::Error, "Session: the WAL could not be written, closing without acknowledging the batch");
                         this->close_stream();
@@ -288,7 +286,6 @@ namespace Zest {
         if (this->stopped_.exchange(true)) {
             return;
         }
-        // The acceptor is not thread-safe: close it from its own thread, and wait for that before stopping the workers
         std::promise<void> closed;
         asio::post(this->acceptor_.get_executor(), [this, &closed] {
             std::error_code ignored;

@@ -37,7 +37,6 @@ namespace Zest {
         return { key, loc.offset, loc.segmentId, loc.size, false };
     }
 
-    // The INDEX is a log replayed in order: a later record for a key replaces the earlier one, a tombstone removes the key
     void IndexManager::loadIndexIntoMemory() {
         std::unique_lock<std::mutex> lock(this->mtx);
         this->index.seekg(0, std::ios::end);
@@ -61,7 +60,6 @@ namespace Zest {
 
         this->index.clear();
         if (position < fsize) {
-            // A torn record at the end would also corrupt every record appended after it
             ZestLog(LogLevel::Warning, std::format("IndexManager - Truncating {} unreadable bytes at the end of the INDEX", fsize - position));
             this->index.close();
             std::filesystem::resize_file(this->indexPath, static_cast<std::uintmax_t>(position));
@@ -71,7 +69,6 @@ namespace Zest {
         ZestLog(LogLevel::Info, "IndexManager - Loaded entries into memory tree.");
     }
 
-    // The put position always stays at the end of the file, so appends stay buffered without any seek
     void IndexManager::append(const IndexEntry& entry) {
         this->index.clear();
         entry.serialize(this->index);
@@ -161,7 +158,6 @@ namespace Zest {
 
         std::unique_lock<std::mutex> lock(this->mtx);
 
-        // Write the compacted index aside and rename it over INDEX: a crash leaves either the old or the new file, never a partial one
         const std::filesystem::path tmpPath = this->settings.DbPath / "INDEX.tmp";
         std::fstream tmp(tmpPath, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
         for (const auto& entry : entries) {

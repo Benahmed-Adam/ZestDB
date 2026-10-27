@@ -76,7 +76,6 @@ int main(int argc, char** argv) {
 
     std::thread cmdThread(cmd, &db, &work);
 
-    // Accepts connections and handles signals; sessions run on the server's own IO threads
     std::thread ioThread([&db]() { db.ioCtx.run(); });
 
     db.srv->listen("0.0.0.0", db.settings.WebPort);

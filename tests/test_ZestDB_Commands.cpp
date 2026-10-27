@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <libzippp/libzippp.h>
 #include <thread>
 
@@ -541,6 +542,49 @@ TEST_CASE("ZestDB keeps only the configured number of archives", "[commands]") {
         zips++;
     }
     REQUIRE(zips == 2);
+}
+
+TEST_CASE("ZestDB keeps serving writes while an archive copies the files", "[commands]") {
+    TempDbDir tmp("zestdb_test_archive_nonblocking", "SegSize: 1048576\nMaxValueSize: 100000\nfsyncOnWrite: false\n", 29561);
+    ZestDB db;
+    for (int i = 0; i < 640; i++) {
+        REQUIRE(db.execCmd(std::format("s key{} {}", i, std::string(100000, static_cast<char>('a' + i % 26)))).code == ResultType::Code::Success);
+    }
+
+    const fs::path snapshot = tmp.dir / "archive" / ".snapshot";
+    auto filesInSnapshot = [&snapshot] {
+        size_t n = 0;
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(snapshot, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (it->is_regular_file(ec)) {
+                n++;
+            }
+        }
+        return n;
+    };
+
+    auto save = std::async(std::launch::async, [&db] { return db.execCmd("save").code; });
+    while (filesInSnapshot() == 0 && save.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+    }
+    REQUIRE(db.execCmd("s during copy").code == ResultType::Code::Success);
+    const size_t copiedWhenWriteReturned = filesInSnapshot();
+    REQUIRE(save.get() == ResultType::Code::Success);
+
+    fs::path zipPath;
+    for (const auto& entry : fs::directory_iterator(tmp.dir / "archive")) {
+        zipPath = entry.path();
+    }
+    libzippp::ZipArchive zip(zipPath.string());
+    REQUIRE(zip.open(libzippp::ZipArchive::ReadOnly));
+    size_t archivedFiles = 0;
+    for (const auto& entry : zip.getEntries()) {
+        if (entry.isFile()) {
+            archivedFiles++;
+        }
+    }
+    REQUIRE(copiedWhenWriteReturned > 0);
+    REQUIRE(copiedWhenWriteReturned < archivedFiles);
+    zip.close();
 }
 
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {

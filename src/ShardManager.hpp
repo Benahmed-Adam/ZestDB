@@ -26,7 +26,7 @@ namespace Zest {
 
         void flush();
         void stop();
-        std::vector<std::shared_lock<std::shared_mutex>> lockAllShards();
+        std::vector<std::shared_lock<std::shared_mutex>> pauseCompaction();
         void clearAllWAL();
         void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
         bool appendToWAL(const std::string& key, const std::string& command);
