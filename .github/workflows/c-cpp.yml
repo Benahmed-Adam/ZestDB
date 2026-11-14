@@ -3,7 +3,6 @@ name: C/C++ CI
 on:
   push:
     branches: [ "main" ]
-    tags: [ "*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -44,6 +43,8 @@ jobs:
 
     needs: [ build, build-windows ]
     runs-on: ubuntu-latest
+    env:
+      PUSH_IMAGE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -53,10 +54,9 @@ jobs:
       with:
         images: benahmedadam/zestdb
         tags: |
-          type=ref,event=tag
           type=raw,value=latest,enable={{is_default_branch}}
           type=sha
-    - if: github.event_name != 'pull_request'
+    - if: env.PUSH_IMAGE == 'true'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -64,7 +64,7 @@ jobs:
     - uses: docker/build-push-action@v6
       with:
         context: .
-        push: ${{ github.event_name != 'pull_request' }}
+        push: ${{ env.PUSH_IMAGE == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
