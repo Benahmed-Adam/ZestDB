@@ -57,11 +57,11 @@ target_include_directories(libzippp SYSTEM PUBLIC ${CMAKE_BINARY_DIR}/include ${
 target_link_libraries(libzippp PUBLIC libzip::zip)
 
 add_library(asio INTERFACE)
-# Depending on the CMake version, extracting the archive strips one or two folder levels
-if(EXISTS ${asio_SOURCE_DIR}/asio/include/asio.hpp)
-    set(ASIO_INCLUDE_DIR ${asio_SOURCE_DIR}/asio/include)
-elseif(EXISTS ${asio_SOURCE_DIR}/include/asio.hpp)
+# The archive's asio/include is a symlink to include, which MSVC cannot open on Windows: prefer the real folder
+if(EXISTS ${asio_SOURCE_DIR}/include/asio.hpp)
     set(ASIO_INCLUDE_DIR ${asio_SOURCE_DIR}/include)
+elseif(EXISTS ${asio_SOURCE_DIR}/asio/include/asio.hpp)
+    set(ASIO_INCLUDE_DIR ${asio_SOURCE_DIR}/asio/include)
 else()
     message(FATAL_ERROR "asio.hpp not found in ${asio_SOURCE_DIR}")
 endif()
