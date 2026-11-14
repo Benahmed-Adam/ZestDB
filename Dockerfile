@@ -24,6 +24,6 @@ COPY --chown=zest docker/config.yaml /data/config.yaml
 
 WORKDIR /data
 USER zest
-VOLUME /data/db
+VOLUME ["/data/db", "/data/archive"]
 EXPOSE 7321 1237
 ENTRYPOINT ["zestdb"]
