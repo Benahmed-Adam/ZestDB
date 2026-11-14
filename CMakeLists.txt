@@ -58,7 +58,14 @@ target_link_libraries(libzippp PUBLIC libzip::zip)
 
 add_library(asio INTERFACE)
 # Depending on the CMake version, extracting the archive strips one or two folder levels
-find_path(ASIO_INCLUDE_DIR asio.hpp PATHS ${asio_SOURCE_DIR}/asio/include ${asio_SOURCE_DIR}/include NO_DEFAULT_PATH NO_CACHE REQUIRED)
+if(EXISTS ${asio_SOURCE_DIR}/asio/include/asio.hpp)
+    set(ASIO_INCLUDE_DIR ${asio_SOURCE_DIR}/asio/include)
+elseif(EXISTS ${asio_SOURCE_DIR}/include/asio.hpp)
+    set(ASIO_INCLUDE_DIR ${asio_SOURCE_DIR}/include)
+else()
+    message(FATAL_ERROR "asio.hpp not found in ${asio_SOURCE_DIR}")
+endif()
+message(STATUS "Using asio headers from ${ASIO_INCLUDE_DIR}")
 target_include_directories(asio SYSTEM INTERFACE ${ASIO_INCLUDE_DIR})
 
 FetchContent_Declare(Catch2

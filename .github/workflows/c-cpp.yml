@@ -31,8 +31,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    # The CMake preinstalled on the runner does not pass the asio include directory to MSBuild 18 (Visual Studio 2026)
-    - uses: lukka/get-cmake@latest
     - name: configure
       run: |
         cmake --version
