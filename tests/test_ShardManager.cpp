@@ -42,13 +42,13 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager del", "[shardmanager]") {
     sm.set("key1", "value1");
     sm.del("key1");
     auto result = sm.get("key1");
-    REQUIRE(result.code == ResultType::Code::Error);
+    REQUIRE(result.code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager get non-existent", "[shardmanager]") {
     ShardManager sm(settings, 4);
     auto result = sm.get("ghost");
-    REQUIRE(result.code == ResultType::Code::Error);
+    REQUIRE(result.code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardManagerFixture, "ShardManager getBy parallel merged results", "[shardmanager]") {
@@ -85,8 +85,8 @@ TEST_CASE_METHOD(ShardManagerFixture, "ShardManager delBy parallel", "[shardmana
     vr.func = [](std::string_view k) { return k.find("abc_") == 0; };
     vr.limit = UINT_MAX;
     sm.delBy(vr);
-    REQUIRE(sm.get("abc_1").code == ResultType::Code::Error);
-    REQUIRE(sm.get("abc_2").code == ResultType::Code::Error);
+    REQUIRE(sm.get("abc_1").code == ResultType::Code::KeyNotFound);
+    REQUIRE(sm.get("abc_2").code == ResultType::Code::KeyNotFound);
     REQUIRE(sm.get("xyz_1").code == ResultType::Code::Success);
 }
 

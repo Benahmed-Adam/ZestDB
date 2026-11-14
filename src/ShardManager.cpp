@@ -108,7 +108,7 @@ namespace Zest {
             for (const auto& key : this->firstMatchingKeys(valid)) {
                 updated += this->set(key, value).code == ResultType::Code::Success;
             }
-            return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", updated), updated };
+            return { ResultType::Code::Success, "", updated };
         }
 
         std::atomic<unsigned int> globalCount(0);
@@ -133,7 +133,7 @@ namespace Zest {
         if (valid.limit != UINT_MAX && totalUpdated > static_cast<long long>(valid.limit)) {
             totalUpdated = static_cast<long long>(valid.limit);
         }
-        return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", totalUpdated), totalUpdated };
+        return { ResultType::Code::Success, "", totalUpdated };
     }
 
     ResultType ShardManager::delBy(ValidationRule& valid) {
@@ -142,7 +142,7 @@ namespace Zest {
             for (const auto& key : this->firstMatchingKeys(valid)) {
                 deleted += this->del(key).code == ResultType::Code::Success;
             }
-            return { ResultType::Code::Success, std::format("Successfully deleted {} entries", deleted), deleted };
+            return { ResultType::Code::Success, "", deleted };
         }
 
         std::atomic<unsigned int> globalCount(0);
@@ -167,7 +167,7 @@ namespace Zest {
         if (valid.limit != UINT_MAX && totalDeleted > static_cast<long long>(valid.limit)) {
             totalDeleted = static_cast<long long>(valid.limit);
         }
-        return { ResultType::Code::Success, std::format("Successfully deleted {} entries", totalDeleted), totalDeleted };
+        return { ResultType::Code::Success, "", totalDeleted };
     }
 
     void ShardManager::flush() {

@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import re
 import socket
 import statistics
 import struct
@@ -54,7 +55,7 @@ class ZestClient:
 
 
 def count_errors(reply: bytes) -> int:
-    return reply.count(b'"code":1')
+    return len(re.findall(rb'"code":[1-9]', reply))
 
 
 def summarize(latencies_ms: list[float]) -> dict:

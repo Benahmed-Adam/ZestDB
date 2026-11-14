@@ -77,7 +77,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 ### Network Server
 - Custom asynchronous TCP server built on Asio, with one `io_context` per CPU core: each session stays on one thread, so requests are never handed between threads. Batched commands are acknowledged after a single WAL write (group commit).
 - Batch framing: a single request can carry multiple commands packed with 4-byte length prefixes, with one JSON response per command.
-- Per-request JSON output with `code`, `response` and `affectedRows` fields.
+- Per-request JSON output with `code`, `response` and `affectedRows` fields; errors are numeric codes (see [returncodes.md](returncodes.md)).
 - Authentication via a `Authorization: <user>.<sha256(user+password)>` handshake command before any data operation, with per-user roles (`read`, `write`, `admin`) checked on every command, so a `reload` that removes a user or changes its role applies to open sessions.
 - A user is locked out for 60 seconds after 5 failed authentications. The lock is per user rather than per address, so it still works behind a proxy such as ngrok (where every client comes from `127.0.0.1`); the flip side is that anyone can lock a known user out for a minute.
 - Connection limits: `MaxConnections` simultaneous sessions, `AuthTimeout` to finish the TLS handshake and authenticate, `IdleTimeout` for authenticated sessions.
@@ -185,15 +185,17 @@ Commands are whitespace-delimited and case-insensitive. For multi-word values, e
 
 ```
 zestdb> s name Bob
-{"code":0,"response":"Key successfully set","affectedRows":1}
+{"affectedRows":1,"code":0,"response":""}
 zestdb> g name
-{"code":0,"response":"Bob","affectedRows":1}
+{"affectedRows":1,"code":0,"response":"Bob"}
 zestdb> gb sw na
-{"code":0,"response":[{"name":"Bob"}],"affectedRows":1}
-zestdb> scfg useSSL true
-{"code":0,"response":"Values successfuly updated !","affectedRows":0}
+{"affectedRows":1,"code":0,"response":[{"name":"Bob"}]}
+zestdb> scfg cachesize 500
+{"affectedRows":0,"code":0,"response":""}
 zestdb> d name
-{"code":0,"response":"Key successfully deleted","affectedRows":1}
+{"affectedRows":1,"code":0,"response":""}
+zestdb> g name
+{"affectedRows":0,"code":200,"response":""}
 ```
 
 ### `scfg` Parameters
@@ -315,10 +317,10 @@ Before authentication a request payload is limited to 1 MiB, and to 64 MiB after
 ### Response format
 Each command yields one JSON object:
 ```json
-{"code":0,"response":"Bob","affectedRows":1}
+{"affectedRows":1,"code":0,"response":"Bob"}
 ```
-- `code`: `0` on success, `1` on error.
-- `response`: a string, or a JSON array/object for bulk operations.
+- `code`: `0` on success, otherwise the error code. Every code is listed in [returncodes.md](returncodes.md).
+- `response`: the data returned by the command (a string, or a JSON array/object for bulk operations); empty when the command returns no data, and on every error.
 - `affectedRows`: number of affected entries.
 
 Multiple commands in one request are answered with responses separated by `\r\n\r\n` and terminated by a trailing newline. See `benchmark/zest_client.py` for a minimal reference client.

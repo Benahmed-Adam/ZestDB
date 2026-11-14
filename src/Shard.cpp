@@ -207,7 +207,7 @@ namespace Zest {
         if (entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone) {
             std::string value = this->storageManager->read(entry);
             if (value.empty()) {
-                return { ResultType::Code::Error, Messages::READ_FAILED, 0 };
+                return { ResultType::Code::ReadFailed };
             }
 
             this->cache->put(entry, value);
@@ -221,7 +221,7 @@ namespace Zest {
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addGetStats(true, latency);
-        return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
+        return { ResultType::Code::KeyNotFound };
     }
 
     ResultType Shard::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
@@ -237,7 +237,7 @@ namespace Zest {
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addSetStats(false, latency);
-            return { ResultType::Code::Error, "Failed to write: segment full", 0 };
+            return { ResultType::Code::WriteFailed };
         }
 
         entry.key = key;
@@ -250,7 +250,7 @@ namespace Zest {
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetStats(false, latency);
-        return { ResultType::Code::Success, Messages::SUCCESS_SET, 1 };
+        return { ResultType::Code::Success, "", 1 };
     }
 
     ResultType Shard::del(const std::string& key) {
@@ -269,13 +269,13 @@ namespace Zest {
             auto end = std::chrono::high_resolution_clock::now();
             double latency = std::chrono::duration<double, std::milli>(end - start).count();
             this->perfMonitor.addDelStats(false, latency);
-            return { ResultType::Code::Success, Messages::SUCCESS_DEL, 1 };
+            return { ResultType::Code::Success, "", 1 };
         }
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(false, latency);
-        return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
+        return { ResultType::Code::KeyNotFound };
     }
 
     ResultType Shard::setTTL(const std::string& key, uint64_t expiresAt) {
@@ -283,13 +283,13 @@ namespace Zest {
 
         IndexEntry entry = this->indexManager->search(key);
         if (entry.segmentId == INVALID_SEGMENT_ID || entry.isTombstone) {
-            return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
+            return { ResultType::Code::KeyNotFound };
         }
 
         entry.expiresAt = expiresAt;
         this->indexManager->update(key, entry);
         this->cache->remove(key);
-        return { ResultType::Code::Success, Messages::SUCCESS_TTL, 1 };
+        return { ResultType::Code::Success, "", 1 };
     }
 
     ResultType Shard::getTTL(const std::string& key) {
@@ -388,7 +388,7 @@ namespace Zest {
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addSetByStats(false, latency);
 
-        return { ResultType::Code::Success, std::format("Value successfully modified for {} entries", matchCount), matchCount };
+        return { ResultType::Code::Success, "", matchCount };
     }
 
     ResultType Shard::delBy(ValidationRule& valid) {
@@ -423,7 +423,7 @@ namespace Zest {
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelByStats(false, latency);
 
-        return { ResultType::Code::Success, std::format("Successfully deleted {} entries", matchCount), matchCount };
+        return { ResultType::Code::Success, "", matchCount };
     }
 
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
