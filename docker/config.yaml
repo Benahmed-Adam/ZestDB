@@ -1,0 +1,34 @@
+DbPath: /data/db
+SegSize: 67108864
+MaxKeySize: 255
+MaxValueSize: 100000
+CacheSize: 2000
+CompactingInterval: 300
+FlushInterval: 10
+
+DBPort: 7321
+WebPort: 1237
+
+# Access is controlled by the ports you publish: inside the container every client comes from the Docker network
+NetworkValidation: '.*'
+
+isDebug: false
+jsonOnly: false
+readOnly: false
+fsyncOnWrite: false
+
+useSSL: false
+SSLCertPath: ./cert.pem
+SSLKeyPath: ./key.pem
+
+ArchiveStoragePath: /data/archive
+ArchiveCreationDelay: 3600
+AutoArchiveSaving: false
+ArchiveRetention: 10
+
+MaxConnections: 1024
+AuthTimeout: 10
+IdleTimeout: 300
+
+# No account by default: mount your own config.yaml over /data/config.yaml with your users
+users: []
