@@ -35,6 +35,26 @@ static IndexEntry makeEntry(const std::string& key, uint32_t segId = 1, unsigned
     return e;
 }
 
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager hides expired entries and drops them on compaction", "[indexmanager]") {
+    IndexManager im(settings);
+    IndexEntry expired = makeEntry("expired");
+    expired.expiresAt = nowMs() - 1;
+    IndexEntry later = makeEntry("later");
+    later.expiresAt = nowMs() + 60000;
+    im.insert(expired);
+    im.insert(later);
+
+    REQUIRE(im.search("expired").segmentId == INVALID_SEGMENT_ID);
+    REQUIRE(im.search("later").expiresAt == later.expiresAt);
+    REQUIRE(im.getAll().size() == 1);
+    REQUIRE(im.keys() == std::vector<std::string>{ "later" });
+
+    im.compact();
+    IndexManager reloaded(settings);
+    REQUIRE(reloaded.search("later").expiresAt == later.expiresAt);
+    REQUIRE(reloaded.getAll().size() == 1);
+}
+
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert and search", "[indexmanager]") {
     IndexManager im(settings);
     im.insert(makeEntry("key1", 1, 0));

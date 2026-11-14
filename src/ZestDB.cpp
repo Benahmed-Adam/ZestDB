@@ -695,7 +695,7 @@ namespace Zest {
         return this->shardManager->get(key);
     }
 
-    ResultType ZestDB::set(const std::string& key, const std::string& value) {
+    ResultType ZestDB::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
@@ -720,7 +720,29 @@ namespace Zest {
             }
         }
 
-        return this->shardManager->set(key, value);
+        return this->shardManager->set(key, value, expiresAt);
+    }
+
+    ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
+        const bool enforce = !this->replaying.load();
+
+        if (enforce && this->settings.readOnly) {
+            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+        }
+
+        if (enforce && !this->validateKey(key)) {
+            return { ResultType::Code::Error, Messages::INVALID_KEY };
+        }
+
+        return this->shardManager->setTTL(key, expiresAt);
+    }
+
+    ResultType ZestDB::getTTL(const std::string& key) {
+        if (!this->validateKey(key)) {
+            return { ResultType::Code::Error, Messages::INVALID_KEY };
+        }
+
+        return this->shardManager->getTTL(key);
     }
 
     ResultType ZestDB::del(const std::string& key) {
@@ -909,6 +931,18 @@ namespace Zest {
         return this->shardManager->syncWAL();
     }
 
+    static bool parseTTL(std::string_view word, bool relative, uint64_t& expiresAt) {
+        if (relative) {
+            uint32_t seconds = 0;
+            if (!parseUInt(word, seconds) || seconds == 0) {
+                return false;
+            }
+            expiresAt = nowMs() + static_cast<uint64_t>(seconds) * 1000;
+            return true;
+        }
+        return parseUInt(word, expiresAt) && expiresAt != 0;
+    }
+
     ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal) {
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
@@ -945,7 +979,7 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db";
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::Error, Messages::PERMISSION_DENIED };
@@ -958,6 +992,8 @@ namespace Zest {
         } else if (cmd != "f" && cmd != "save") {
             sharedLock.lock();
         }
+
+        std::string walCommand;
 
         if (cmd == "g") {
             if (words.size() < 2) {
@@ -972,6 +1008,42 @@ namespace Zest {
                 result.response = Messages::MISSING_VALUE;
             } else {
                 result = this->set(std::string(words[1]), std::string(sv.substr(static_cast<size_t>(words[2].data() - sv.data()))));
+            }
+        } else if (cmd == "setex" || cmd == "setexat") {
+            uint64_t ttl = 0;
+            if (words.size() < 2) {
+                result.response = Messages::MISSING_KEY;
+            } else if (words.size() < 4) {
+                result.response = Messages::MISSING_VALUE;
+            } else if (!parseTTL(words[2], cmd == "setex", ttl)) {
+                result.response = Messages::INVALID_TTL;
+            } else {
+                const std::string key(words[1]);
+                const std::string value(sv.substr(static_cast<size_t>(words[3].data() - sv.data())));
+                result = this->set(key, value, ttl);
+                walCommand = std::format("setexat {} {} {}", key, ttl, value);
+            }
+        } else if (cmd == "expire" || cmd == "expireat") {
+            uint64_t ttl = 0;
+            if (words.size() < 3) {
+                result.response = Messages::MISSING_ARGUMENTS;
+            } else if (!parseTTL(words[2], cmd == "expire", ttl)) {
+                result.response = Messages::INVALID_TTL;
+            } else {
+                result = this->setTTL(std::string(words[1]), ttl);
+                walCommand = std::format("expireat {} {}", words[1], ttl);
+            }
+        } else if (cmd == "persist") {
+            if (words.size() < 2) {
+                result.response = Messages::MISSING_KEY;
+            } else {
+                result = this->setTTL(std::string(words[1]), 0);
+            }
+        } else if (cmd == "ttl") {
+            if (words.size() < 2) {
+                result.response = Messages::MISSING_KEY;
+            } else {
+                result = this->getTTL(std::string(words[1]));
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
@@ -1228,7 +1300,7 @@ namespace Zest {
 
         if (!this->replaying.load()) {
             if (result.code == ResultType::Code::Success && isWrite) {
-                if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), command) || (syncWal && !this->syncWAL()))) {
+                if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), walCommand.empty() ? command : walCommand) || (syncWal && !this->syncWAL()))) {
                     result = { ResultType::Code::Error, Messages::WAL_WRITE_FAILED, result.affectedRows };
                 }
             }
@@ -1246,6 +1318,10 @@ namespace Zest {
         oss << "set <key> <value>                      - Set key-value pair"
             << "\n";
         oss << "del <key>                              - Delete key" << "\n";
+        oss << "setex <key> <seconds> <value>          - Set a value that expires after <seconds>" << "\n";
+        oss << "expire <key> <seconds>                 - Make an existing key expire after <seconds>" << "\n";
+        oss << "ttl <key>                              - Seconds before expiry (-1: no TTL, -2: no key)" << "\n";
+        oss << "persist <key>                          - Remove the TTL of a key" << "\n";
         oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching "
                "pattern"
             << "\n";

@@ -39,6 +39,7 @@ namespace Zest {
         static constexpr const char* VALUE_EMPTY = "The value cannot be empty !";
         static constexpr const char* SUCCESS_SET = "Key successfully set";
         static constexpr const char* SUCCESS_DEL = "Key successfully deleted";
+        static constexpr const char* SUCCESS_TTL = "TTL successfully set";
         static constexpr const char* PATTERN_EMPTY = "Pattern cannot be empty";
         static constexpr const char* INVALID_REGEX = "Invalid search mode or invalid regex pattern";
         static constexpr const char* MISSING_KEY = "Error: missing key";
@@ -69,6 +70,7 @@ namespace Zest {
         static constexpr const char* WAL_WRITE_FAILED = "The write was applied but could not be logged in the WAL !";
         static constexpr const char* PAYLOAD_TOO_LARGE = "Payload too large !";
         static constexpr const char* INVALID_LIMIT = "Invalid limit ! lim expects a positive integer";
+        static constexpr const char* INVALID_TTL = "Invalid TTL ! expects a positive integer";
         static constexpr const char* INVALID_MODE = "Invalid mode ! Use a mode between re, sw, ct, ew";
     };
 

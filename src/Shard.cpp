@@ -192,7 +192,7 @@ namespace Zest {
 
         CacheEntry cacheEntry = this->cache->get(key);
 
-        bool fromCache = (cacheEntry.index.segmentId != INVALID_SEGMENT_ID && !cacheEntry.index.isTombstone);
+        bool fromCache = (cacheEntry.index.segmentId != INVALID_SEGMENT_ID && !cacheEntry.index.isTombstone && !cacheEntry.index.isExpired());
 
         if (fromCache) {
             auto end = std::chrono::high_resolution_clock::now();
@@ -224,7 +224,7 @@ namespace Zest {
         return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
     }
 
-    ResultType Shard::set(const std::string& key, const std::string& value) {
+    ResultType Shard::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
         auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
 
@@ -241,6 +241,7 @@ namespace Zest {
         }
 
         entry.key = key;
+        entry.expiresAt = expiresAt;
 
         this->indexManager->insert(entry);
 
@@ -275,6 +276,37 @@ namespace Zest {
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
         this->perfMonitor.addDelStats(false, latency);
         return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
+    }
+
+    ResultType Shard::setTTL(const std::string& key, uint64_t expiresAt) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+
+        IndexEntry entry = this->indexManager->search(key);
+        if (entry.segmentId == INVALID_SEGMENT_ID || entry.isTombstone) {
+            return { ResultType::Code::Error, Messages::KEY_NOT_FOUND, 0 };
+        }
+
+        entry.expiresAt = expiresAt;
+        this->indexManager->update(key, entry);
+        this->cache->remove(key);
+        return { ResultType::Code::Success, Messages::SUCCESS_TTL, 1 };
+    }
+
+    ResultType Shard::getTTL(const std::string& key) {
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+
+        IndexEntry entry = this->indexManager->search(key);
+        if (entry.segmentId == INVALID_SEGMENT_ID || entry.isTombstone) {
+            return { ResultType::Code::Success, "-2", 0 };
+        }
+        if (entry.expiresAt == 0) {
+            return { ResultType::Code::Success, "-1", 1 };
+        }
+        const uint64_t now = nowMs();
+        if (entry.expiresAt <= now) {
+            return { ResultType::Code::Success, "-2", 0 };
+        }
+        return { ResultType::Code::Success, std::to_string((entry.expiresAt - now + 999) / 1000), 1 };
     }
 
     ResultType Shard::getBy(ValidationRule& valid) {

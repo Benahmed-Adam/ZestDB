@@ -34,9 +34,19 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->get(key);
     }
 
-    ResultType ShardManager::set(const std::string& key, const std::string& value) {
+    ResultType ShardManager::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
         int shardId = this->getShardId(key);
-        return this->shards[static_cast<size_t>(shardId)]->set(key, value);
+        return this->shards[static_cast<size_t>(shardId)]->set(key, value, expiresAt);
+    }
+
+    ResultType ShardManager::setTTL(const std::string& key, uint64_t expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->setTTL(key, expiresAt);
+    }
+
+    ResultType ShardManager::getTTL(const std::string& key) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->getTTL(key);
     }
 
     ResultType ShardManager::del(const std::string& key) {

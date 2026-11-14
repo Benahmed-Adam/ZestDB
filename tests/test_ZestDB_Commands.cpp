@@ -587,6 +587,99 @@ TEST_CASE("ZestDB keeps serving writes while an archive copies the files", "[com
     zip.close();
 }
 
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setex stores a value with a TTL", "[commands][ttl]") {
+    REQUIRE(db->execCmd("setex k 60 hello world").code == ResultType::Code::Success);
+    REQUIRE(db->get("k").response == "hello world");
+    const int ttl = std::stoi(db->execCmd("ttl k").response);
+    REQUIRE(ttl > 0);
+    REQUIRE(ttl <= 60);
+
+    REQUIRE(db->execCmd("persist k").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("ttl k").response == "-1");
+    REQUIRE(db->execCmd("ttl missing").response == "-2");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expired keys are invisible", "[commands][ttl]") {
+    REQUIRE(db->execCmd(std::format("setexat gone {} value", nowMs() - 1)).code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("s kept value").code == ResultType::Code::Success);
+
+    REQUIRE(db->get("gone").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("ttl gone").response == "-2");
+    REQUIRE(db->execCmd("d gone").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("expire gone 10").code == ResultType::Code::Error);
+    REQUIRE(db->execCmd("gb ew e").affectedRows == 0);
+    REQUIRE(db->execCmd("gb ew t").affectedRows == 1);
+
+    REQUIRE(db->execCmd("s gone back").code == ResultType::Code::Success);
+    REQUIRE(db->get("gone").response == "back");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expire makes a key disappear once its TTL is over", "[commands][ttl]") {
+    db->execCmd("s k value");
+    REQUIRE(db->execCmd("expire k 1").code == ResultType::Code::Success);
+    REQUIRE(db->get("k").response == "value");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    REQUIRE(db->get("k").code == ResultType::Code::Error);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set removes the TTL of a key", "[commands][ttl]") {
+    db->execCmd("setex k 60 old");
+    db->execCmd("s k new");
+    REQUIRE(db->execCmd("ttl k").response == "-1");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd refuses invalid TTLs", "[commands][ttl]") {
+    REQUIRE(db->execCmd("setex k 0 v").response == Messages::INVALID_TTL);
+    REQUIRE(db->execCmd("setex k -5 v").response == Messages::INVALID_TTL);
+    REQUIRE(db->execCmd("setex k abc v").response == Messages::INVALID_TTL);
+    REQUIRE(db->execCmd("setex k 60").response == Messages::MISSING_VALUE);
+    REQUIRE(db->execCmd("expire k").response == Messages::MISSING_ARGUMENTS);
+    REQUIRE(db->execCmd("expire missing 10").code == ResultType::Code::Error);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd TTL commands respect roles", "[commands][ttl]") {
+    db->execCmd("s k v");
+    REQUIRE(db->execCmd("setex k 60 v", Role::Read).response == Messages::PERMISSION_DENIED);
+    REQUIRE(db->execCmd("expire k 60", Role::Read).response == Messages::PERMISSION_DENIED);
+    REQUIRE(db->execCmd("persist k", Role::Read).response == Messages::PERMISSION_DENIED);
+    REQUIRE(db->execCmd("ttl k", Role::Read).response == "-1");
+}
+
+TEST_CASE("ZestDB journals TTLs as absolute dates", "[commands][ttl]") {
+    TempDbDir tmp("zestdb_test_ttl_wal", "", 29563);
+    ZestDB db;
+    REQUIRE(db.execCmd("setex k 60 hello world").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("expire k 120").code == ResultType::Code::Success);
+
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    REQUIRE(wal.find("setexat k ") != std::string::npos);
+    REQUIRE(wal.find(" hello world") != std::string::npos);
+    REQUIRE(wal.find("expireat k ") != std::string::npos);
+    REQUIRE(wal.find("setex k") == std::string::npos);
+}
+
+TEST_CASE("ZestDB keeps TTLs across a restart", "[commands][ttl]") {
+    TempDbDir tmp("zestdb_test_ttl_restart", "", 29565);
+    {
+        ZestDB db;
+        db.execCmd("setex k 60 value");
+        db.execCmd(std::format("setexat gone {} value", nowMs() + 300));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    ZestDB db;
+    REQUIRE(db.get("k").response == "value");
+    const int ttl = std::stoi(db.execCmd("ttl k").response);
+    REQUIRE(ttl > 0);
+    REQUIRE(ttl <= 60);
+    REQUIRE(db.get("gone").code == ResultType::Code::Error);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

@@ -34,7 +34,7 @@ namespace Zest {
     }
 
     IndexEntry IndexManager::toEntry(const std::string& key, const Location& loc) {
-        return { key, loc.offset, loc.segmentId, loc.size, false };
+        return { key, loc.offset, loc.segmentId, loc.size, false, loc.expiresAt };
     }
 
     void IndexManager::loadIndexIntoMemory() {
@@ -53,7 +53,7 @@ namespace Zest {
             if (entry.isTombstone) {
                 this->memoryTree.erase(entry.key);
             } else {
-                this->memoryTree[entry.key] = { entry.offset, entry.segmentId, entry.size };
+                this->memoryTree[entry.key] = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
             }
             position = this->index.tellg();
         }
@@ -79,7 +79,7 @@ namespace Zest {
         std::unique_lock<std::mutex> lock(this->mtx);
 
         auto it = this->memoryTree.find(key);
-        if (it != this->memoryTree.end()) {
+        if (it != this->memoryTree.end() && !toEntry(it->first, it->second).isExpired()) {
             return toEntry(it->first, it->second);
         }
 
@@ -100,14 +100,14 @@ namespace Zest {
         if (entry.isTombstone) {
             this->memoryTree.erase(it);
         } else {
-            it->second = { entry.offset, entry.segmentId, entry.size };
+            it->second = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
         }
     }
 
     void IndexManager::insert(const IndexEntry& entry) {
         std::unique_lock<std::mutex> lock(this->mtx);
         this->append(entry);
-        this->memoryTree[entry.key] = { entry.offset, entry.segmentId, entry.size };
+        this->memoryTree[entry.key] = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
     }
 
     std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()>& stopEarly) {
@@ -115,12 +115,16 @@ namespace Zest {
         std::unique_lock<std::mutex> lock(this->mtx);
 
         res.reserve(std::min<size_t>(limit, this->memoryTree.size()));
+        const uint64_t now = nowMs();
         for (const auto& [key, loc] : this->memoryTree) {
             if (res.size() >= limit)
                 break;
             if (stopEarly && stopEarly())
                 break;
-            res.push_back(toEntry(key, loc));
+            IndexEntry entry = toEntry(key, loc);
+            if (!entry.isExpired(now)) {
+                res.push_back(std::move(entry));
+            }
         }
 
         return res;
@@ -130,10 +134,11 @@ namespace Zest {
         std::vector<IndexEntry> res;
         std::unique_lock<std::mutex> lock(this->mtx);
 
+        const uint64_t now = nowMs();
         for (const auto& [key, loc] : this->memoryTree) {
             if (stopEarly && stopEarly())
                 break;
-            if (matches(key)) {
+            if (matches(key) && !toEntry(key, loc).isExpired(now)) {
                 res.push_back(toEntry(key, loc));
             }
         }
@@ -145,8 +150,11 @@ namespace Zest {
         std::unique_lock<std::mutex> lock(this->mtx);
         std::vector<std::string> res;
         res.reserve(this->memoryTree.size());
+        const uint64_t now = nowMs();
         for (const auto& [key, loc] : this->memoryTree) {
-            res.push_back(key);
+            if (!toEntry(key, loc).isExpired(now)) {
+                res.push_back(key);
+            }
         }
         return res;
     }
@@ -183,6 +191,7 @@ namespace Zest {
         }
 
         this->canFlush = false;
+        std::erase_if(this->memoryTree, [now = nowMs()](const auto& item) { return toEntry(item.first, item.second).isExpired(now); });
         ZestLog(LogLevel::Debug, "Index compaction completed successfully.");
         return entries;
     }

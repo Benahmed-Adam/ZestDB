@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -17,12 +18,21 @@ namespace Zest {
     static constexpr uint32_t INVALID_SEGMENT_ID = UINT32_MAX;
     static constexpr uint64_t INVALID_OFFSET = UINT64_MAX;
 
+    inline uint64_t nowMs() {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    }
+
     struct IndexEntry {
         std::string key;
         uint64_t offset;
         uint32_t segmentId;
         uint32_t size;
         bool isTombstone;
+        uint64_t expiresAt = 0;
+
+        bool isExpired(uint64_t now = nowMs()) const {
+            return expiresAt != 0 && expiresAt <= now;
+        }
 
         void serialize(std::ostream& os) const {
             uint32_t klen = static_cast<uint32_t>(key.size());
@@ -35,11 +45,12 @@ namespace Zest {
                 uint32_t segmentId;
                 uint32_t size;
                 bool isTombstone;
+                uint64_t expiresAt;
             };
 
 #pragma pack(pop)
 
-            Header header{ klen, offset, segmentId, size, isTombstone };
+            Header header{ klen, offset, segmentId, size, isTombstone, expiresAt };
 
             os.write(reinterpret_cast<const char*>(&header), sizeof(header));
 
@@ -57,6 +68,7 @@ namespace Zest {
                 uint32_t segmentId;
                 uint32_t size;
                 bool isTombstone;
+                uint64_t expiresAt;
             };
 
 #pragma pack(pop)
@@ -70,6 +82,7 @@ namespace Zest {
             segmentId = header.segmentId;
             size = header.size;
             isTombstone = header.isTombstone;
+            expiresAt = header.expiresAt;
 
             key.resize(header.klen);
             if (header.klen > 0) {
@@ -100,6 +113,7 @@ namespace Zest {
             uint64_t offset;
             uint32_t segmentId;
             uint32_t size;
+            uint64_t expiresAt;
         };
 
         std::filesystem::path indexPath;

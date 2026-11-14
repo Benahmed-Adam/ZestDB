@@ -36,8 +36,11 @@ namespace Zest {
         ~ZestDB();
 
         ResultType get(const std::string& key);
-        ResultType set(const std::string& key, const std::string& value);
+        ResultType set(const std::string& key, const std::string& value, uint64_t expiresAt = 0);
         ResultType del(const std::string& key);
+
+        ResultType setTTL(const std::string& key, uint64_t expiresAt);
+        ResultType getTTL(const std::string& key);
 
         ResultType getBy(ValidationRule& valid);
         ResultType setBy(ValidationRule& valid, const std::string& value);
