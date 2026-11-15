@@ -167,6 +167,7 @@ Commands are whitespace-delimited and case-insensitive. For multi-word values, e
 | `setex <key> <seconds> <value>` | Store a value that expires after `<seconds>`. |
 | `expire <key> <seconds>` / `persist <key>` | Set or remove the TTL of an existing key. |
 | `ttl <key>` | Seconds before the key expires (`-1`: no TTL, `-2`: no key). |
+| `setnx <key> <value>` | Store a value only if the key does not exist (an expired key counts as absent); otherwise returns code `207`. |
 | `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
 | `getby <mode> <pattern> [lim <n>]` / `gb ...` | Get all entries whose key matches the rule. |
 | `setby <mode> <pattern> <value> [lim <n>]` / `sb ...` | Update the value of all matching keys. |

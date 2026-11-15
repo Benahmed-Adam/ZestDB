@@ -240,6 +240,28 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent increments never lose an update
     REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent setnx on one key lets exactly one writer win", "[shard][setnx]") {
+    constexpr int threads = 8;
+    constexpr int rounds = 50;
+    Shard shard(settings, 0);
+    for (int round = 0; round < rounds; round++) {
+        const std::string key = std::format("lock{}", round);
+        std::atomic<int> winners = 0;
+        std::vector<std::thread> workers;
+        for (int t = 0; t < threads; t++) {
+            workers.emplace_back([&, t] {
+                if (shard.setnx(key, std::format("owner{}", t)).code == ResultType::Code::Success) {
+                    winners++;
+                }
+            });
+        }
+        for (auto& worker : workers) {
+            worker.join();
+        }
+        REQUIRE(winners == 1);
+    }
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

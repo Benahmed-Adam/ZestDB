@@ -52,6 +52,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 204 | `JsonOnly` | `jsonOnly` is enabled and the value is not valid JSON. |
 | 205 | `NotAnInteger` | `incr` / `decr`: the stored value is not a 64-bit integer; it is left unchanged. |
 | 206 | `IntegerOverflow` | `incr` / `decr`: the result would leave the 64-bit integer range; the value is left unchanged. |
+| 207 | `KeyExists` | `setnx`: the key already exists; its value is left unchanged. |
 
 ## 3xx - Authentication and permissions
 

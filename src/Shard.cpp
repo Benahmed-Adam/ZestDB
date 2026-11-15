@@ -230,8 +230,21 @@ namespace Zest {
     }
 
     ResultType Shard::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
-        auto start = std::chrono::high_resolution_clock::now();
         std::unique_lock<std::shared_mutex> lock(this->readMtx);
+        return this->writeLocked(key, value, expiresAt);
+    }
+
+    ResultType Shard::setnx(const std::string& key, const std::string& value) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+        IndexEntry existing = this->indexManager->search(key);
+        if (existing.segmentId != INVALID_SEGMENT_ID && !existing.isTombstone) {
+            return { ResultType::Code::KeyExists };
+        }
+        return this->writeLocked(key, value, 0);
+    }
+
+    ResultType Shard::writeLocked(const std::string& key, const std::string& value, uint64_t expiresAt) {
+        auto start = std::chrono::high_resolution_clock::now();
 
         IndexEntry entry = this->storageManager->append(value);
 

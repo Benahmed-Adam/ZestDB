@@ -695,7 +695,7 @@ namespace Zest {
         return this->shardManager->get(key);
     }
 
-    ResultType ZestDB::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
+    ResultType ZestDB::checkWrite(const std::string& key, const std::string& value) const {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
@@ -720,7 +720,23 @@ namespace Zest {
             }
         }
 
+        return { ResultType::Code::Success };
+    }
+
+    ResultType ZestDB::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
+        ResultType check = this->checkWrite(key, value);
+        if (check.code != ResultType::Code::Success) {
+            return check;
+        }
         return this->shardManager->set(key, value, expiresAt);
+    }
+
+    ResultType ZestDB::setnx(const std::string& key, const std::string& value) {
+        ResultType check = this->checkWrite(key, value);
+        if (check.code != ResultType::Code::Success) {
+            return check;
+        }
+        return this->shardManager->setnx(key, value);
     }
 
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
@@ -996,7 +1012,7 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr";
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
@@ -1061,6 +1077,17 @@ namespace Zest {
                 result.code = ResultType::Code::MissingKey;
             } else {
                 result = this->getTTL(std::string(words[1]));
+            }
+        } else if (cmd == "setnx") {
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingKey;
+            } else if (words.size() < 3) {
+                result.code = ResultType::Code::MissingValue;
+            } else {
+                const std::string key(words[1]);
+                const std::string value(sv.substr(static_cast<size_t>(words[2].data() - sv.data())));
+                result = this->setnx(key, value);
+                walCommand = std::format("s {} {}", key, value);
             }
         } else if (cmd == "incr" || cmd == "decr") {
             int64_t delta = 1;
@@ -1351,6 +1378,7 @@ namespace Zest {
         oss << "persist <key>                          - Remove the TTL of a key" << "\n";
         oss << "incr <key> [n]                         - Add n (default 1) to an integer value, 0 if absent" << "\n";
         oss << "decr <key> [n]                         - Subtract n (default 1) from an integer value" << "\n";
+        oss << "setnx <key> <value>                    - Set the value only if the key does not exist" << "\n";
         oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching "
                "pattern"
             << "\n";

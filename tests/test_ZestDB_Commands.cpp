@@ -758,6 +758,59 @@ TEST_CASE("ZestDB journals the result of incr, not the increment", "[commands][i
     REQUIRE(db.get("t").response == "2");
 }
 
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx only writes keys that do not exist", "[commands][setnx]") {
+    auto created = db->execCmd("setnx lock worker A");
+    REQUIRE(created.code == ResultType::Code::Success);
+    REQUIRE(created.affectedRows == 1);
+    REQUIRE(db->get("lock").response == "worker A");
+
+    auto refused = db->execCmd("setnx lock worker B");
+    REQUIRE(refused.code == ResultType::Code::KeyExists);
+    REQUIRE(refused.affectedRows == 0);
+    REQUIRE(db->get("lock").response == "worker A");
+
+    db->execCmd("d lock");
+    REQUIRE(db->execCmd("setnx lock worker B").code == ResultType::Code::Success);
+    REQUIRE(db->get("lock").response == "worker B");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx treats an expired key as absent", "[commands][setnx]") {
+    db->execCmd(std::format("setexat lock {} old", nowMs() - 1));
+    REQUIRE(db->execCmd("setnx lock new").code == ResultType::Code::Success);
+    REQUIRE(db->get("lock").response == "new");
+    REQUIRE(db->execCmd("ttl lock").response == "-1");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx validates like set", "[commands][setnx]") {
+    REQUIRE(db->execCmd("setnx").code == ResultType::Code::MissingKey);
+    REQUIRE(db->execCmd("setnx k").code == ResultType::Code::MissingValue);
+    REQUIRE(db->execCmd("setnx k v", Role::Read).code == ResultType::Code::PermissionDenied);
+    db->execCmd("scfg jsononly true");
+    REQUIRE(db->execCmd("setnx k notjson").code == ResultType::Code::JsonOnly);
+    db->execCmd("scfg jsononly false");
+    db->execCmd("scfg readonly true");
+    REQUIRE(db->execCmd("setnx k v").code == ResultType::Code::ReadOnly);
+    REQUIRE(db->get("k").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE("ZestDB journals a successful setnx as a set, and nothing when the key exists", "[commands][setnx]") {
+    TempDbDir tmp("zestdb_test_setnx_wal", "", 29569);
+    ZestDB db;
+    db.execCmd("setnx k first");
+    db.execCmd("setnx k second");
+
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    REQUIRE(wal.find("s k first") != std::string::npos);
+    REQUIRE(wal.find("second") == std::string::npos);
+    REQUIRE(wal.find("setnx") == std::string::npos);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

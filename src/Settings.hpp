@@ -47,6 +47,7 @@ namespace Zest {
             JsonOnly = 204,
             NotAnInteger = 205,
             IntegerOverflow = 206,
+            KeyExists = 207,
 
             AuthFailed = 300,
             PermissionDenied = 301,

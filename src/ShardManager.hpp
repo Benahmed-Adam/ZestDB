@@ -28,6 +28,7 @@ namespace Zest {
         ResultType delBy(ValidationRule& valid);
 
         ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
+        ResultType setnx(const std::string& key, const std::string& value);
 
         void flush();
         void stop();

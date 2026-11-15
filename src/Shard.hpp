@@ -31,7 +31,8 @@ namespace Zest {
         ResultType delBy(ValidationRule& valid);
 
         ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
-        
+        ResultType setnx(const std::string& key, const std::string& value);
+
         std::vector<std::string> matchingKeys(const ValidationRule& valid);
 
         bool flushData();
@@ -70,6 +71,7 @@ namespace Zest {
         void fillCache();
         void verifyIndexEntries();
         void compactSegments(std::vector<IndexEntry> entries);
+        ResultType writeLocked(const std::string& key, const std::string& value, uint64_t expiresAt);
 
         std::unique_ptr<WAL> wal;
         std::unique_ptr<IndexManager> indexManager;
