@@ -105,32 +105,36 @@ public:
     }
 };
 
+static std::string codeOf(ResultType::Code code) {
+    return std::format("\"code\":{},", static_cast<int>(code));
+}
+
 TEST_CASE_METHOD(SessionFixture, "Session authenticates with a tokenHash user", "[session]") {
     Client c;
-    REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(c.send("s key1 value1").find(Messages::SUCCESS_SET) != std::string::npos);
+    REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("s key1 value1").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session still accepts a deprecated plaintext password user", "[session]") {
     Client c;
-    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(Messages::AUTH_SUCCESS) != std::string::npos);
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session refuses a wrong token or the stored hash itself", "[session]") {
     Client wrong;
-    REQUIRE(wrong.send("Authorization: alice.deadbeef").find(Messages::AUTH_FAILED) != std::string::npos);
+    REQUIRE(wrong.send("Authorization: alice.deadbeef").find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
     Client storedHash;
-    REQUIRE(storedHash.send("Authorization: alice." + sha256(sha256("alicesecret"))).find(Messages::AUTH_FAILED) != std::string::npos);
+    REQUIRE(storedHash.send("Authorization: alice." + sha256(sha256("alicesecret"))).find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session refuses an oversized payload before authentication", "[session]") {
     Client c;
-    REQUIRE(c.sendRaw(be32(0xFFFFFFFF)).find(Messages::PAYLOAD_TOO_LARGE) != std::string::npos);
+    REQUIRE(c.sendRaw(be32(0xFFFFFFFF)).find(codeOf(ResultType::Code::PayloadTooLarge)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session closes the connection on an Authorization without a token", "[session]") {
     Client c;
-    REQUIRE(c.send("Authorization: bob").find(Messages::AUTH_FAILED) != std::string::npos);
+    REQUIRE(c.send("Authorization: bob").find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
     REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).empty());
 }
 
@@ -140,38 +144,38 @@ static std::string login(Client& c, const std::string& user, const std::string& 
 
 TEST_CASE_METHOD(SessionFixture, "Session survives values that are not valid UTF-8", "[session]") {
     Client c;
-    REQUIRE(login(c, "bob", "bob").find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(c.send("s k \xff\xfe").find(Messages::SUCCESS_SET) != std::string::npos);
-    REQUIRE(c.send("g k").find("\"code\":0") != std::string::npos);
-    REQUIRE(c.send("gb sw k").find("\"code\":0") != std::string::npos);
-    REQUIRE(c.send("s k2 v").find(Messages::SUCCESS_SET) != std::string::npos);
+    REQUIRE(login(c, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("s k \xff\xfe").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("g k").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("gb sw k").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("s k2 v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session enforces the user's role", "[session]") {
     Client reader;
-    REQUIRE(login(reader, "reader", "r").find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(reader.send("s k v").find(Messages::PERMISSION_DENIED) != std::string::npos);
-    REQUIRE(reader.send("g k").find(Messages::KEY_NOT_FOUND) != std::string::npos);
+    REQUIRE(login(reader, "reader", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(reader.send("s k v").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    REQUIRE(reader.send("g k").find(codeOf(ResultType::Code::KeyNotFound)) != std::string::npos);
 
     Client writer;
-    REQUIRE(login(writer, "bob", "bob").find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(writer.send("s k v").find(Messages::SUCCESS_SET) != std::string::npos);
+    REQUIRE(login(writer, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(writer.send("s k v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     for (const char* adminCmd : { "scfg readonly true", "gcfg", "r", "f", "save" }) {
-        REQUIRE(writer.send(adminCmd).find(Messages::PERMISSION_DENIED) != std::string::npos);
+        REQUIRE(writer.send(adminCmd).find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
     }
 
     Client admin;
-    REQUIRE(login(admin, "root", "r").find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(admin.send("gcfg").find("\"code\":0") != std::string::npos);
+    REQUIRE(login(admin, "root", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(admin.send("gcfg").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session is revoked when a reload removes its user", "[session]") {
     Client c;
-    REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(Messages::AUTH_SUCCESS) != std::string::npos);
-    REQUIRE(c.send("s k v").find(Messages::SUCCESS_SET) != std::string::npos);
+    REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("s k v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     writeConfig(false);
     REQUIRE(db->execCmd("r").code == ResultType::Code::Success);
-    REQUIRE(c.send("g k").find(Messages::SESSION_REVOKED) != std::string::npos);
+    REQUIRE(c.send("g k").find(codeOf(ResultType::Code::SessionRevoked)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session serves several clients in parallel", "[session]") {
@@ -180,7 +184,7 @@ TEST_CASE_METHOD(SessionFixture, "Session serves several clients in parallel", "
     for (int t = 0; t < 8; t++) {
         clients.emplace_back([t, &failures] {
             Client c;
-            if (login(c, "bob", "bob").find(Messages::AUTH_SUCCESS) == std::string::npos) {
+            if (login(c, "bob", "bob").find(codeOf(ResultType::Code::Success)) == std::string::npos) {
                 failures++;
                 return;
             }
@@ -203,7 +207,7 @@ TEST_CASE_METHOD(SessionFixture, "Session refuses connections above MaxConnectio
     std::vector<std::unique_ptr<Client>> open;
     for (int i = 0; i < MAX_CONNECTIONS; i++) {
         open.push_back(std::make_unique<Client>());
-        REQUIRE(login(*open.back(), "bob", "bob").find(Messages::AUTH_SUCCESS) != std::string::npos);
+        REQUIRE(login(*open.back(), "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     }
     Client extra;
     REQUIRE(login(extra, "bob", "bob").empty());
@@ -217,7 +221,7 @@ TEST_CASE_METHOD(SessionFixture, "Session closes a client that does not authenti
 
 TEST_CASE_METHOD(SessionFixture, "Session closes an idle authenticated client", "[session]") {
     Client c;
-    REQUIRE(login(c, "bob", "bob").find(Messages::AUTH_SUCCESS) != std::string::npos);
+    REQUIRE(login(c, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     std::this_thread::sleep_for(std::chrono::milliseconds(2500));
     REQUIRE(c.send("g k").empty());
 }
@@ -225,12 +229,12 @@ TEST_CASE_METHOD(SessionFixture, "Session closes an idle authenticated client", 
 TEST_CASE_METHOD(SessionFixture, "Session locks a user out after repeated failed authentications, not the whole address", "[session]") {
     for (int i = 0; i < 5; i++) {
         Client c;
-        REQUIRE(login(c, "bob", "wrong").find(Messages::AUTH_FAILED) != std::string::npos);
+        REQUIRE(login(c, "bob", "wrong").find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
     }
     Client lockedOut;
-    REQUIRE(login(lockedOut, "bob", "bob").find(Messages::AUTH_FAILED) != std::string::npos);
+    REQUIRE(login(lockedOut, "bob", "bob").find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
 
     // Same address (127.0.0.1, as behind ngrok): another user still gets in
     Client other;
-    REQUIRE(login(other, "reader", "r").find(Messages::AUTH_SUCCESS) != std::string::npos);
+    REQUIRE(login(other, "reader", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }

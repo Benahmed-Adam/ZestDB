@@ -47,7 +47,7 @@ namespace Zest {
         std::string out = "{\"affectedRows\":";
         out += std::to_string(resp.affectedRows);
         out += ",\"code\":";
-        out += resp.code == ResultType::Code::Success ? '0' : '1';
+        out += std::to_string(static_cast<int>(resp.code));
         out += ",\"response\":";
         const bool looksLikeJson = !resp.response.empty() && (resp.response.front() == '[' || resp.response.front() == '{');
         if (looksLikeJson && json::accept(resp.response)) {
@@ -395,15 +395,13 @@ namespace Zest {
                 s.SSLKeyPath != oldSettings.SSLKeyPath) {
                 ZestLog(LogLevel::Error, "Cannot change path settings during "
                                          "hot-reload. Paths are immutable.");
-                return { ResultType::Code::Error, "Cannot change path settings during hot-reload. Paths are "
-                                                  "immutable. Restart the database to apply changes." };
+                return { ResultType::Code::ConfigNotReloadable };
             }
 
             if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort || s.MaxConnections != oldSettings.MaxConnections || s.AuthTimeout != oldSettings.AuthTimeout ||
                 s.IdleTimeout != oldSettings.IdleTimeout) {
                 ZestLog(LogLevel::Error, "Cannot change the ports, SSL or connection limits during hot-reload.");
-                return { ResultType::Code::Error, "Cannot change the ports, SSL or connection limits during hot-reload. "
-                                                  "Restart the database to apply changes." };
+                return { ResultType::Code::ConfigNotReloadable };
             }
 
             this->settings = std::move(s);
@@ -415,13 +413,13 @@ namespace Zest {
             this->shardManager->reloadSettings(this->settings);
             this->threadCV.notify_all();
 
-            return { ResultType::Code::Success, "Reload successful !" };
+            return { ResultType::Code::Success };
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("An error occured during the reload of the "
                                                  "configuration : {}. Aborting...",
                                                  e.what()));
         }
-        return { ResultType::Code::Error, "Reload failed !" };
+        return { ResultType::Code::ReloadFailed };
     }
 
     void ZestDB::setConfig() {
@@ -669,7 +667,7 @@ namespace Zest {
 
     bool ZestDB::validateKey(std::string_view key) const {
         if (key.size() > this->settings.MaxKeySize) {
-            ZestLog(LogLevel::Error, std::format("ZestDB::validateKey - {} MaxKeySize : {}", Messages::KEY_TOO_LONG, this->settings.MaxKeySize));
+            ZestLog(LogLevel::Error, std::format("ZestDB::validateKey - The key is too long ! MaxKeySize : {}", this->settings.MaxKeySize));
             return false;
         }
         return true;
@@ -677,7 +675,7 @@ namespace Zest {
 
     bool ZestDB::validateValue(std::string_view value) const {
         if (value.size() > this->settings.MaxValueSize) {
-            ZestLog(LogLevel::Error, std::format("ZestDB::validateValue - {} MaxValueSize : {}", Messages::VALUE_TOO_LONG, this->settings.MaxValueSize));
+            ZestLog(LogLevel::Error, std::format("ZestDB::validateValue - The value is too long ! MaxValueSize : {}", this->settings.MaxValueSize));
             return false;
         }
         return true;
@@ -689,7 +687,7 @@ namespace Zest {
 
     ResultType ZestDB::get(const std::string& key) {
         if (!this->validateKey(key)) {
-            return { ResultType::Code::Error, Messages::INVALID_KEY };
+            return { ResultType::Code::InvalidKey };
         }
 
         return this->shardManager->get(key);
@@ -699,24 +697,24 @@ namespace Zest {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
-            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+            return { ResultType::Code::ReadOnly };
         }
 
         if (enforce && !this->validateKey(key)) {
-            return { ResultType::Code::Error, Messages::INVALID_KEY };
+            return { ResultType::Code::InvalidKey };
         }
 
         if (value.empty()) {
-            return { ResultType::Code::Error, Messages::VALUE_EMPTY };
+            return { ResultType::Code::EmptyValue };
         }
 
         if (enforce && !this->validateValue(value)) {
-            return { ResultType::Code::Error, Messages::INVALID_VALUE };
+            return { ResultType::Code::InvalidValue };
         }
 
         if (enforce && this->settings.jsonOnly) {
             if (!this->isJsonValid(value)) {
-                return { ResultType::Code::Error, Messages::JSON_ONLY_ERROR };
+                return { ResultType::Code::JsonOnly };
             }
         }
 
@@ -727,11 +725,11 @@ namespace Zest {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
-            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+            return { ResultType::Code::ReadOnly };
         }
 
         if (enforce && !this->validateKey(key)) {
-            return { ResultType::Code::Error, Messages::INVALID_KEY };
+            return { ResultType::Code::InvalidKey };
         }
 
         return this->shardManager->setTTL(key, expiresAt);
@@ -739,7 +737,7 @@ namespace Zest {
 
     ResultType ZestDB::getTTL(const std::string& key) {
         if (!this->validateKey(key)) {
-            return { ResultType::Code::Error, Messages::INVALID_KEY };
+            return { ResultType::Code::InvalidKey };
         }
 
         return this->shardManager->getTTL(key);
@@ -749,11 +747,11 @@ namespace Zest {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
-            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+            return { ResultType::Code::ReadOnly };
         }
 
         if (enforce && !this->validateKey(key)) {
-            return { ResultType::Code::Error, Messages::INVALID_KEY };
+            return { ResultType::Code::InvalidKey };
         }
 
         return this->shardManager->del(key);
@@ -767,20 +765,20 @@ namespace Zest {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
-            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+            return { ResultType::Code::ReadOnly };
         }
 
         if (value.empty()) {
-            return { ResultType::Code::Error, Messages::VALUE_EMPTY };
+            return { ResultType::Code::EmptyValue };
         }
 
         if (enforce && !this->validateValue(value)) {
-            return { ResultType::Code::Error, Messages::INVALID_VALUE };
+            return { ResultType::Code::InvalidValue };
         }
 
         if (enforce && this->settings.jsonOnly) {
             if (!this->isJsonValid(value)) {
-                return { ResultType::Code::Error, Messages::JSON_ONLY_ERROR };
+                return { ResultType::Code::JsonOnly };
             }
         }
 
@@ -789,7 +787,7 @@ namespace Zest {
 
     ResultType ZestDB::delBy(ValidationRule& valid) {
         if (!this->replaying.load() && this->settings.readOnly) {
-            return { ResultType::Code::Error, Messages::READ_ONLY_ERROR };
+            return { ResultType::Code::ReadOnly };
         }
 
         return this->shardManager->delBy(valid);
@@ -947,7 +945,7 @@ namespace Zest {
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
         if (start == std::string_view::npos) {
-            return { ResultType::Code::Error, Messages::NO_COMMAND_GIVEN };
+            return { ResultType::Code::NoCommand };
         }
         sv.remove_prefix(start);
         sv.remove_suffix(sv.size() - 1 - sv.find_last_not_of("\r\n"));
@@ -964,10 +962,10 @@ namespace Zest {
                 break;
         }
 
-        ResultType result = { ResultType::Code::Error, "" };
+        ResultType result = { ResultType::Code::InternalError };
 
         if (words.empty()) {
-            return { ResultType::Code::Error, Messages::NO_COMMAND_GIVEN };
+            return { ResultType::Code::NoCommand };
         }
 
         std::string cmd = toLowerStr(words[0]);
@@ -982,7 +980,7 @@ namespace Zest {
         const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
-            return { ResultType::Code::Error, Messages::PERMISSION_DENIED };
+            return { ResultType::Code::PermissionDenied };
         }
 
         std::shared_lock<std::shared_mutex> sharedLock(this->writeMtx, std::defer_lock);
@@ -997,26 +995,26 @@ namespace Zest {
 
         if (cmd == "g") {
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else {
                 result = this->get(std::string(words[1]));
             }
         } else if (cmd == "s") {
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 3) {
-                result.response = Messages::MISSING_VALUE;
+                result.code = ResultType::Code::MissingValue;
             } else {
                 result = this->set(std::string(words[1]), std::string(sv.substr(static_cast<size_t>(words[2].data() - sv.data()))));
             }
         } else if (cmd == "setex" || cmd == "setexat") {
             uint64_t ttl = 0;
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 4) {
-                result.response = Messages::MISSING_VALUE;
+                result.code = ResultType::Code::MissingValue;
             } else if (!parseTTL(words[2], cmd == "setex", ttl)) {
-                result.response = Messages::INVALID_TTL;
+                result.code = ResultType::Code::InvalidTtl;
             } else {
                 const std::string key(words[1]);
                 const std::string value(sv.substr(static_cast<size_t>(words[3].data() - sv.data())));
@@ -1026,34 +1024,34 @@ namespace Zest {
         } else if (cmd == "expire" || cmd == "expireat") {
             uint64_t ttl = 0;
             if (words.size() < 3) {
-                result.response = Messages::MISSING_ARGUMENTS;
+                result.code = ResultType::Code::MissingArguments;
             } else if (!parseTTL(words[2], cmd == "expire", ttl)) {
-                result.response = Messages::INVALID_TTL;
+                result.code = ResultType::Code::InvalidTtl;
             } else {
                 result = this->setTTL(std::string(words[1]), ttl);
                 walCommand = std::format("expireat {} {}", words[1], ttl);
             }
         } else if (cmd == "persist") {
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else {
                 result = this->setTTL(std::string(words[1]), 0);
             }
         } else if (cmd == "ttl") {
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else {
                 result = this->getTTL(std::string(words[1]));
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
-                result.response = Messages::MISSING_KEY;
+                result.code = ResultType::Code::MissingKey;
             } else {
                 result = this->del(std::string(words[1]));
             }
         } else if (cmd == "gb") {
             if (words.size() < 3) {
-                result.response = Messages::MISSING_ARGUMENTS;
+                result.code = ResultType::Code::MissingArguments;
             } else {
                 std::string mode = toLowerStr(words[1]);
                 std::string_view pattern = words[2];
@@ -1066,9 +1064,9 @@ namespace Zest {
                 }
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
                 if (!limitOk) {
-                    result.response = Messages::INVALID_LIMIT;
+                    result.code = ResultType::Code::InvalidLimit;
                 } else if (!validMode) {
-                    result.response = Messages::INVALID_REGEX;
+                    result.code = ResultType::Code::InvalidRegex;
                 } else {
                     valid.limit = limit;
                     result = this->getBy(valid);
@@ -1076,7 +1074,7 @@ namespace Zest {
             }
         } else if (cmd == "sb") {
             if (words.size() < 4) {
-                result.response = Messages::MISSING_VALUE;
+                result.code = ResultType::Code::MissingValue;
             } else {
                 std::string mode = toLowerStr(words[1]);
                 std::string_view pattern = words[2];
@@ -1092,13 +1090,13 @@ namespace Zest {
                 }
 
                 if (!limitOk) {
-                    result.response = Messages::INVALID_LIMIT;
+                    result.code = ResultType::Code::InvalidLimit;
                 } else {
                     std::string value(sv.substr(valStart, valEnd - valStart));
 
                     auto [valid, validMode] = this->createValidationRule(mode, pattern);
                     if (!validMode) {
-                        result.response = Messages::INVALID_REGEX;
+                        result.code = ResultType::Code::InvalidRegex;
                     } else {
                         valid.limit = limit;
                         result = this->setBy(valid, value);
@@ -1107,7 +1105,7 @@ namespace Zest {
             }
         } else if (cmd == "db") {
             if (words.size() < 3) {
-                result.response = Messages::MISSING_PATTERN;
+                result.code = ResultType::Code::MissingPattern;
             } else {
                 std::string mode = toLowerStr(words[1]);
                 std::string_view pattern = words[2];
@@ -1120,9 +1118,9 @@ namespace Zest {
                 }
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
                 if (!limitOk) {
-                    result.response = Messages::INVALID_LIMIT;
+                    result.code = ResultType::Code::InvalidLimit;
                 } else if (!validMode) {
-                    result.response = Messages::INVALID_MODE;
+                    result.code = ResultType::Code::InvalidMode;
                 } else {
                     valid.limit = limit;
                     result = this->delBy(valid);
@@ -1134,12 +1132,11 @@ namespace Zest {
         } else if (cmd == "f") {
             this->flush();
             result.code = ResultType::Code::Success;
-            result.response = Messages::FLUSH_SUCCESSFUL;
         } else if (cmd == "r") {
             result = this->reloadConfig();
         } else if (cmd == "scfg") {
             if (words.size() < 3) {
-                result.response = Messages::MISSING_ARGUMENTS;
+                result.code = ResultType::Code::MissingArguments;
                 return result;
             }
 
@@ -1153,54 +1150,54 @@ namespace Zest {
 
             if (param == "segsize") {
                 if (!parseUInt(valueStr, ulongVal)) {
-                    result.response = "Invalid SegSize value";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 if (ulongVal <= this->settings.MaxValueSize) {
-                    result.response = "SegSize must be greater than MaxValueSize";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.SegSize = ulongVal;
                 valueSet = true;
             } else if (param == "maxkeysize") {
                 if (!parseUInt(valueStr, uintVal)) {
-                    result.response = "Invalid MaxKeySize value";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 if (uintVal > MAX_KEY_SIZE) {
-                    result.response = std::format("MaxKeySize cannot exceed {}", MAX_KEY_SIZE);
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.MaxKeySize = uintVal;
                 valueSet = true;
             } else if (param == "maxvaluesize") {
                 if (!parseUInt(valueStr, uintVal)) {
-                    result.response = "Invalid MaxValueSize value";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 if (uintVal >= this->settings.SegSize) {
-                    result.response = "MaxValueSize must be less than SegSize";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.MaxValueSize = uintVal;
                 valueSet = true;
             } else if (param == "cachesize") {
                 if (!parseUInt(valueStr, uintVal)) {
-                    result.response = "Invalid CacheSize value";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.CacheSize = uintVal;
                 valueSet = true;
             } else if (param == "compactinginterval") {
                 if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
-                    result.response = "Invalid CompactingInterval value (at least 1 second)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.CompactingInterval = uintVal;
                 valueSet = true;
             } else if (param == "flushinterval") {
                 if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
-                    result.response = "Invalid FlushInterval value (at least 1 second)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.FlushInterval = uintVal;
@@ -1213,7 +1210,7 @@ namespace Zest {
                     this->settings.NetworkValidation = std::move(testRegex);
                     valueSet = true;
                 } catch (const std::regex_error& e) {
-                    result.response = std::format("Invalid regex: {}", e.what());
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
             } else if (param == "isdebug") {
@@ -1224,12 +1221,12 @@ namespace Zest {
                     this->settings.isDebug = false;
                     valueSet = true;
                 } else {
-                    result.response = "Invalid isDebug value (use true/false or 0/1)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 setLoggerDebugMode(this->settings.isDebug);
             } else if (param == "usessl") {
-                result.response = "useSSL cannot be changed at runtime: edit config.yaml and restart";
+                result.code = ResultType::Code::ConfigNotReloadable;
                 return result;
             } else if (param == "jsononly") {
                 if (valueStr == "true" || valueStr == "1") {
@@ -1239,7 +1236,7 @@ namespace Zest {
                     this->settings.jsonOnly = false;
                     valueSet = true;
                 } else {
-                    result.response = "Invalid jsonOnly value (use true/false or 0/1)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
             } else if (param == "readonly") {
@@ -1250,12 +1247,12 @@ namespace Zest {
                     this->settings.readOnly = false;
                     valueSet = true;
                 } else {
-                    result.response = "Invalid readOnly value (use true/false or 0/1)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
             } else if (param == "archivecreationdelay") {
                 if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
-                    result.response = "Invalid ArchiveCreationDelay value (at least 1 second)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.ArchiveCreationDelay = uintVal;
@@ -1268,18 +1265,16 @@ namespace Zest {
                     this->settings.AutoArchiveSaving = false;
                     valueSet = true;
                 } else {
-                    result.response = "Invalid AutoArchiveSaving value (use "
-                                      "true/false or 0/1)";
+                    result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
             } else {
-                result.response = std::string("Unknown parameter: ") + std::string(param);
+                result.code = ResultType::Code::UnknownConfigParam;
                 return result;
             }
 
             if (valueSet) {
                 result.code = ResultType::Code::Success;
-                result.response = Messages::UPDATE_SUCCESSFUL;
                 this->setConfig();
                 this->shardManager->reloadSettings(this->settings);
             }
@@ -1289,19 +1284,18 @@ namespace Zest {
         } else if (cmd == "save") {
             if (this->createArchive()) {
                 result.code = ResultType::Code::Success;
-                result.response = "Archive successfully created.";
             } else {
-                result.response = "Failed to create the archive";
+                result.code = ResultType::Code::ArchiveFailed;
                 return result;
             }
         } else {
-            result.response = Messages::CMD_NOT_FOUND;
+            result.code = ResultType::Code::UnknownCommand;
         }
 
         if (!this->replaying.load()) {
             if (result.code == ResultType::Code::Success && isWrite) {
                 if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), walCommand.empty() ? command : walCommand) || (syncWal && !this->syncWAL()))) {
-                    result = { ResultType::Code::Error, Messages::WAL_WRITE_FAILED, result.affectedRows };
+                    result = { ResultType::Code::WalWriteFailed, "", result.affectedRows };
                 }
             }
         }
@@ -1400,8 +1394,8 @@ namespace Zest {
         this->replaying.store(true);
         this->shardManager->replayAllWAL([this](const std::string& cmd) {
             auto resp = this->execCmd(cmd);
-            if (resp.code == ResultType::Code::Error) {
-                ZestLog(LogLevel::Warning, std::format("WAL replay: '{}' failed: {}", cmd, resp.response));
+            if (resp.code != ResultType::Code::Success) {
+                ZestLog(LogLevel::Warning, std::format("WAL replay: '{}' failed with code {}", cmd, static_cast<int>(resp.code)));
             }
             return responseToJson(resp);
         });

@@ -40,17 +40,13 @@ TEST_CASE("ntohl converts network to host byte order", "[server]") {
     REQUIRE(hostOrder == 0x01020304);
 }
 
-TEST_CASE("Messages constants are defined", "[server]") {
-    REQUIRE(std::string(Messages::AUTH_SUCCESS).find("authenticated") != std::string::npos);
-    REQUIRE(std::string(Messages::AUTH_FAILED).find("Authentication") != std::string::npos);
-    REQUIRE(std::string(Messages::MALFORMED_BATCH).find("Batch") != std::string::npos);
-}
-
-TEST_CASE("ResultType SUCCESS and ERROR codes", "[server]") {
-    ResultType ok{ ResultType::Code::Success, "ok", 0 };
-    ResultType err{ ResultType::Code::Error, "fail", 0 };
-    REQUIRE(ok.code == ResultType::Code::Success);
-    REQUIRE(err.code == ResultType::Code::Error);
+TEST_CASE("ResultType codes keep their protocol values", "[server]") {
+    REQUIRE(static_cast<int>(ResultType::Code::Success) == 0);
+    REQUIRE(static_cast<int>(ResultType::Code::UnknownCommand) == 101);
+    REQUIRE(static_cast<int>(ResultType::Code::KeyNotFound) == 200);
+    REQUIRE(static_cast<int>(ResultType::Code::AuthFailed) == 300);
+    REQUIRE(static_cast<int>(ResultType::Code::InvalidConfigValue) == 401);
+    REQUIRE(static_cast<int>(ResultType::Code::WalWriteFailed) == 503);
 }
 
 TEST_CASE("ResultType default affectedRows is zero", "[server]") {

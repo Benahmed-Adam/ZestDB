@@ -53,7 +53,7 @@ def main() -> None:
             ms, reply = client.timed([cmd])
             resp = json.loads(reply)
             if resp["code"] != 0:
-                sys.exit(f"{cmd!r} failed: {resp['response']}")
+                sys.exit(f"{cmd!r} failed with code {resp['code']} (see returncodes.md)")
             latencies.append(ms)
             rows = resp["affectedRows"]
         results.append({"scenario": name, "command": cmd, "rows": rows, "latency_ms": summarize(latencies)})

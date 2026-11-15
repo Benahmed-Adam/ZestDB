@@ -46,7 +46,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard set and get", "[shard]") {
 TEST_CASE_METHOD(ShardFixture, "Shard get key not found", "[shard]") {
     Shard shard(settings, 0);
     auto result = shard.get("nonexistent");
-    REQUIRE(result.code == ResultType::Code::Error);
+    REQUIRE(result.code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardFixture, "Shard del existing key", "[shard]") {
@@ -55,13 +55,13 @@ TEST_CASE_METHOD(ShardFixture, "Shard del existing key", "[shard]") {
     auto delResult = shard.del("key1");
     REQUIRE(delResult.code == ResultType::Code::Success);
     auto getResult = shard.get("key1");
-    REQUIRE(getResult.code == ResultType::Code::Error);
+    REQUIRE(getResult.code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardFixture, "Shard del key not found", "[shard]") {
     Shard shard(settings, 0);
     auto result = shard.del("ghost");
-    REQUIRE(result.code == ResultType::Code::Error);
+    REQUIRE(result.code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardFixture, "Shard set overwrite same key", "[shard]") {
@@ -124,7 +124,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard delBy tombstones matching keys", "[shard]"
     auto result = shard.delBy(vr);
     REQUIRE(result.code == ResultType::Code::Success);
     REQUIRE(result.affectedRows == 2);
-    REQUIRE(shard.get("abc_1").code == ResultType::Code::Error);
+    REQUIRE(shard.get("abc_1").code == ResultType::Code::KeyNotFound);
     REQUIRE(shard.get("xyz_1").code == ResultType::Code::Success);
 }
 
@@ -171,7 +171,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
             for (int i = 0; i < perWriter; i++) {
                 auto r = shard.get(std::format("k{}_{}", w, i));
                 if (expected(w, i).empty()) {
-                    REQUIRE(r.code == ResultType::Code::Error);
+                    REQUIRE(r.code == ResultType::Code::KeyNotFound);
                 } else {
                     REQUIRE(r.response == expected(w, i));
                 }
@@ -250,7 +250,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard does not return a value truncated on disk"
     }
     fs::resize_file(testDir / "shards" / "0" / "seg" / "1.seg", 5);
     Shard shard(settings, 0);
-    REQUIRE(shard.get("key1").code == ResultType::Code::Error);
+    REQUIRE(shard.get("key1").code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ShardFixture, "Shard compactor removes dead segments once every key is deleted", "[shard]") {

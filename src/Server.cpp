@@ -89,7 +89,7 @@ namespace Zest {
                         payload_size = ntohl(payload_size);
                         if (payload_size > (this->authenticated_ ? MAX_PAYLOAD_SIZE : MAX_UNAUTHENTICATED_PAYLOAD_SIZE)) {
                             ZestLog(LogLevel::Warning, std::format("Session: payload of {} bytes refused", payload_size));
-                            this->queue_write(ZestDB::responseToJson({ ResultType::Code::Error, Messages::PAYLOAD_TOO_LARGE, 0 }) + "\n", true);
+                            this->queue_write(ZestDB::responseToJson({ ResultType::Code::PayloadTooLarge }) + "\n", true);
                             return;
                         }
                         this->do_read_command(payload_size);
@@ -124,7 +124,7 @@ namespace Zest {
 
                     while (offset < payload_size && !should_close) {
                         if (offset + 4 > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::Error, Messages::MALFORMED_BATCH, 0 });
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::MalformedBatch });
                             break;
                         }
 
@@ -134,7 +134,7 @@ namespace Zest {
                         offset += 4;
 
                         if (offset + cmd_size > payload_size) {
-                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::Error, Messages::MALFORMED_BATCH, 0 });
+                            final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::MalformedBatch });
                             break;
                         }
 
@@ -170,37 +170,37 @@ namespace Zest {
             const size_t dotPos = cmd.find('.', authPrefix.size());
             should_close = true;
             if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
-                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
+                return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
 
             std::string username = cmd.substr(authPrefix.size(), dotPos - authPrefix.size());
             if (!this->db_.authAllowed(username)) {
                 ZestLog(LogLevel::Warning, std::format("Session: user {} is locked out after too many failed authentications ({})", username, this->remote_ip_));
-                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
+                return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
             if (!this->db_.authenticate(username, cmd.substr(dotPos + 1))) {
                 this->db_.recordAuthResult(username, false);
-                return ZestDB::responseToJson({ ResultType::Code::Error, Messages::AUTH_FAILED, 0 });
+                return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
 
             this->db_.recordAuthResult(username, true);
             this->authenticated_ = true;
             this->username_ = std::move(username);
             should_close = false;
-            return ZestDB::responseToJson({ ResultType::Code::Success, Messages::AUTH_SUCCESS, 0 });
+            return ZestDB::responseToJson({ ResultType::Code::Success });
         }
 
         std::optional<Role> role = this->db_.roleOf(this->username_);
         if (!role) {
             should_close = true;
-            return ZestDB::responseToJson({ ResultType::Code::Error, Messages::SESSION_REVOKED, 0 });
+            return ZestDB::responseToJson({ ResultType::Code::SessionRevoked });
         }
 
         try {
             return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false));
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("Session: command failed with an exception: {}", e.what()));
-            return ZestDB::responseToJson({ ResultType::Code::Error, Messages::INTERNAL_ERROR, 0 });
+            return ZestDB::responseToJson({ ResultType::Code::InternalError });
         }
     }
 

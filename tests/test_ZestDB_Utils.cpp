@@ -47,8 +47,13 @@ TEST_CASE("responseToJson JSON object", "[utils]") {
     REQUIRE(json.find("\"code\":0") != std::string::npos);
 }
 
+TEST_CASE("responseToJson writes the numeric code", "[utils]") {
+    auto json = ZestDB::responseToJson({ ResultType::Code::KeyNotFound });
+    REQUIRE(json == "{\"affectedRows\":0,\"code\":200,\"response\":\"\"}");
+}
+
 TEST_CASE("responseToJson empty response", "[utils]") {
-    ResultType r{ ResultType::Code::Error, "", 0 };
+    ResultType r{ ResultType::Code::InternalError, "", 0 };
     auto json = ZestDB::responseToJson(r);
     REQUIRE(json.find("\"response\":\"\"") != std::string::npos);
 }
