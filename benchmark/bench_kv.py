@@ -12,7 +12,7 @@ def run(client, mode: str, num: int, batch_size: int, prefix: str) -> dict:
     batch: list[str] = []
     t_start = time.perf_counter()
     for i in range(num):
-        batch.append(f"s {prefix}{i} v_{i}" if mode == "set" else f"g {prefix}{i}")
+        batch.append(f's {prefix}{i} "v_{i}"' if mode == "set" else f"g {prefix}{i}")
         if len(batch) >= batch_size or i == num - 1:
             ms, reply = client.timed(batch)
             latencies.append(ms)

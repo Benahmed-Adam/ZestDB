@@ -81,7 +81,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd help", "[commands]") {
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set and get", "[commands]") {
-    auto s = db->execCmd("s key1 value1");
+    auto s = db->execCmd(R"(s key1 "value1")");
     REQUIRE(s.code == ResultType::Code::Success);
     auto g = db->execCmd("g key1");
     REQUIRE(g.code == ResultType::Code::Success);
@@ -103,13 +103,13 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set missing value", "[commands]") {
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set preserves spaces in value", "[commands]") {
-    db->execCmd("s key1 hello world foo");
+    db->execCmd(R"(s key1 "hello world foo")");
     auto g = db->execCmd("g key1");
     REQUIRE(g.response == "hello world foo");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd del existing key", "[commands]") {
-    db->execCmd("s key1 val");
+    db->execCmd(R"(s key1 "val")");
     auto r = db->execCmd("d key1");
     REQUIRE(r.code == ResultType::Code::Success);
 }
@@ -125,8 +125,8 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby missing args", "[commands]") {
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby valid re", "[commands]") {
-    db->execCmd("s test_1 v1");
-    db->execCmd("s test_2 v2");
+    db->execCmd(R"(s test_1 "v1")");
+    db->execCmd(R"(s test_2 "v2")");
     auto r = db->execCmd("gb re test_.*");
     REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
@@ -138,9 +138,9 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby invalid mode", "[commands]") {
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby with lim", "[commands]") {
-    db->execCmd("s a1 v1");
-    db->execCmd("s a2 v2");
-    db->execCmd("s a3 v3");
+    db->execCmd(R"(s a1 "v1")");
+    db->execCmd(R"(s a2 "v2")");
+    db->execCmd(R"(s a3 "v3")");
     auto r = db->execCmd("gb sw a lim 2");
     REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
@@ -152,15 +152,15 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby missing value", "[commands]") 
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby valid", "[commands]") {
-    db->execCmd("s abc_1 old");
-    db->execCmd("s abc_2 old");
-    auto r = db->execCmd("sb sw abc_ newval");
+    db->execCmd(R"(s abc_1 "old")");
+    db->execCmd(R"(s abc_2 "old")");
+    auto r = db->execCmd(R"(sb sw abc_ "newval")");
     REQUIRE(r.code == ResultType::Code::Success);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby preserves spaces in value", "[commands]") {
-    db->execCmd("s abc_1 old");
-    db->execCmd("sb sw abc_ hello world");
+    db->execCmd(R"(s abc_1 "old")");
+    db->execCmd(R"(sb sw abc_ "hello world")");
     auto g = db->execCmd("g abc_1");
     REQUIRE(g.response == "hello world");
 }
@@ -171,9 +171,9 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby missing pattern", "[commands]"
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby valid", "[commands]") {
-    db->execCmd("s abc_1 v1");
-    db->execCmd("s abc_2 v2");
-    db->execCmd("s xyz_1 v3");
+    db->execCmd(R"(s abc_1 "v1")");
+    db->execCmd(R"(s abc_2 "v2")");
+    db->execCmd(R"(s xyz_1 "v3")");
     auto r = db->execCmd("db sw abc_");
     REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 2);
@@ -185,7 +185,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby invalid mode", "[commands]") {
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd case insensitive", "[commands]") {
-    auto r = db->execCmd("S key1 value1");
+    auto r = db->execCmd(R"(S key1 "value1")");
     REQUIRE(r.code == ResultType::Code::Success);
     auto g = db->execCmd("G key1");
     REQUIRE(g.code == ResultType::Code::Success);
@@ -268,9 +268,9 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg non-numeric int", "[commands]")
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby with lim", "[commands]") {
-    db->execCmd("s a1 v1");
-    db->execCmd("s a2 v2");
-    db->execCmd("s a3 v3");
+    db->execCmd(R"(s a1 "v1")");
+    db->execCmd(R"(s a2 "v2")");
+    db->execCmd(R"(s a3 "v3")");
     auto r = db->execCmd("db sw a lim 1");
     REQUIRE(r.code == ResultType::Code::Success);
     REQUIRE(r.affectedRows == 1);
@@ -278,7 +278,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd delby with lim", "[commands]") {
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd readonly blocks set", "[commands]") {
     db->execCmd("scfg readonly true");
-    auto r = db->execCmd("s key1 val");
+    auto r = db->execCmd(R"(s key1 "val")");
     REQUIRE(r.code == ResultType::Code::ReadOnly);
 }
 
@@ -297,13 +297,13 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd readonly allows get", "[commands]") 
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd jsononly blocks non-json", "[commands]") {
     db->execCmd("scfg jsononly true");
-    auto r = db->execCmd("s key1 plainvalue");
+    auto r = db->execCmd(R"(s key1 "plainvalue")");
     REQUIRE(r.code == ResultType::Code::JsonOnly);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd jsononly allows json", "[commands]") {
     db->execCmd("scfg jsononly true");
-    auto r = db->execCmd("s key1 {\"a\":1}");
+    auto r = db->execCmd(R"(s key1 "{\"a\":1}")");
     REQUIRE(r.code == ResultType::Code::Success);
 }
 
@@ -313,12 +313,12 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd getby lim counts matches, not scanne
         db->set("k" + std::to_string(i), "v");
     }
     REQUIRE(db->execCmd("gb sw target lim 1").affectedRows == 1);
-    REQUIRE(db->execCmd("sb sw target y lim 1").affectedRows == 1);
+    REQUIRE(db->execCmd(R"(sb sw target "y" lim 1)").affectedRows == 1);
     REQUIRE(db->execCmd("db sw target lim 1").affectedRows == 1);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd invalid lim is an error, not an exception", "[commands]") {
-    for (const char* cmd : { "gb sw a lim abc", "sb sw a val lim x", "db sw a lim -1" }) {
+    for (const char* cmd : { "gb sw a lim abc", R"(sb sw a "val" lim x)", "db sw a lim -1" }) {
         ResultType r;
         REQUIRE_NOTHROW(r = db->execCmd(cmd));
         REQUIRE(r.code == ResultType::Code::InvalidLimit);
@@ -326,21 +326,21 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd invalid lim is an error, not an exce
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set key that appears earlier in the command", "[commands]") {
-    db->execCmd("s s hello");
+    db->execCmd(R"(s s "hello")");
     REQUIRE(db->execCmd("g s").response == "hello");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby value equal to pattern", "[commands]") {
-    db->execCmd("s user1 a");
-    db->execCmd("sb sw user user");
+    db->execCmd(R"(s user1 "a")");
+    db->execCmd(R"(sb sw user "user")");
     REQUIRE(db->execCmd("g user1").response == "user");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd accepts long command names", "[commands]") {
-    REQUIRE(db->execCmd("set key1 v1").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(R"(set key1 "v1")").code == ResultType::Code::Success);
     REQUIRE(db->execCmd("GET key1").response == "v1");
     REQUIRE(db->execCmd("getby sw key").affectedRows == 1);
-    REQUIRE(db->execCmd("setby sw key v2").affectedRows == 1);
+    REQUIRE(db->execCmd(R"(setby sw key "v2")").affectedRows == 1);
     REQUIRE(db->execCmd("delby sw key").affectedRows == 1);
     REQUIRE(db->execCmd("del key1").code == ResultType::Code::KeyNotFound);
     REQUIRE(db->execCmd("flush").code == ResultType::Code::Success);
@@ -381,7 +381,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby takes a trailing lim, as docum
     for (const char* k : { "k1", "k2", "k3" }) {
         db->set(k, "old");
     }
-    REQUIRE(db->execCmd("sb sw k hello world lim 2").affectedRows == 2);
+    REQUIRE(db->execCmd(R"(sb sw k "hello world" lim 2)").affectedRows == 2);
     int updated = 0;
     for (const char* k : { "k1", "k2", "k3" }) {
         updated += db->get(k).response == "hello world";
@@ -432,7 +432,7 @@ TEST_CASE("ZestDB WAL replay keeps writes that today's config would reject", "[c
         Settings s;
         s.fsyncOnWrite = false;
         WAL wal(s, tmp.dir / "db" / "shards" / "0" / "WAL");
-        REQUIRE(wal.append("s replayed a value longer than five"));
+        REQUIRE(wal.append(R"(s replayed "a value longer than five")"));
     }
     ZestDB db;
     REQUIRE(db.get("replayed").response == "a value longer than five");
@@ -464,7 +464,7 @@ TEST_CASE("ZestDB archives do not contain previous archives", "[commands]") {
     TempDbDir tmp("zestdb_test_archive_nesting", "", 29537);
     tmp.writeConfig(std::format("DbPath: {}\nDBPort: 29537\nWebPort: 29538\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n", tmp.dir.string(), (tmp.dir / "archive").string()));
     ZestDB db;
-    db.execCmd("s key value");
+    db.execCmd(R"(s key "value")");
     REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
@@ -483,7 +483,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby/delby with lim pick the smalle
     for (const char* k : { "k5", "k2", "k9", "k1", "k7", "k3" }) {
         db->set(k, "old");
     }
-    REQUIRE(db->execCmd("sb sw k new lim 3").affectedRows == 3);
+    REQUIRE(db->execCmd(R"(sb sw k "new" lim 3)").affectedRows == 3);
     for (const char* k : { "k1", "k2", "k3" }) {
         REQUIRE(db->get(k).response == "new");
     }
@@ -497,7 +497,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby/delby with lim pick the smalle
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set keeps trailing spaces but not the line ending", "[commands]") {
-    db->execCmd("s key1 value  \r\n");
+    db->execCmd("s key1 \"value  \"\r\n");
     REQUIRE(db->get("key1").response == "value  ");
 }
 
@@ -510,7 +510,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd scfg refuses negative numbers and ze
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "responses stay valid JSON for values that are not UTF-8", "[commands]") {
-    REQUIRE(db->execCmd(std::string("s k \xff")).code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(std::string("s k \"\xff\"")).code == ResultType::Code::Success);
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("g k")));
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd("gb sw k")));
     REQUIRE_NOTHROW(ZestDB::responseToJson(db->execCmd(std::string("scfg \xff x"))));
@@ -531,7 +531,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd refuses regexes that would blow up t
 TEST_CASE("ZestDB keeps only the configured number of archives", "[commands]") {
     TempDbDir tmp("zestdb_test_archive_retention", "ArchiveRetention: 2\n", 29541);
     ZestDB db;
-    db.execCmd("s key value");
+    db.execCmd(R"(s key "value")");
     for (int i = 0; i < 3; i++) {
         REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
     }
@@ -547,7 +547,7 @@ TEST_CASE("ZestDB keeps serving writes while an archive copies the files", "[com
     TempDbDir tmp("zestdb_test_archive_nonblocking", "SegSize: 1048576\nMaxValueSize: 100000\nfsyncOnWrite: false\n", 29561);
     ZestDB db;
     for (int i = 0; i < 640; i++) {
-        REQUIRE(db.execCmd(std::format("s key{} {}", i, std::string(100000, static_cast<char>('a' + i % 26)))).code == ResultType::Code::Success);
+        REQUIRE(db.execCmd(std::format("s key{} \"{}\"", i, std::string(100000, static_cast<char>('a' + i % 26)))).code == ResultType::Code::Success);
     }
 
     const fs::path snapshot = tmp.dir / "archive" / ".snapshot";
@@ -565,7 +565,7 @@ TEST_CASE("ZestDB keeps serving writes while an archive copies the files", "[com
     auto save = std::async(std::launch::async, [&db] { return db.execCmd("save").code; });
     while (filesInSnapshot() == 0 && save.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
     }
-    REQUIRE(db.execCmd("s during copy").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(s during "copy")").code == ResultType::Code::Success);
     const size_t copiedWhenWriteReturned = filesInSnapshot();
     REQUIRE(save.get() == ResultType::Code::Success);
 
@@ -587,7 +587,7 @@ TEST_CASE("ZestDB keeps serving writes while an archive copies the files", "[com
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setex stores a value with a TTL", "[commands][ttl]") {
-    REQUIRE(db->execCmd("setex k 60 hello world").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(R"(setex k 60 "hello world")").code == ResultType::Code::Success);
     REQUIRE(db->get("k").response == "hello world");
     const int ttl = std::stoi(db->execCmd("ttl k").response);
     REQUIRE(ttl > 0);
@@ -599,8 +599,8 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setex stores a value with a TTL", "[
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expired keys are invisible", "[commands][ttl]") {
-    REQUIRE(db->execCmd(std::format("setexat gone {} value", nowMs() - 1)).code == ResultType::Code::Success);
-    REQUIRE(db->execCmd("s kept value").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(std::format("setexat gone {} \"value\"", nowMs() - 1)).code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(R"(s kept "value")").code == ResultType::Code::Success);
 
     REQUIRE(db->get("gone").code == ResultType::Code::KeyNotFound);
     REQUIRE(db->execCmd("ttl gone").response == "-2");
@@ -609,12 +609,12 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expired keys are invisible", "[comma
     REQUIRE(db->execCmd("gb ew e").affectedRows == 0);
     REQUIRE(db->execCmd("gb ew t").affectedRows == 1);
 
-    REQUIRE(db->execCmd("s gone back").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd(R"(s gone "back")").code == ResultType::Code::Success);
     REQUIRE(db->get("gone").response == "back");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expire makes a key disappear once its TTL is over", "[commands][ttl]") {
-    db->execCmd("s k value");
+    db->execCmd(R"(s k "value")");
     REQUIRE(db->execCmd("expire k 1").code == ResultType::Code::Success);
     REQUIRE(db->get("k").response == "value");
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
@@ -622,23 +622,23 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd expire makes a key disappear once it
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd set removes the TTL of a key", "[commands][ttl]") {
-    db->execCmd("setex k 60 old");
-    db->execCmd("s k new");
+    db->execCmd(R"(setex k 60 "old")");
+    db->execCmd(R"(s k "new")");
     REQUIRE(db->execCmd("ttl k").response == "-1");
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd refuses invalid TTLs", "[commands][ttl]") {
-    REQUIRE(db->execCmd("setex k 0 v").code == ResultType::Code::InvalidTtl);
-    REQUIRE(db->execCmd("setex k -5 v").code == ResultType::Code::InvalidTtl);
-    REQUIRE(db->execCmd("setex k abc v").code == ResultType::Code::InvalidTtl);
+    REQUIRE(db->execCmd(R"(setex k 0 "v")").code == ResultType::Code::InvalidTtl);
+    REQUIRE(db->execCmd(R"(setex k -5 "v")").code == ResultType::Code::InvalidTtl);
+    REQUIRE(db->execCmd(R"(setex k abc "v")").code == ResultType::Code::InvalidTtl);
     REQUIRE(db->execCmd("setex k 60").code == ResultType::Code::MissingValue);
     REQUIRE(db->execCmd("expire k").code == ResultType::Code::MissingArguments);
     REQUIRE(db->execCmd("expire missing 10").code == ResultType::Code::KeyNotFound);
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd TTL commands respect roles", "[commands][ttl]") {
-    db->execCmd("s k v");
-    REQUIRE(db->execCmd("setex k 60 v", Role::Read).code == ResultType::Code::PermissionDenied);
+    db->execCmd(R"(s k "v")");
+    REQUIRE(db->execCmd(R"(setex k 60 "v")", Role::Read).code == ResultType::Code::PermissionDenied);
     REQUIRE(db->execCmd("expire k 60", Role::Read).code == ResultType::Code::PermissionDenied);
     REQUIRE(db->execCmd("persist k", Role::Read).code == ResultType::Code::PermissionDenied);
     REQUIRE(db->execCmd("ttl k", Role::Read).response == "-1");
@@ -647,7 +647,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd TTL commands respect roles", "[comma
 TEST_CASE("ZestDB journals TTLs as absolute dates", "[commands][ttl]") {
     TempDbDir tmp("zestdb_test_ttl_wal", "", 29563);
     ZestDB db;
-    REQUIRE(db.execCmd("setex k 60 hello world").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(setex k 60 "hello world")").code == ResultType::Code::Success);
     REQUIRE(db.execCmd("expire k 120").code == ResultType::Code::Success);
 
     std::string wal;
@@ -658,7 +658,7 @@ TEST_CASE("ZestDB journals TTLs as absolute dates", "[commands][ttl]") {
         }
     }
     REQUIRE(wal.find("setexat k ") != std::string::npos);
-    REQUIRE(wal.find(" hello world") != std::string::npos);
+    REQUIRE(wal.find(R"("hello world")") != std::string::npos);
     REQUIRE(wal.find("expireat k ") != std::string::npos);
     REQUIRE(wal.find("setex k") == std::string::npos);
 }
@@ -667,8 +667,8 @@ TEST_CASE("ZestDB keeps TTLs across a restart", "[commands][ttl]") {
     TempDbDir tmp("zestdb_test_ttl_restart", "", 29565);
     {
         ZestDB db;
-        db.execCmd("setex k 60 value");
-        db.execCmd(std::format("setexat gone {} value", nowMs() + 300));
+        db.execCmd(R"(setex k 60 "value")");
+        db.execCmd(std::format("setexat gone {} \"value\"", nowMs() + 300));
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
     ZestDB db;
@@ -677,6 +677,258 @@ TEST_CASE("ZestDB keeps TTLs across a restart", "[commands][ttl]") {
     REQUIRE(ttl > 0);
     REQUIRE(ttl <= 60);
     REQUIRE(db.get("gone").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr and decr update an integer value", "[commands][incr]") {
+    REQUIRE(db->execCmd("incr n").response == "1");
+    REQUIRE(db->execCmd("incr n 10").response == "11");
+    REQUIRE(db->execCmd("incr n -3").response == "8");
+    REQUIRE(db->execCmd("decr n").response == "7");
+    REQUIRE(db->execCmd("decr n 10").response == "-3");
+    REQUIRE(db->get("n").response == "-3");
+    REQUIRE(db->execCmd("incr n").affectedRows == 1);
+
+    db->execCmd(R"(s counter "41")");
+    REQUIRE(db->execCmd("incr counter").response == "42");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr refuses values and increments that are not integers", "[commands][incr]") {
+    db->execCmd(R"(s name "Bob")");
+    db->execCmd(R"(s spaced "5 ")");
+    REQUIRE(db->execCmd("incr name").code == ResultType::Code::NotAnInteger);
+    REQUIRE(db->execCmd("incr spaced").code == ResultType::Code::NotAnInteger);
+    REQUIRE(db->get("name").response == "Bob");
+
+    REQUIRE(db->execCmd("incr n abc").code == ResultType::Code::InvalidIncrement);
+    REQUIRE(db->execCmd("incr n 1.5").code == ResultType::Code::InvalidIncrement);
+    REQUIRE(db->execCmd("incr").code == ResultType::Code::MissingKey);
+    REQUIRE(db->get("n").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr reports overflows without changing the value", "[commands][incr]") {
+    db->execCmd(std::format("s big \"{}\"", INT64_MAX));
+    REQUIRE(db->execCmd("incr big").code == ResultType::Code::IntegerOverflow);
+    REQUIRE(db->get("big").response == std::to_string(INT64_MAX));
+
+    db->execCmd(std::format("s small \"{}\"", INT64_MIN));
+    REQUIRE(db->execCmd("decr small").code == ResultType::Code::IntegerOverflow);
+    REQUIRE(db->execCmd(std::format("decr n {}", INT64_MIN)).code == ResultType::Code::IntegerOverflow);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr keeps the TTL and restarts expired keys at 0", "[commands][incr]") {
+    db->execCmd(R"(setex n 60 "5")");
+    REQUIRE(db->execCmd("incr n").response == "6");
+    const int ttl = std::stoi(db->execCmd("ttl n").response);
+    REQUIRE(ttl > 0);
+    REQUIRE(ttl <= 60);
+
+    db->execCmd(std::format("setexat gone {} \"100\"", nowMs() - 1));
+    REQUIRE(db->execCmd("incr gone").response == "1");
+    REQUIRE(db->execCmd("ttl gone").response == "-1");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr respects roles and read-only mode", "[commands][incr]") {
+    REQUIRE(db->execCmd("incr n", Role::Read).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db->execCmd("decr n", Role::Read).code == ResultType::Code::PermissionDenied);
+    db->execCmd("scfg readonly true");
+    REQUIRE(db->execCmd("incr n").code == ResultType::Code::ReadOnly);
+}
+
+TEST_CASE("ZestDB journals the result of incr, not the increment", "[commands][incr]") {
+    TempDbDir tmp("zestdb_test_incr_wal", "", 29567);
+    {
+        ZestDB db;
+        db.execCmd("incr n 5");
+        db.execCmd(R"(setex t 60 "1")");
+        db.execCmd("incr t");
+
+        std::string wal;
+        for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+            if (entry.path().filename() == "WAL") {
+                std::ifstream in(entry.path(), std::ios::binary);
+                wal += std::string(std::istreambuf_iterator<char>(in), {});
+            }
+        }
+        REQUIRE(wal.find(R"(s n "5")") != std::string::npos);
+        REQUIRE(wal.find("setexat t ") != std::string::npos);
+        REQUIRE(wal.find("incr") == std::string::npos);
+    }
+    ZestDB db;
+    REQUIRE(db.get("n").response == "5");
+    REQUIRE(db.get("t").response == "2");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx only writes keys that do not exist", "[commands][setnx]") {
+    auto created = db->execCmd(R"(setnx lock "worker A")");
+    REQUIRE(created.code == ResultType::Code::Success);
+    REQUIRE(created.affectedRows == 1);
+    REQUIRE(db->get("lock").response == "worker A");
+
+    auto refused = db->execCmd(R"(setnx lock "worker B")");
+    REQUIRE(refused.code == ResultType::Code::KeyExists);
+    REQUIRE(refused.affectedRows == 0);
+    REQUIRE(db->get("lock").response == "worker A");
+
+    db->execCmd("d lock");
+    REQUIRE(db->execCmd(R"(setnx lock "worker B")").code == ResultType::Code::Success);
+    REQUIRE(db->get("lock").response == "worker B");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx treats an expired key as absent", "[commands][setnx]") {
+    db->execCmd(std::format("setexat lock {} \"old\"", nowMs() - 1));
+    REQUIRE(db->execCmd(R"(setnx lock "new")").code == ResultType::Code::Success);
+    REQUIRE(db->get("lock").response == "new");
+    REQUIRE(db->execCmd("ttl lock").response == "-1");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setnx validates like set", "[commands][setnx]") {
+    REQUIRE(db->execCmd("setnx").code == ResultType::Code::MissingKey);
+    REQUIRE(db->execCmd("setnx k").code == ResultType::Code::MissingValue);
+    REQUIRE(db->execCmd(R"(setnx k "v")", Role::Read).code == ResultType::Code::PermissionDenied);
+    db->execCmd("scfg jsononly true");
+    REQUIRE(db->execCmd(R"(setnx k "notjson")").code == ResultType::Code::JsonOnly);
+    db->execCmd("scfg jsononly false");
+    db->execCmd("scfg readonly true");
+    REQUIRE(db->execCmd(R"(setnx k "v")").code == ResultType::Code::ReadOnly);
+    REQUIRE(db->get("k").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE("ZestDB journals a successful setnx as a set, and nothing when the key exists", "[commands][setnx]") {
+    TempDbDir tmp("zestdb_test_setnx_wal", "", 29569);
+    ZestDB db;
+    db.execCmd(R"(setnx k "first")");
+    db.execCmd(R"(setnx k "second")");
+
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    REQUIRE(wal.find(R"(s k "first")") != std::string::npos);
+    REQUIRE(wal.find("second") == std::string::npos);
+    REQUIRE(wal.find("setnx") == std::string::npos);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd cas replaces the value only when it matches", "[commands][cas]") {
+    db->execCmd(R"(s balance "100")");
+    auto swapped = db->execCmd(R"(cas balance "100" "80")");
+    REQUIRE(swapped.code == ResultType::Code::Success);
+    REQUIRE(swapped.affectedRows == 1);
+    REQUIRE(db->get("balance").response == "80");
+
+    REQUIRE(db->execCmd(R"(cas balance "100" "50")").code == ResultType::Code::ValueMismatch);
+    REQUIRE(db->execCmd(R"(cas balance "8" "50")").code == ResultType::Code::ValueMismatch);
+    REQUIRE(db->get("balance").response == "80");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd cas handles spaces in both values", "[commands][cas]") {
+    db->execCmd(R"(s user "{\"a\": 1}")");
+    REQUIRE(db->execCmd(R"(cas user "{\"a\": 1}" "{\"a\": 2, \"b\": 3}")").code == ResultType::Code::Success);
+    REQUIRE(db->get("user").response == R"({"a": 2, "b": 3})");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd cas fails on missing or expired keys and keeps the TTL", "[commands][cas]") {
+    REQUIRE(db->execCmd(R"(cas missing "a" "b")").code == ResultType::Code::KeyNotFound);
+    db->execCmd(std::format("setexat gone {} \"a\"", nowMs() - 1));
+    REQUIRE(db->execCmd(R"(cas gone "a" "b")").code == ResultType::Code::KeyNotFound);
+
+    db->execCmd(R"(setex lock 60 "owner1")");
+    REQUIRE(db->execCmd(R"(cas lock "owner1" "owner2")").code == ResultType::Code::Success);
+    const int ttl = std::stoi(db->execCmd("ttl lock").response);
+    REQUIRE(ttl > 0);
+    REQUIRE(ttl <= 60);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd cas rejects malformed values", "[commands][cas]") {
+    db->execCmd(R"(s k "abc")");
+    REQUIRE(db->execCmd("cas").code == ResultType::Code::MissingKey);
+    REQUIRE(db->execCmd("cas k").code == ResultType::Code::MissingArguments);
+    REQUIRE(db->execCmd("cas k abc new").code == ResultType::Code::InvalidValueFormat);
+    REQUIRE(db->execCmd(R"(cas k "abc" new)").code == ResultType::Code::InvalidValueFormat);
+    REQUIRE(db->execCmd(R"(cas k "abc" "new" extra)").code == ResultType::Code::InvalidValueFormat);
+    REQUIRE(db->execCmd(R"(cas k "abc)").code == ResultType::Code::InvalidValueFormat);
+    REQUIRE(db->execCmd(R"(cas k "abc")").code == ResultType::Code::MissingValue);
+    REQUIRE(db->execCmd(R"(cas k "abc"   )").code == ResultType::Code::MissingValue);
+    REQUIRE(db->execCmd(R"(cas k "abc" "new")", Role::Read).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db->get("k").response == "abc");
+}
+
+TEST_CASE("ZestDB journals a successful cas as a set", "[commands][cas]") {
+    TempDbDir tmp("zestdb_test_cas_wal", "", 29571);
+    ZestDB db;
+    db.execCmd(R"(s k "old")");
+    db.execCmd(R"(cas k "old" "new value")");
+    db.execCmd(R"(cas k "old" "refused")");
+
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    REQUIRE(wal.find(R"(s k "new value")") != std::string::npos);
+    REQUIRE(wal.find("refused") == std::string::npos);
+    REQUIRE(wal.find("cas") == std::string::npos);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd values are quoted and unescape \\\" and \\\\ only", "[commands][quoting]") {
+    REQUIRE(db->execCmd(R"(s k "say \"hi\" and \\ bye")").code == ResultType::Code::Success);
+    REQUIRE(db->get("k").response == R"(say "hi" and \ bye)");
+
+    REQUIRE(db->execCmd(R"(s k "line\nbreak")").code == ResultType::Code::Success);
+    REQUIRE(db->get("k").response == R"(line\nbreak)");
+
+    REQUIRE(db->execCmd(R"(s k "  padded  "   )").code == ResultType::Code::Success);
+    REQUIRE(db->get("k").response == "  padded  ");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd rejects values that are not properly quoted", "[commands][quoting]") {
+    for (const char* cmd : { "s k value", R"(s k "unterminated)", R"(s k "a" b)", R"(s k "a\")", "setex k 60 value", "setnx k value", "sb sw k value", R"(sb sw k "v" lim)",
+                             R"(sb sw k "v" extra)" }) {
+        CAPTURE(cmd);
+        REQUIRE(db->execCmd(cmd).code == ResultType::Code::InvalidValueFormat);
+    }
+    REQUIRE(db->execCmd(R"(s k "")").code == ResultType::Code::EmptyValue);
+    REQUIRE(db->get("k").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby reads lim only after the closing quote", "[commands][quoting]") {
+    db->execCmd(R"(s k1 "a")");
+    db->execCmd(R"(s k2 "b")");
+    REQUIRE(db->execCmd(R"(sb sw k "paid lim 5")").affectedRows == 2);
+    REQUIRE(db->get("k1").response == "paid lim 5");
+    REQUIRE(db->execCmd(R"(sb sw k "x" lim 1)").affectedRows == 1);
+    REQUIRE(db->execCmd(R"(sb sw k "x" LIM 1   )").affectedRows == 1);
+}
+
+TEST_CASE("ZestDB journals escaped values and replays them exactly", "[commands][quoting]") {
+    TempDbDir tmp("zestdb_test_quoted_wal", "", 29573);
+    {
+        ZestDB db;
+        REQUIRE(db.execCmd(R"(setex k 60 "a \"q\" \\ b")").code == ResultType::Code::Success);
+        std::string wal;
+        for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+            if (entry.path().filename() == "WAL") {
+                std::ifstream in(entry.path(), std::ios::binary);
+                wal += std::string(std::istreambuf_iterator<char>(in), {});
+            }
+        }
+        REQUIRE(wal.find(R"("a \"q\" \\ b")") != std::string::npos);
+    }
+
+    fs::create_directories(tmp.dir / "db" / "shards" / "0");
+    {
+        Settings s;
+        s.fsyncOnWrite = false;
+        WAL wal(s, tmp.dir / "db" / "shards" / "0" / "WAL");
+        REQUIRE(wal.append(R"(s replayed "x \"y\" \\ z")"));
+    }
+    ZestDB db;
+    REQUIRE(db.get("k").response == R"(a "q" \ b)");
+    REQUIRE(db.get("replayed").response == R"(x "y" \ z)");
 }
 
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {

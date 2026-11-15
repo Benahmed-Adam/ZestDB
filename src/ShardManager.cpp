@@ -39,6 +39,16 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->set(key, value, expiresAt);
     }
 
+    ResultType ShardManager::setnx(const std::string& key, const std::string& value) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->setnx(key, value);
+    }
+
+    ResultType ShardManager::cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->cas(key, expected, value, expiresAt);
+    }
+
     ResultType ShardManager::setTTL(const std::string& key, uint64_t expiresAt) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->setTTL(key, expiresAt);
@@ -168,6 +178,11 @@ namespace Zest {
             totalDeleted = static_cast<long long>(valid.limit);
         }
         return { ResultType::Code::Success, "", totalDeleted };
+    }
+
+    ResultType ShardManager::incr(const std::string& key, int64_t delta, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->incr(key, delta, expiresAt);
     }
 
     void ShardManager::flush() {

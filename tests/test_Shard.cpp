@@ -221,6 +221,72 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
     checkAll(reopened);
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent increments never lose an update", "[shard][incr]") {
+    constexpr int threads = 8;
+    constexpr int perThread = 500;
+    Shard shard(settings, 0);
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; t++) {
+        workers.emplace_back([&shard] {
+            uint64_t expiresAt = 0;
+            for (int i = 0; i < perThread; i++) {
+                shard.incr("counter", 1, expiresAt);
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent setnx on one key lets exactly one writer win", "[shard][setnx]") {
+    constexpr int threads = 8;
+    constexpr int rounds = 50;
+    Shard shard(settings, 0);
+    for (int round = 0; round < rounds; round++) {
+        const std::string key = std::format("lock{}", round);
+        std::atomic<int> winners = 0;
+        std::vector<std::thread> workers;
+        for (int t = 0; t < threads; t++) {
+            workers.emplace_back([&, t] {
+                if (shard.setnx(key, std::format("owner{}", t)).code == ResultType::Code::Success) {
+                    winners++;
+                }
+            });
+        }
+        for (auto& worker : workers) {
+            worker.join();
+        }
+        REQUIRE(winners == 1);
+    }
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent cas retries never lose an update", "[shard][cas]") {
+    constexpr int threads = 8;
+    constexpr int perThread = 100;
+    Shard shard(settings, 0);
+    shard.set("counter", "0");
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; t++) {
+        workers.emplace_back([&shard] {
+            uint64_t expiresAt = 0;
+            for (int i = 0; i < perThread; i++) {
+                while (true) {
+                    const std::string current = shard.get("counter").response;
+                    if (shard.cas("counter", current, std::to_string(std::stoi(current) + 1), expiresAt).code == ResultType::Code::Success) {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

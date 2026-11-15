@@ -13,7 +13,7 @@ void populate(Zest::ZestDB* db) {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int i = 0; i < 1000000 && db->isRunning(); ++i) {
-        db->execCmd(std::format("s key_{} val_{}", i, i));
+        db->execCmd(std::format("s key_{} \"val_{}\"", i, i));
     }
 
     auto end = std::chrono::high_resolution_clock::now();
