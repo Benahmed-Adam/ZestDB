@@ -500,8 +500,10 @@ namespace Zest {
             ZestLog(LogLevel::Warning, "An archive is already being created");
             return false;
         }
+
         struct ResetFlag {
             std::atomic<bool>& flag;
+
             ~ResetFlag() {
                 flag = false;
             }

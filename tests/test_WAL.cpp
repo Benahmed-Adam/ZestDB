@@ -2,8 +2,8 @@
 #include <filesystem>
 #include <fstream>
 
-#include "WAL.hpp"
 #include "File.hpp"
+#include "WAL.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;

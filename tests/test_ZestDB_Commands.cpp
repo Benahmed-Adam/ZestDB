@@ -7,9 +7,9 @@
 #include <libzippp/libzippp.h>
 #include <thread>
 
+#include "WAL.hpp"
 #include "ZestDB.hpp"
 #include "lib/json.hpp"
-#include "WAL.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;

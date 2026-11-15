@@ -1,9 +1,9 @@
 #include <atomic>
 #include <catch2/catch_all.hpp>
 #include <filesystem>
-#include <functional>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <thread>
 
 #include "Shard.hpp"
