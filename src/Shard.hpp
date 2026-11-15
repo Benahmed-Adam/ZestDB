@@ -33,6 +33,7 @@ namespace Zest {
 
         bool flushData();
         void flush();
+        void compact();
         void stop();
 
         std::shared_mutex& compactionMutex() {

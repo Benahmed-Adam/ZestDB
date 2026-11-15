@@ -162,7 +162,6 @@ TEST_CASE_METHOD(ShardFixture, "Shard WAL append works", "[shard]") {
 }
 
 TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions keep every value", "[shard]") {
-    settings.CompactingInterval = 0;
     constexpr int writers = 4;
     constexpr int perWriter = 200;
 
@@ -184,9 +183,16 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
         Shard shard(settings, 0);
         std::atomic<bool> done = false;
         std::thread flusher([&] {
-            while (!done) {
+            do {
                 shard.flush();
-            }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            } while (!done);
+        });
+        std::thread compactor([&] {
+            do {
+                shard.compact();
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            } while (!done);
         });
         std::vector<std::thread> threads;
         for (int w = 0; w < writers; w++) {
@@ -207,6 +213,7 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
         }
         done = true;
         flusher.join();
+        compactor.join();
         checkAll(shard);
     }
 

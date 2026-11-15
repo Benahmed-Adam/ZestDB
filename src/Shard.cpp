@@ -106,9 +106,7 @@ namespace Zest {
                     break;
                 }
 
-                std::unique_lock<std::shared_mutex> compactionLock(this->compactionMtx);
-                std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
-                this->compactSegments(indexManager->compact());
+                this->compact();
                 ZestLog(LogLevel::Debug, "Compactor - compaction done, waiting...");
             }
             ZestLog(LogLevel::Info, "Stopping the compactor...");
@@ -119,6 +117,12 @@ namespace Zest {
         if (cacheThread.joinable()) {
             cacheThread.join();
         }
+    }
+
+    void Shard::compact() {
+        std::unique_lock<std::shared_mutex> compactionLock(this->compactionMtx);
+        std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
+        this->compactSegments(this->indexManager->compact());
     }
 
     void Shard::compactSegments(std::vector<IndexEntry> entries) {
