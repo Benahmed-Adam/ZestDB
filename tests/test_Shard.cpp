@@ -262,6 +262,31 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent setnx on one key lets exactly o
     }
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent cas retries never lose an update", "[shard][cas]") {
+    constexpr int threads = 8;
+    constexpr int perThread = 100;
+    Shard shard(settings, 0);
+    shard.set("counter", "0");
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; t++) {
+        workers.emplace_back([&shard] {
+            uint64_t expiresAt = 0;
+            for (int i = 0; i < perThread; i++) {
+                while (true) {
+                    const std::string current = shard.get("counter").response;
+                    if (shard.cas("counter", current, std::to_string(std::stoi(current) + 1), expiresAt).code == ResultType::Code::Success) {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

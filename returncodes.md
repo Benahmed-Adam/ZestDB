@@ -40,6 +40,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 110 | `MalformedBatch` | A command length in the batch frame does not match its content. |
 | 111 | `PayloadTooLarge` | The request exceeds 1 MiB before authentication or 64 MiB after; the connection is closed. |
 | 112 | `InvalidIncrement` | The increment of `incr` / `decr` is not an integer. |
+| 113 | `InvalidValueFormat` | A value is not between double quotes, its closing quote is missing, or something other than `lim <n>` (for `setby`) follows it. |
 
 ## 2xx - Key or value
 
@@ -53,6 +54,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 205 | `NotAnInteger` | `incr` / `decr`: the stored value is not a 64-bit integer; it is left unchanged. |
 | 206 | `IntegerOverflow` | `incr` / `decr`: the result would leave the 64-bit integer range; the value is left unchanged. |
 | 207 | `KeyExists` | `setnx`: the key already exists; its value is left unchanged. |
+| 208 | `ValueMismatch` | `cas`: the current value differs from the expected one; it is left unchanged. |
 
 ## 3xx - Authentication and permissions
 

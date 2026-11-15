@@ -112,7 +112,7 @@ static std::string codeOf(ResultType::Code code) {
 TEST_CASE_METHOD(SessionFixture, "Session authenticates with a tokenHash user", "[session]") {
     Client c;
     REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(c.send("s key1 value1").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(R"(s key1 "value1")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session still accepts a deprecated plaintext password user", "[session]") {
@@ -145,21 +145,21 @@ static std::string login(Client& c, const std::string& user, const std::string& 
 TEST_CASE_METHOD(SessionFixture, "Session survives values that are not valid UTF-8", "[session]") {
     Client c;
     REQUIRE(login(c, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(c.send("s k \xff\xfe").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send("s k \"\xff\xfe\"").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(c.send("g k").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(c.send("gb sw k").find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(c.send("s k2 v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(R"(s k2 "v")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session enforces the user's role", "[session]") {
     Client reader;
     REQUIRE(login(reader, "reader", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(reader.send("s k v").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    REQUIRE(reader.send(R"(s k "v")").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
     REQUIRE(reader.send("g k").find(codeOf(ResultType::Code::KeyNotFound)) != std::string::npos);
 
     Client writer;
     REQUIRE(login(writer, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(writer.send("s k v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(writer.send(R"(s k "v")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     for (const char* adminCmd : { "scfg readonly true", "gcfg", "r", "f", "save" }) {
         REQUIRE(writer.send(adminCmd).find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
     }
@@ -172,7 +172,7 @@ TEST_CASE_METHOD(SessionFixture, "Session enforces the user's role", "[session]"
 TEST_CASE_METHOD(SessionFixture, "Session is revoked when a reload removes its user", "[session]") {
     Client c;
     REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
-    REQUIRE(c.send("s k v").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     writeConfig(false);
     REQUIRE(db->execCmd("r").code == ResultType::Code::Success);
     REQUIRE(c.send("g k").find(codeOf(ResultType::Code::SessionRevoked)) != std::string::npos);
@@ -190,7 +190,7 @@ TEST_CASE_METHOD(SessionFixture, "Session serves several clients in parallel", "
             }
             for (int i = 0; i < 100; i++) {
                 std::string key = std::format("c{}_{}", t, i);
-                c.send("s " + key + " " + key);
+                c.send("s " + key + " \"" + key + "\"");
                 if (c.send("g " + key).find("\"response\":\"" + key + "\"") == std::string::npos) {
                     failures++;
                 }

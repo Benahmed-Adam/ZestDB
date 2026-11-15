@@ -157,20 +157,21 @@ ZestDB follows a layered design where each layer is independently testable:
 
 ## Commands
 
-Commands are whitespace-delimited and case-insensitive. For multi-word values, everything after the key/pattern is preserved verbatim.
+Commands are whitespace-delimited and case-insensitive. Values are always written between double quotes, so they may contain spaces: `s greeting "hello world"`.
 
 | Command | Description |
 | --- | --- |
 | `get <key>` / `g <key>` | Retrieve the value stored for a key. |
-| `set <key> <value>` / `s <key> <value>` | Store a value (spaces preserved). |
+| `set <key> "<value>"` / `s <key> "<value>"` | Store a value. |
 | `del <key>` / `d <key>` | Delete a key (marks a tombstone). |
-| `setex <key> <seconds> <value>` | Store a value that expires after `<seconds>`. |
+| `setex <key> <seconds> "<value>"` | Store a value that expires after `<seconds>`. |
 | `expire <key> <seconds>` / `persist <key>` | Set or remove the TTL of an existing key. |
 | `ttl <key>` | Seconds before the key expires (`-1`: no TTL, `-2`: no key). |
-| `setnx <key> <value>` | Store a value only if the key does not exist (an expired key counts as absent); otherwise returns code `207`. |
+| `setnx <key> "<value>"` | Store a value only if the key does not exist (an expired key counts as absent); otherwise returns code `207`. |
+| `cas <key> "<expected>" "<new>"` | Atomically replace the value only if it equals `<expected>`, e.g. `cas balance "100" "80"`; otherwise returns code `208`. The TTL is kept. |
 | `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
 | `getby <mode> <pattern> [lim <n>]` / `gb ...` | Get all entries whose key matches the rule. |
-| `setby <mode> <pattern> <value> [lim <n>]` / `sb ...` | Update the value of all matching keys. |
+| `setby <mode> <pattern> "<value>" [lim <n>]` / `sb ...` | Update the value of all matching keys. |
 | `delby <mode> <pattern> [lim <n>]` / `db ...` | Delete all matching keys. |
 | `flush` / `f` | Force all in-memory data to disk and clear the WAL. |
 | `reload` / `r` | Reload the configuration from `config.yaml`. |
@@ -186,10 +187,21 @@ Commands are whitespace-delimited and case-insensitive. For multi-word values, e
 - `ew` - key ends with the pattern.
 - `lim <n>` - global cap on the number of matched/affected entries.
 
+### Quoted values
+- A value starts and ends with `"`. Inside it, `\"` stands for a quote and `\\` for a backslash; any other backslash is kept as is.
+- Nothing may follow the closing quote, except `lim <n>` for `setby`: `sb sw order: "paid lim 5" lim 10` stores `paid lim 5` in at most 10 keys.
+- A value that is not quoted, not terminated or followed by anything else is rejected with code `113`; an empty value `""` with code `203`.
+
+```
+zestdb> s user "{\"name\": \"Bob\", \"path\": \"C:\\\\tmp\"}"
+zestdb> g user
+{"affectedRows":1,"code":0,"response":"{\"name\": \"Bob\", \"path\": \"C:\\\\tmp\"}"}
+```
+
 ### Example Session
 
 ```
-zestdb> s name Bob
+zestdb> s name "Bob"
 {"affectedRows":1,"code":0,"response":""}
 zestdb> g name
 {"affectedRows":1,"code":0,"response":"Bob"}
@@ -513,8 +525,8 @@ Measured with the three commands above (`bench_concurrency.py` with `--clients 1
 | getby suffix | `gb ew 99` | 1,000 | 2.81 |
 | getby regex | `gb re bench_user:\d*8` | 10,000 | 15.42 |
 | getby regex, no match | `gb re (a+)+$` | 0 | 4.30 |
-| setby prefix, lim 1000 | `sb sw bench_order: updated lim 1000` | 1,000 | 6.89 |
-| setby prefix, all | `sb sw bench_order: updated` | 50,000 | 12.12 |
+| setby prefix, lim 1000 | `sb sw bench_order: "updated" lim 1000` | 1,000 | 6.89 |
+| setby prefix, all | `sb sw bench_order: "updated"` | 50,000 | 12.12 |
 | delby prefix, lim 1000 | `db sw bench_order: lim 1000` | 1,000 | 7.29 |
 | delby prefix, all | `db sw bench_` | 99,000 | 250.82 |
 

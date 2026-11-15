@@ -444,29 +444,36 @@ namespace Zest {
         return { ResultType::Code::Success, "", matchCount };
     }
 
-    ResultType Shard::incr(const std::string& key, int64_t delta, uint64_t& expiresAt) {
-        auto start = std::chrono::high_resolution_clock::now();
-        std::unique_lock<std::shared_mutex> lock(this->readMtx);
-
-        int64_t current = 0;
+    ResultType Shard::readLocked(const std::string& key, uint64_t& expiresAt) {
         expiresAt = 0;
         CacheEntry cached = this->cache->get(key);
         if (cached.index.segmentId == INVALID_SEGMENT_ID || cached.index.isTombstone || cached.index.isExpired()) {
             cached.index = this->indexManager->search(key);
-            cached.value.clear();
-            if (cached.index.segmentId != INVALID_SEGMENT_ID && !cached.index.isTombstone) {
-                cached.value = this->storageManager->read(cached.index);
-                if (cached.value.empty()) {
-                    return { ResultType::Code::ReadFailed };
-                }
+            if (cached.index.segmentId == INVALID_SEGMENT_ID || cached.index.isTombstone) {
+                return { ResultType::Code::KeyNotFound };
+            }
+            cached.value = this->storageManager->read(cached.index);
+            if (cached.value.empty()) {
+                return { ResultType::Code::ReadFailed };
             }
         }
-        if (!cached.value.empty()) {
-            auto [end, ec] = std::from_chars(cached.value.data(), cached.value.data() + cached.value.size(), current);
-            if (ec != std::errc() || end != cached.value.data() + cached.value.size()) {
+        expiresAt = cached.index.expiresAt;
+        return { ResultType::Code::Success, cached.value, 1 };
+    }
+
+    ResultType Shard::incr(const std::string& key, int64_t delta, uint64_t& expiresAt) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+
+        int64_t current = 0;
+        ResultType stored = this->readLocked(key, expiresAt);
+        if (stored.code == ResultType::Code::Success) {
+            const std::string& value = stored.response;
+            auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), current);
+            if (ec != std::errc() || end != value.data() + value.size()) {
                 return { ResultType::Code::NotAnInteger };
             }
-            expiresAt = cached.index.expiresAt;
+        } else if (stored.code != ResultType::Code::KeyNotFound) {
+            return stored;
         }
 
         if ((delta > 0 && current > INT64_MAX - delta) || (delta < 0 && current < INT64_MIN - delta)) {
@@ -474,18 +481,24 @@ namespace Zest {
         }
         const std::string result = std::to_string(current + delta);
 
-        IndexEntry entry = this->storageManager->append(result);
-        if (entry.segmentId == INVALID_SEGMENT_ID) {
-            return { ResultType::Code::WriteFailed };
+        ResultType written = this->writeLocked(key, result, expiresAt);
+        if (written.code == ResultType::Code::Success) {
+            written.response = result;
         }
-        entry.key = key;
-        entry.expiresAt = expiresAt;
-        this->indexManager->insert(entry);
-        this->cache->put(entry, result);
+        return written;
+    }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        this->perfMonitor.addSetStats(false, std::chrono::duration<double, std::milli>(end - start).count());
-        return { ResultType::Code::Success, result, 1 };
+    ResultType Shard::cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+
+        ResultType stored = this->readLocked(key, expiresAt);
+        if (stored.code != ResultType::Code::Success) {
+            return stored;
+        }
+        if (stored.response != expected) {
+            return { ResultType::Code::ValueMismatch };
+        }
+        return this->writeLocked(key, value, expiresAt);
     }
 
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {

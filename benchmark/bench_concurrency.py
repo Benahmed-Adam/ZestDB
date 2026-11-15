@@ -11,13 +11,13 @@ def worker(conn_args: tuple, wid: int, ops: int, batch_size: int, read_pct: int,
     client = ZestClient(*conn_args)
     keys = [f"bench_conc_{wid}_{i}" for i in range(ops)]
     for start in range(0, ops, 10_000):
-        client.send([f"s {k} v" for k in keys[start:start + 10_000]])
+        client.send([f's {k} "v"' for k in keys[start:start + 10_000]])
     barrier.wait()
 
     latencies, errors, batch = [], 0, []
     t_start = time.perf_counter()
     for i, k in enumerate(keys):
-        batch.append(f"g {k}" if i % 100 < read_pct else f"s {k} v{i}")
+        batch.append(f"g {k}" if i % 100 < read_pct else f's {k} "v{i}"')
         if len(batch) >= batch_size or i == ops - 1:
             ms, reply = client.timed(batch)
             latencies.append(ms)

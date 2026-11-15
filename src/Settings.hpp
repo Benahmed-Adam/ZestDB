@@ -39,6 +39,7 @@ namespace Zest {
             MalformedBatch = 110,
             PayloadTooLarge = 111,
             InvalidIncrement = 112,
+            InvalidValueFormat = 113,
 
             KeyNotFound = 200,
             InvalidKey = 201,
@@ -48,6 +49,7 @@ namespace Zest {
             NotAnInteger = 205,
             IntegerOverflow = 206,
             KeyExists = 207,
+            ValueMismatch = 208,
 
             AuthFailed = 300,
             PermissionDenied = 301,

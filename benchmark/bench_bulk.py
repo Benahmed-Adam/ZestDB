@@ -12,7 +12,7 @@ def populate(client, num: int) -> None:
     batch: list[str] = []
     for i in range(num):
         prefix = "bench_user:" if i % 2 == 0 else "bench_order:"
-        batch.append(f"s {prefix}{i} v_{i}")
+        batch.append(f's {prefix}{i} "v_{i}"')
         if len(batch) >= POPULATE_BATCH or i == num - 1:
             client.send(batch)
             batch = []
@@ -26,8 +26,8 @@ def scenarios() -> list[tuple[str, str]]:
         ("getby suffix", "gb ew 99"),
         ("getby regex", r"gb re bench_user:\d*8"),
         ("getby regex, no match", "gb re (a+)+$"),
-        ("setby prefix, lim 1000", "sb sw bench_order: updated lim 1000"),
-        ("setby prefix, all", "sb sw bench_order: updated"),
+        ("setby prefix, lim 1000", 'sb sw bench_order: "updated" lim 1000'),
+        ("setby prefix, all", 'sb sw bench_order: "updated"'),
         ("delby prefix, lim 1000", "db sw bench_order: lim 1000"),
         ("delby prefix, all", "db sw bench_"),
     ]

@@ -48,6 +48,7 @@ namespace Zest {
 
         ResultType incr(const std::string& key, int64_t delta);
         ResultType setnx(const std::string& key, const std::string& value);
+        ResultType cas(const std::string& key, const std::string& expected, const std::string& value);
 
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();
@@ -68,6 +69,7 @@ namespace Zest {
 
     private:
         ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
+        ResultType casBy(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
         ResultType checkWrite(const std::string& key, const std::string& value) const;
         void boot();
         bool validateKey(std::string_view key) const;

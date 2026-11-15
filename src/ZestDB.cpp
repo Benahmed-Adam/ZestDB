@@ -739,6 +739,19 @@ namespace Zest {
         return this->shardManager->setnx(key, value);
     }
 
+    ResultType ZestDB::cas(const std::string& key, const std::string& expected, const std::string& value) {
+        uint64_t expiresAt = 0;
+        return this->casBy(key, expected, value, expiresAt);
+    }
+
+    ResultType ZestDB::casBy(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
+        ResultType check = this->checkWrite(key, value);
+        if (check.code != ResultType::Code::Success) {
+            return check;
+        }
+        return this->shardManager->cas(key, expected, value, expiresAt);
+    }
+
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
         const bool enforce = !this->replaying.load();
 
@@ -964,6 +977,46 @@ namespace Zest {
         return this->shardManager->syncWAL();
     }
 
+    static bool readQuoted(std::string_view sv, size_t& pos, std::string& out) {
+        pos = sv.find_first_not_of(" \t", pos);
+        if (pos == std::string_view::npos || sv[pos] != '"') {
+            return false;
+        }
+        out.clear();
+        for (size_t i = pos + 1; i < sv.size(); i++) {
+            if (sv[i] == '\\' && i + 1 < sv.size() && (sv[i + 1] == '"' || sv[i + 1] == '\\')) {
+                out += sv[++i];
+            } else if (sv[i] == '"') {
+                pos = i + 1;
+                return true;
+            } else {
+                out += sv[i];
+            }
+        }
+        return false;
+    }
+
+    static bool onlySpacesFrom(std::string_view sv, size_t pos) {
+        return sv.find_first_not_of(" \t", pos) == std::string_view::npos;
+    }
+
+    static bool readLastValue(std::string_view sv, std::string_view word, std::string& out) {
+        size_t pos = static_cast<size_t>(word.data() - sv.data());
+        return readQuoted(sv, pos, out) && onlySpacesFrom(sv, pos);
+    }
+
+    static std::string quoteValue(std::string_view value) {
+        std::string out = "\"";
+        for (char c : value) {
+            if (c == '"' || c == '\\') {
+                out += '\\';
+            }
+            out += c;
+        }
+        out += '"';
+        return out;
+    }
+
     static bool parseTTL(std::string_view word, bool relative, uint64_t& expiresAt) {
         if (relative) {
             uint32_t seconds = 0;
@@ -1012,7 +1065,7 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx";
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
@@ -1035,26 +1088,31 @@ namespace Zest {
                 result = this->get(std::string(words[1]));
             }
         } else if (cmd == "s") {
+            std::string value;
             if (words.size() < 2) {
                 result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 3) {
                 result.code = ResultType::Code::MissingValue;
+            } else if (!readLastValue(sv, words[2], value)) {
+                result.code = ResultType::Code::InvalidValueFormat;
             } else {
-                result = this->set(std::string(words[1]), std::string(sv.substr(static_cast<size_t>(words[2].data() - sv.data()))));
+                result = this->set(std::string(words[1]), value);
             }
         } else if (cmd == "setex" || cmd == "setexat") {
             uint64_t ttl = 0;
+            std::string value;
             if (words.size() < 2) {
                 result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 4) {
                 result.code = ResultType::Code::MissingValue;
             } else if (!parseTTL(words[2], cmd == "setex", ttl)) {
                 result.code = ResultType::Code::InvalidTtl;
+            } else if (!readLastValue(sv, words[3], value)) {
+                result.code = ResultType::Code::InvalidValueFormat;
             } else {
                 const std::string key(words[1]);
-                const std::string value(sv.substr(static_cast<size_t>(words[3].data() - sv.data())));
                 result = this->set(key, value, ttl);
-                walCommand = std::format("setexat {} {} {}", key, ttl, value);
+                walCommand = std::format("setexat {} {} {}", key, ttl, quoteValue(value));
             }
         } else if (cmd == "expire" || cmd == "expireat") {
             uint64_t ttl = 0;
@@ -1079,15 +1137,37 @@ namespace Zest {
                 result = this->getTTL(std::string(words[1]));
             }
         } else if (cmd == "setnx") {
+            std::string value;
             if (words.size() < 2) {
                 result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 3) {
                 result.code = ResultType::Code::MissingValue;
+            } else if (!readLastValue(sv, words[2], value)) {
+                result.code = ResultType::Code::InvalidValueFormat;
             } else {
                 const std::string key(words[1]);
-                const std::string value(sv.substr(static_cast<size_t>(words[2].data() - sv.data())));
                 result = this->setnx(key, value);
-                walCommand = std::format("s {} {}", key, value);
+                walCommand = std::format("s {} {}", key, quoteValue(value));
+            }
+        } else if (cmd == "cas") {
+            std::string expected;
+            std::string value;
+            size_t valuePos = 0;
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingKey;
+            } else if (words.size() < 3) {
+                result.code = ResultType::Code::MissingArguments;
+            } else if (valuePos = static_cast<size_t>(words[2].data() - sv.data()); !readQuoted(sv, valuePos, expected)) {
+                result.code = ResultType::Code::InvalidValueFormat;
+            } else if (onlySpacesFrom(sv, valuePos)) {
+                result.code = ResultType::Code::MissingValue;
+            } else if (!readQuoted(sv, valuePos, value) || !onlySpacesFrom(sv, valuePos)) {
+                result.code = ResultType::Code::InvalidValueFormat;
+            } else {
+                const std::string key(words[1]);
+                uint64_t expiresAt = 0;
+                result = this->casBy(key, expected, value, expiresAt);
+                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(value)) : std::format("s {} {}", key, quoteValue(value));
             }
         } else if (cmd == "incr" || cmd == "decr") {
             int64_t delta = 1;
@@ -1101,7 +1181,7 @@ namespace Zest {
                 const std::string key(words[1]);
                 uint64_t expiresAt = 0;
                 result = this->incrBy(key, cmd == "incr" ? delta : -delta, expiresAt);
-                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, result.response) : std::format("s {} {}", key, result.response);
+                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(result.response)) : std::format("s {} {}", key, quoteValue(result.response));
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
@@ -1139,21 +1219,22 @@ namespace Zest {
                 std::string mode = toLowerStr(words[1]);
                 std::string_view pattern = words[2];
                 unsigned int limit = UINT_MAX;
-                bool limitOk = true;
+                std::string value;
+                size_t valuePos = static_cast<size_t>(words[3].data() - sv.data());
 
-                size_t valStart = static_cast<size_t>(words[3].data() - sv.data());
-                size_t valEnd = sv.size();
-                if (words.size() >= 6 && toLowerStr(words[words.size() - 2]) == "lim") {
-                    limitOk = parseNumber(words.back(), limit);
-                    std::string_view lastValueWord = words[words.size() - 3];
-                    valEnd = static_cast<size_t>(lastValueWord.data() + lastValueWord.size() - sv.data());
+                const bool valueOk = readQuoted(sv, valuePos, value);
+                std::string_view rest;
+                if (valueOk && !onlySpacesFrom(sv, valuePos)) {
+                    rest = sv.substr(sv.find_first_not_of(" \t", valuePos));
+                    rest = rest.substr(0, rest.find_last_not_of(" \t") + 1);
                 }
+                const bool hasLimit = rest.size() > 3 && toLowerStr(rest.substr(0, 3)) == "lim" && (rest[3] == ' ' || rest[3] == '\t');
 
-                if (!limitOk) {
+                if (!valueOk || (!rest.empty() && !hasLimit)) {
+                    result.code = ResultType::Code::InvalidValueFormat;
+                } else if (hasLimit && !parseNumber(rest.substr(rest.find_first_not_of(" \t", 3)), limit)) {
                     result.code = ResultType::Code::InvalidLimit;
                 } else {
-                    std::string value(sv.substr(valStart, valEnd - valStart));
-
                     auto [valid, validMode] = this->createValidationRule(mode, pattern);
                     if (!validMode) {
                         result.code = ResultType::Code::InvalidRegex;
@@ -1369,22 +1450,24 @@ namespace Zest {
         oss << "---------------" << "\n";
         oss << "get <key>                              - Get value by key"
             << "\n";
-        oss << "set <key> <value>                      - Set key-value pair"
+        oss << "set <key> \"<value>\"                    - Set key-value pair"
             << "\n";
         oss << "del <key>                              - Delete key" << "\n";
-        oss << "setex <key> <seconds> <value>          - Set a value that expires after <seconds>" << "\n";
+        oss << "setex <key> <seconds> \"<value>\"        - Set a value that expires after <seconds>" << "\n";
         oss << "expire <key> <seconds>                 - Make an existing key expire after <seconds>" << "\n";
         oss << "ttl <key>                              - Seconds before expiry (-1: no TTL, -2: no key)" << "\n";
         oss << "persist <key>                          - Remove the TTL of a key" << "\n";
         oss << "incr <key> [n]                         - Add n (default 1) to an integer value, 0 if absent" << "\n";
         oss << "decr <key> [n]                         - Subtract n (default 1) from an integer value" << "\n";
-        oss << "setnx <key> <value>                    - Set the value only if the key does not exist" << "\n";
+        oss << "cas <key> \"<expected>\" \"<new>\"         - Replace the value only if it equals <expected>" << "\n";
+        oss << "setnx <key> \"<value>\"                  - Set the value only if the key does not exist" << "\n";
         oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching "
                "pattern"
             << "\n";
-        oss << "setby <mode> <pattern> <val> [lim <n>] - Set value for keys "
+        oss << "setby <mode> <pattern> \"<val>\" [lim <n>] - Set value for keys "
                "matching pattern"
             << "\n";
+        oss << "Values are written between double quotes; use \\\" for a quote and \\\\ for a backslash inside them" << "\n";
         oss << "delby <mode> <pattern> [lim <n>]       - Delete keys matching "
                "pattern"
             << "\n";
