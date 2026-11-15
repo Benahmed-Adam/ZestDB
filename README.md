@@ -164,6 +164,10 @@ Commands are whitespace-delimited and case-insensitive. For multi-word values, e
 | `get <key>` / `g <key>` | Retrieve the value stored for a key. |
 | `set <key> <value>` / `s <key> <value>` | Store a value (spaces preserved). |
 | `del <key>` / `d <key>` | Delete a key (marks a tombstone). |
+| `setex <key> <seconds> <value>` | Store a value that expires after `<seconds>`. |
+| `expire <key> <seconds>` / `persist <key>` | Set or remove the TTL of an existing key. |
+| `ttl <key>` | Seconds before the key expires (`-1`: no TTL, `-2`: no key). |
+| `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
 | `getby <mode> <pattern> [lim <n>]` / `gb ...` | Get all entries whose key matches the rule. |
 | `setby <mode> <pattern> <value> [lim <n>]` / `sb ...` | Update the value of all matching keys. |
 | `delby <mode> <pattern> [lim <n>]` / `db ...` | Delete all matching keys. |

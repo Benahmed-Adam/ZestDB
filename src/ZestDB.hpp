@@ -46,6 +46,8 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
 
+        ResultType incr(const std::string& key, int64_t delta);
+
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
@@ -64,6 +66,7 @@ namespace Zest {
         static std::string responseToJson(const ResultType& resp);
 
     private:
+        ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
         void boot();
         bool validateKey(std::string_view key) const;
         bool validateValue(std::string_view value) const;

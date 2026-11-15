@@ -795,6 +795,23 @@ namespace Zest {
         return this->shardManager->delBy(valid);
     }
 
+    ResultType ZestDB::incr(const std::string& key, int64_t delta) {
+        uint64_t expiresAt = 0;
+        return this->incrBy(key, delta, expiresAt);
+    }
+
+    ResultType ZestDB::incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt) {
+        if (this->settings.readOnly) {
+            return { ResultType::Code::ReadOnly };
+        }
+
+        if (!this->validateKey(key)) {
+            return { ResultType::Code::InvalidKey };
+        }
+
+        return this->shardManager->incr(key, delta, expiresAt);
+    }
+
     static bool isRegexTooComplex(std::string_view pattern) {
         constexpr size_t maxLength = 1024;
         constexpr size_t maxDepth = 32;
@@ -922,7 +939,7 @@ namespace Zest {
     }
 
     template <typename T>
-    static bool parseUInt(std::string_view str, T& out) {
+    static bool parseNumber(std::string_view str, T& out) {
         auto [end, ec] = std::from_chars(str.data(), str.data() + str.size(), out);
         return ec == std::errc() && end == str.data() + str.size();
     }
@@ -934,13 +951,13 @@ namespace Zest {
     static bool parseTTL(std::string_view word, bool relative, uint64_t& expiresAt) {
         if (relative) {
             uint32_t seconds = 0;
-            if (!parseUInt(word, seconds) || seconds == 0) {
+            if (!parseNumber(word, seconds) || seconds == 0) {
                 return false;
             }
             expiresAt = nowMs() + static_cast<uint64_t>(seconds) * 1000;
             return true;
         }
-        return parseUInt(word, expiresAt) && expiresAt != 0;
+        return parseNumber(word, expiresAt) && expiresAt != 0;
     }
 
     ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal) {
@@ -979,7 +996,7 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist";
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
@@ -1045,6 +1062,20 @@ namespace Zest {
             } else {
                 result = this->getTTL(std::string(words[1]));
             }
+        } else if (cmd == "incr" || cmd == "decr") {
+            int64_t delta = 1;
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingKey;
+            } else if (words.size() > 2 && !parseNumber(words[2], delta)) {
+                result.code = ResultType::Code::InvalidIncrement;
+            } else if (cmd == "decr" && delta == INT64_MIN) {
+                result.code = ResultType::Code::IntegerOverflow;
+            } else {
+                const std::string key(words[1]);
+                uint64_t expiresAt = 0;
+                result = this->incrBy(key, cmd == "incr" ? delta : -delta, expiresAt);
+                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, result.response) : std::format("s {} {}", key, result.response);
+            }
         } else if (cmd == "d") {
             if (words.size() < 2) {
                 result.code = ResultType::Code::MissingKey;
@@ -1061,7 +1092,7 @@ namespace Zest {
                 bool limitOk = true;
                 for (size_t i = 3; i < words.size(); i++) {
                     if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                        limitOk = parseUInt(words[i + 1], limit);
+                        limitOk = parseNumber(words[i + 1], limit);
                     }
                 }
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
@@ -1086,7 +1117,7 @@ namespace Zest {
                 size_t valStart = static_cast<size_t>(words[3].data() - sv.data());
                 size_t valEnd = sv.size();
                 if (words.size() >= 6 && toLowerStr(words[words.size() - 2]) == "lim") {
-                    limitOk = parseUInt(words.back(), limit);
+                    limitOk = parseNumber(words.back(), limit);
                     std::string_view lastValueWord = words[words.size() - 3];
                     valEnd = static_cast<size_t>(lastValueWord.data() + lastValueWord.size() - sv.data());
                 }
@@ -1115,7 +1146,7 @@ namespace Zest {
                 bool limitOk = true;
                 for (size_t i = 3; i < words.size(); i++) {
                     if (toLowerStr(words[i]) == "lim" && i + 1 < words.size()) {
-                        limitOk = parseUInt(words[i + 1], limit);
+                        limitOk = parseNumber(words[i + 1], limit);
                     }
                 }
                 auto [valid, validMode] = this->createValidationRule(mode, pattern);
@@ -1151,7 +1182,7 @@ namespace Zest {
             unsigned int uintVal = 0;
 
             if (param == "segsize") {
-                if (!parseUInt(valueStr, ulongVal)) {
+                if (!parseNumber(valueStr, ulongVal)) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
@@ -1162,7 +1193,7 @@ namespace Zest {
                 this->settings.SegSize = ulongVal;
                 valueSet = true;
             } else if (param == "maxkeysize") {
-                if (!parseUInt(valueStr, uintVal)) {
+                if (!parseNumber(valueStr, uintVal)) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
@@ -1173,7 +1204,7 @@ namespace Zest {
                 this->settings.MaxKeySize = uintVal;
                 valueSet = true;
             } else if (param == "maxvaluesize") {
-                if (!parseUInt(valueStr, uintVal)) {
+                if (!parseNumber(valueStr, uintVal)) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
@@ -1184,21 +1215,21 @@ namespace Zest {
                 this->settings.MaxValueSize = uintVal;
                 valueSet = true;
             } else if (param == "cachesize") {
-                if (!parseUInt(valueStr, uintVal)) {
+                if (!parseNumber(valueStr, uintVal)) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.CacheSize = uintVal;
                 valueSet = true;
             } else if (param == "compactinginterval") {
-                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                if (!parseNumber(valueStr, uintVal) || uintVal == 0) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
                 this->settings.CompactingInterval = uintVal;
                 valueSet = true;
             } else if (param == "flushinterval") {
-                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                if (!parseNumber(valueStr, uintVal) || uintVal == 0) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
@@ -1253,7 +1284,7 @@ namespace Zest {
                     return result;
                 }
             } else if (param == "archivecreationdelay") {
-                if (!parseUInt(valueStr, uintVal) || uintVal == 0) {
+                if (!parseNumber(valueStr, uintVal) || uintVal == 0) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }
@@ -1318,6 +1349,8 @@ namespace Zest {
         oss << "expire <key> <seconds>                 - Make an existing key expire after <seconds>" << "\n";
         oss << "ttl <key>                              - Seconds before expiry (-1: no TTL, -2: no key)" << "\n";
         oss << "persist <key>                          - Remove the TTL of a key" << "\n";
+        oss << "incr <key> [n]                         - Add n (default 1) to an integer value, 0 if absent" << "\n";
+        oss << "decr <key> [n]                         - Subtract n (default 1) from an integer value" << "\n";
         oss << "getby <mode> <pattern> [lim <n>]       - Get keys matching "
                "pattern"
             << "\n";

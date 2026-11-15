@@ -29,6 +29,9 @@ namespace Zest {
         ResultType getBy(ValidationRule& valid);
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
+
+        ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
+        
         std::vector<std::string> matchingKeys(const ValidationRule& valid);
 
         bool flushData();

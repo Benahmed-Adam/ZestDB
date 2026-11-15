@@ -679,6 +679,85 @@ TEST_CASE("ZestDB keeps TTLs across a restart", "[commands][ttl]") {
     REQUIRE(db.get("gone").code == ResultType::Code::KeyNotFound);
 }
 
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr and decr update an integer value", "[commands][incr]") {
+    REQUIRE(db->execCmd("incr n").response == "1");
+    REQUIRE(db->execCmd("incr n 10").response == "11");
+    REQUIRE(db->execCmd("incr n -3").response == "8");
+    REQUIRE(db->execCmd("decr n").response == "7");
+    REQUIRE(db->execCmd("decr n 10").response == "-3");
+    REQUIRE(db->get("n").response == "-3");
+    REQUIRE(db->execCmd("incr n").affectedRows == 1);
+
+    db->execCmd("s counter 41");
+    REQUIRE(db->execCmd("incr counter").response == "42");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr refuses values and increments that are not integers", "[commands][incr]") {
+    db->execCmd("s name Bob");
+    db->execCmd("s spaced 5 ");
+    REQUIRE(db->execCmd("incr name").code == ResultType::Code::NotAnInteger);
+    REQUIRE(db->execCmd("incr spaced").code == ResultType::Code::NotAnInteger);
+    REQUIRE(db->get("name").response == "Bob");
+
+    REQUIRE(db->execCmd("incr n abc").code == ResultType::Code::InvalidIncrement);
+    REQUIRE(db->execCmd("incr n 1.5").code == ResultType::Code::InvalidIncrement);
+    REQUIRE(db->execCmd("incr").code == ResultType::Code::MissingKey);
+    REQUIRE(db->get("n").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr reports overflows without changing the value", "[commands][incr]") {
+    db->execCmd(std::format("s big {}", INT64_MAX));
+    REQUIRE(db->execCmd("incr big").code == ResultType::Code::IntegerOverflow);
+    REQUIRE(db->get("big").response == std::to_string(INT64_MAX));
+
+    db->execCmd(std::format("s small {}", INT64_MIN));
+    REQUIRE(db->execCmd("decr small").code == ResultType::Code::IntegerOverflow);
+    REQUIRE(db->execCmd(std::format("decr n {}", INT64_MIN)).code == ResultType::Code::IntegerOverflow);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr keeps the TTL and restarts expired keys at 0", "[commands][incr]") {
+    db->execCmd("setex n 60 5");
+    REQUIRE(db->execCmd("incr n").response == "6");
+    const int ttl = std::stoi(db->execCmd("ttl n").response);
+    REQUIRE(ttl > 0);
+    REQUIRE(ttl <= 60);
+
+    db->execCmd(std::format("setexat gone {} 100", nowMs() - 1));
+    REQUIRE(db->execCmd("incr gone").response == "1");
+    REQUIRE(db->execCmd("ttl gone").response == "-1");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd incr respects roles and read-only mode", "[commands][incr]") {
+    REQUIRE(db->execCmd("incr n", Role::Read).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db->execCmd("decr n", Role::Read).code == ResultType::Code::PermissionDenied);
+    db->execCmd("scfg readonly true");
+    REQUIRE(db->execCmd("incr n").code == ResultType::Code::ReadOnly);
+}
+
+TEST_CASE("ZestDB journals the result of incr, not the increment", "[commands][incr]") {
+    TempDbDir tmp("zestdb_test_incr_wal", "", 29567);
+    {
+        ZestDB db;
+        db.execCmd("incr n 5");
+        db.execCmd("setex t 60 1");
+        db.execCmd("incr t");
+
+        std::string wal;
+        for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+            if (entry.path().filename() == "WAL") {
+                std::ifstream in(entry.path(), std::ios::binary);
+                wal += std::string(std::istreambuf_iterator<char>(in), {});
+            }
+        }
+        REQUIRE(wal.find("s n 5") != std::string::npos);
+        REQUIRE(wal.find("setexat t ") != std::string::npos);
+        REQUIRE(wal.find("incr") == std::string::npos);
+    }
+    ZestDB db;
+    REQUIRE(db.get("n").response == "5");
+    REQUIRE(db.get("t").response == "2");
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

@@ -170,6 +170,11 @@ namespace Zest {
         return { ResultType::Code::Success, "", totalDeleted };
     }
 
+    ResultType ShardManager::incr(const std::string& key, int64_t delta, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->incr(key, delta, expiresAt);
+    }
+
     void ShardManager::flush() {
         std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {

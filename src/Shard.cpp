@@ -1,6 +1,7 @@
 #include "Shard.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -428,6 +429,50 @@ namespace Zest {
         this->perfMonitor.addDelByStats(false, latency);
 
         return { ResultType::Code::Success, "", matchCount };
+    }
+
+    ResultType Shard::incr(const std::string& key, int64_t delta, uint64_t& expiresAt) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+
+        int64_t current = 0;
+        expiresAt = 0;
+        CacheEntry cached = this->cache->get(key);
+        if (cached.index.segmentId == INVALID_SEGMENT_ID || cached.index.isTombstone || cached.index.isExpired()) {
+            cached.index = this->indexManager->search(key);
+            cached.value.clear();
+            if (cached.index.segmentId != INVALID_SEGMENT_ID && !cached.index.isTombstone) {
+                cached.value = this->storageManager->read(cached.index);
+                if (cached.value.empty()) {
+                    return { ResultType::Code::ReadFailed };
+                }
+            }
+        }
+        if (!cached.value.empty()) {
+            auto [end, ec] = std::from_chars(cached.value.data(), cached.value.data() + cached.value.size(), current);
+            if (ec != std::errc() || end != cached.value.data() + cached.value.size()) {
+                return { ResultType::Code::NotAnInteger };
+            }
+            expiresAt = cached.index.expiresAt;
+        }
+
+        if ((delta > 0 && current > INT64_MAX - delta) || (delta < 0 && current < INT64_MIN - delta)) {
+            return { ResultType::Code::IntegerOverflow };
+        }
+        const std::string result = std::to_string(current + delta);
+
+        IndexEntry entry = this->storageManager->append(result);
+        if (entry.segmentId == INVALID_SEGMENT_ID) {
+            return { ResultType::Code::WriteFailed };
+        }
+        entry.key = key;
+        entry.expiresAt = expiresAt;
+        this->indexManager->insert(entry);
+        this->cache->put(entry, result);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        this->perfMonitor.addSetStats(false, std::chrono::duration<double, std::milli>(end - start).count());
+        return { ResultType::Code::Success, result, 1 };
     }
 
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {

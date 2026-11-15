@@ -27,6 +27,8 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value);
         ResultType delBy(ValidationRule& valid);
 
+        ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
+
         void flush();
         void stop();
         std::vector<std::shared_lock<std::shared_mutex>> pauseCompaction();

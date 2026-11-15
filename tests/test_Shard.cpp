@@ -221,6 +221,25 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent writes, flushes and compactions
     checkAll(reopened);
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard concurrent increments never lose an update", "[shard][incr]") {
+    constexpr int threads = 8;
+    constexpr int perThread = 500;
+    Shard shard(settings, 0);
+    std::vector<std::thread> workers;
+    for (int t = 0; t < threads; t++) {
+        workers.emplace_back([&shard] {
+            uint64_t expiresAt = 0;
+            for (int i = 0; i < perThread; i++) {
+                shard.incr("counter", 1, expiresAt);
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

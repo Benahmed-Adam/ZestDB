@@ -38,12 +38,15 @@ namespace Zest {
             InvalidTtl = 109,
             MalformedBatch = 110,
             PayloadTooLarge = 111,
+            InvalidIncrement = 112,
 
             KeyNotFound = 200,
             InvalidKey = 201,
             InvalidValue = 202,
             EmptyValue = 203,
             JsonOnly = 204,
+            NotAnInteger = 205,
+            IntegerOverflow = 206,
 
             AuthFailed = 300,
             PermissionDenied = 301,
