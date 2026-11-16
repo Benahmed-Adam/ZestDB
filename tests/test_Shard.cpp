@@ -301,6 +301,25 @@ TEST_CASE_METHOD(ShardFixture, "Shard exists finds keys that are not in the cach
     REQUIRE(shard.exists("absent").response == "false");
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard writes do not fill the cache, reads do, and cached values stay fresh", "[shard][lru]") {
+    Shard shard(settings, 0);
+    auto misses = [&shard] { return shard.getPerfMonitoring().getPerformances()["get"]["nbCacheMisses"].get<unsigned int>(); };
+
+    shard.set("k", "v1");
+    REQUIRE(shard.get("k").response == "v1");
+    REQUIRE(misses() == 1);
+    REQUIRE(shard.get("k").response == "v1");
+    REQUIRE(misses() == 1);
+
+    shard.set("k", "v2");
+    REQUIRE(shard.get("k").response == "v2");
+    REQUIRE(misses() == 1);
+    uint64_t expiresAt = 0;
+    shard.incr("n", 1, expiresAt);
+    REQUIRE(shard.get("n").response == "1");
+    REQUIRE(misses() == 2);
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

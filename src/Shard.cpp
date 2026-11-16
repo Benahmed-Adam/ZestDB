@@ -263,7 +263,7 @@ namespace Zest {
 
         this->indexManager->insert(entry);
 
-        this->cache->put(entry, value);
+        this->cache->update(entry, value);
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
@@ -397,7 +397,7 @@ namespace Zest {
 
             this->indexManager->insert(newEntry);
 
-            this->cache->put(newEntry, value);
+            this->cache->update(newEntry, value);
 
             matchCount++;
         }

@@ -1127,7 +1127,6 @@ namespace Zest {
     }
 
     bool ZestDB::syncWAL() {
-        // Called by the server outside execCmd: the lock keeps a restore from replacing the shards meanwhile
         std::shared_lock<std::shared_mutex> lock(this->writeMtx);
         return this->shardManager->syncWAL();
     }

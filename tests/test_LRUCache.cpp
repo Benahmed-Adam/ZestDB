@@ -30,6 +30,19 @@ TEST_CASE("LRUCache get hit promotes to front", "[lru]") {
     REQUIRE(result.value == "val1");
 }
 
+TEST_CASE("LRUCache update replaces cached keys and never inserts", "[lru]") {
+    LRUCache cache(10);
+    cache.update(makeEntry("absent"), "v");
+    REQUIRE(cache.get("absent").index.segmentId == INVALID_SEGMENT_ID);
+
+    cache.put(makeEntry("key1"), "old");
+    cache.update(makeEntry("key1", 2, 40), "new");
+    auto result = cache.get("key1");
+    REQUIRE(result.value == "new");
+    REQUIRE(result.index.segmentId == 2);
+    REQUIRE(result.index.offset == 40);
+}
+
 TEST_CASE("LRUCache get miss returns sentinel", "[lru]") {
     LRUCache cache(10);
     auto result = cache.get("missing");
