@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <filesystem>
 #include <fstream>
@@ -67,6 +68,11 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager count skips expired keys and
     REQUIRE(im.count() == 3);
     REQUIRE(im.count([](std::string_view key) { return key.starts_with("a"); }) == 2);
     REQUIRE(im.count([](std::string_view) { return false; }) == 0);
+
+    std::vector<std::string> aKeys = im.keys([](std::string_view key) { return key.starts_with("a"); });
+    std::sort(aKeys.begin(), aKeys.end());
+    REQUIRE(aKeys == std::vector<std::string>{ "a1", "a2" });
+    REQUIRE(im.keys().size() == 3);
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert and search", "[indexmanager]") {

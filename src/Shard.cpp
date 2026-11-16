@@ -515,10 +515,7 @@ namespace Zest {
 
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
-        std::vector<std::string> keys;
-        for (auto& entry : this->indexManager->findMatching(valid.func)) {
-            keys.push_back(std::move(entry.key));
-        }
+        std::vector<std::string> keys = this->indexManager->keys(valid.func);
         if (keys.size() > valid.limit) {
             std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);

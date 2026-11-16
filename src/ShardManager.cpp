@@ -204,6 +204,11 @@ namespace Zest {
         return { ResultType::Code::Success, std::to_string(total), static_cast<long long>(total) };
     }
 
+    ResultType ShardManager::keys(const ValidationRule& valid) {
+        const std::vector<std::string> keys = this->firstMatchingKeys(valid);
+        return { ResultType::Code::Success, nlohmann::json(keys).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), static_cast<long long>(keys.size()) };
+    }
+
     void ShardManager::flush() {
         std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {

@@ -33,6 +33,7 @@ namespace Zest {
 
         ResultType exists(const std::string& key);
         ResultType count(const ValidationRule& valid);
+        ResultType keys(const ValidationRule& valid);
 
         void flush();
         void stop();

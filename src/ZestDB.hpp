@@ -55,6 +55,7 @@ namespace Zest {
 
         ResultType exists(const std::string& key);
         ResultType count(const ValidationRule& valid);
+        ResultType keys(const ValidationRule& valid);
 
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();

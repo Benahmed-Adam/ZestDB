@@ -1121,6 +1121,54 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd count rejects incomplete or invalid 
     REQUIRE(db->execCmd("count", Role::Read).code == ResultType::Code::Success);
 }
 
+static std::vector<std::string> keysOf(const ResultType& result) {
+    return nlohmann::json::parse(result.response).get<std::vector<std::string>>();
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys lists the live keys sorted", "[commands][keys]") {
+    auto empty = db->execCmd("keys");
+    REQUIRE(empty.code == ResultType::Code::Success);
+    REQUIRE(empty.response == "[]");
+    REQUIRE(empty.affectedRows == 0);
+
+    for (const char* key : { "user:3", "order:1", "user:1", "user:2", "order:2" }) {
+        db->execCmd(std::format(R"(s {} "v")", key));
+    }
+    auto all = db->execCmd("keys");
+    REQUIRE(keysOf(all) == std::vector<std::string>{ "order:1", "order:2", "user:1", "user:2", "user:3" });
+    REQUIRE(all.affectedRows == 5);
+
+    REQUIRE(keysOf(db->execCmd("keys sw user:")) == std::vector<std::string>{ "user:1", "user:2", "user:3" });
+    REQUIRE(keysOf(db->execCmd("keys ew :2")) == std::vector<std::string>{ "order:2", "user:2" });
+
+    db->execCmd("d user:2");
+    db->execCmd(std::format(R"(setexat order:1 {} "v")", nowMs() - 1));
+    REQUIRE(keysOf(db->execCmd("keys")) == std::vector<std::string>{ "order:2", "user:1", "user:3" });
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys with lim returns the smallest keys", "[commands][keys]") {
+    for (int i = 0; i < 20; i++) {
+        db->execCmd(std::format(R"(s k{:02} "v")", i));
+    }
+    auto limited = db->execCmd("keys lim 3");
+    REQUIRE(keysOf(limited) == std::vector<std::string>{ "k00", "k01", "k02" });
+    REQUIRE(limited.affectedRows == 3);
+
+    REQUIRE(keysOf(db->execCmd("keys sw k1 lim 2")) == std::vector<std::string>{ "k10", "k11" });
+    REQUIRE(keysOf(db->execCmd("keys sw k1 LIM 50")).size() == 10);
+    REQUIRE(db->execCmd("keys lim 0").response == "[]");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys rejects malformed arguments", "[commands][keys]") {
+    REQUIRE(db->execCmd("keys sw").code == ResultType::Code::MissingPattern);
+    REQUIRE(db->execCmd("keys xx abc").code == ResultType::Code::InvalidRegex);
+    for (const char* cmd : { "keys lim", "keys lim abc", "keys lim -1", "keys sw a lim", "keys sw a extra", "keys sw a lim 2 extra" }) {
+        CAPTURE(cmd);
+        REQUIRE(db->execCmd(cmd).code == ResultType::Code::InvalidLimit);
+    }
+    REQUIRE(db->execCmd("keys", Role::Read).code == ResultType::Code::Success);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

@@ -990,6 +990,10 @@ namespace Zest {
         return this->shardManager->count(valid);
     }
 
+    ResultType ZestDB::keys(const ValidationRule& valid) {
+        return this->shardManager->keys(valid);
+    }
+
     static bool isRegexTooComplex(std::string_view pattern) {
         constexpr size_t maxLength = 1024;
         constexpr size_t maxDepth = 32;
@@ -1437,6 +1441,29 @@ namespace Zest {
                     result = this->count(valid);
                 }
             }
+        } else if (cmd == "keys") {
+            ValidationRule valid;
+            size_t next = 1;
+            bool ok = true;
+            if (words.size() > 1 && toLowerStr(words[1]) != "lim") {
+                if (words.size() < 3) {
+                    result.code = ResultType::Code::MissingPattern;
+                    ok = false;
+                } else if (auto [rule, validMode] = this->createValidationRule(toLowerStr(words[1]), words[2]); !validMode) {
+                    result.code = ResultType::Code::InvalidRegex;
+                    ok = false;
+                } else {
+                    valid = std::move(rule);
+                    next = 3;
+                }
+            }
+            if (ok && words.size() > next && (words.size() != next + 2 || toLowerStr(words[next]) != "lim" || !parseNumber(words[next + 1], valid.limit))) {
+                result.code = ResultType::Code::InvalidLimit;
+                ok = false;
+            }
+            if (ok) {
+                result = this->keys(valid);
+            }
         } else if (cmd == "h") {
             result.code = ResultType::Code::Success;
             result.response = this->help();
@@ -1636,6 +1663,7 @@ namespace Zest {
         oss << "ttl <key>                              - Seconds before expiry (-1: no TTL, -2: no key)" << "\n";
         oss << "exists <key>                           - true if the key exists and has not expired, false otherwise" << "\n";
         oss << "count [<mode> <pattern>]               - Number of live keys, or of those matching the pattern" << "\n";
+        oss << "keys [<mode> <pattern>] [lim <n>]      - Sorted live keys, or those matching the pattern; lim keeps the n smallest" << "\n";
         oss << "persist <key>                          - Remove the TTL of a key" << "\n";
         oss << "incr <key> [n]                         - Add n (default 1) to an integer value, 0 if absent" << "\n";
         oss << "decr <key> [n]                         - Subtract n (default 1) from an integer value" << "\n";
