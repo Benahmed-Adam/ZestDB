@@ -146,6 +146,20 @@ namespace Zest {
         return res;
     }
 
+    size_t IndexManager::count(const std::function<bool(std::string_view)>& matches) {
+        std::unique_lock<std::mutex> lock(this->mtx);
+
+        const uint64_t now = nowMs();
+        size_t n = 0;
+        for (const auto& [key, loc] : this->memoryTree) {
+            const bool expired = loc.expiresAt != 0 && loc.expiresAt <= now;
+            if (!expired && (!matches || matches(key))) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     std::vector<std::string> IndexManager::keys() {
         std::unique_lock<std::mutex> lock(this->mtx);
         std::vector<std::string> res;

@@ -32,6 +32,7 @@ namespace Zest {
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 
         ResultType exists(const std::string& key);
+        ResultType count(const ValidationRule& valid);
 
         void flush();
         void stop();

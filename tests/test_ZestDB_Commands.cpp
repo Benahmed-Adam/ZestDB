@@ -1088,6 +1088,39 @@ TEST_CASE("ZestDB exists finds keys after a restart", "[commands][exists]") {
     REQUIRE(db.execCmd("exists other").response == "false");
 }
 
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd count counts live keys, optionally by pattern", "[commands][count]") {
+    auto empty = db->execCmd("count");
+    REQUIRE(empty.code == ResultType::Code::Success);
+    REQUIRE(empty.response == "0");
+    REQUIRE(empty.affectedRows == 0);
+
+    for (int i = 0; i < 50; i++) {
+        db->execCmd(std::format(R"(s user:{} "u")", i));
+        db->execCmd(std::format(R"(s order:{} "o")", i));
+    }
+    auto all = db->execCmd("count");
+    REQUIRE(all.response == "100");
+    REQUIRE(all.affectedRows == 100);
+
+    REQUIRE(db->execCmd("count sw user:").response == "50");
+    REQUIRE(db->execCmd("count SW user:").response == "50");
+    REQUIRE(db->execCmd("count ew :7").response == "2");
+    REQUIRE(db->execCmd("count ct :4").response == "22");
+    REQUIRE(db->execCmd(R"(count re order:\d)").response == "10");
+    REQUIRE(db->execCmd("count sw nothing").response == "0");
+
+    db->execCmd("db sw order:");
+    db->execCmd(std::format(R"(setexat user:0 {} "u")", nowMs() - 1));
+    REQUIRE(db->execCmd("count").response == "49");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd count rejects incomplete or invalid patterns", "[commands][count]") {
+    REQUIRE(db->execCmd("count sw").code == ResultType::Code::MissingPattern);
+    REQUIRE(db->execCmd("count xx abc").code == ResultType::Code::InvalidRegex);
+    REQUIRE(db->execCmd(R"(count re (a)\1)").code == ResultType::Code::InvalidRegex);
+    REQUIRE(db->execCmd("count", Role::Read).code == ResultType::Code::Success);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

@@ -55,6 +55,20 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager hides expired entries and dr
     REQUIRE(reloaded.getAll().size() == 1);
 }
 
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager count skips expired keys and applies the filter", "[indexmanager][count]") {
+    IndexManager im(settings);
+    im.insert(makeEntry("a1"));
+    im.insert(makeEntry("a2"));
+    im.insert(makeEntry("b1"));
+    IndexEntry expired = makeEntry("a3");
+    expired.expiresAt = nowMs() - 1;
+    im.insert(expired);
+
+    REQUIRE(im.count() == 3);
+    REQUIRE(im.count([](std::string_view key) { return key.starts_with("a"); }) == 2);
+    REQUIRE(im.count([](std::string_view) { return false; }) == 0);
+}
+
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert and search", "[indexmanager]") {
     IndexManager im(settings);
     im.insert(makeEntry("key1", 1, 0));

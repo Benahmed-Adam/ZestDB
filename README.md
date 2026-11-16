@@ -181,6 +181,8 @@ Commands are whitespace-delimited and case-insensitive. Values are always writte
 | `expire <key> <seconds>` / `persist <key>` | Set or remove the TTL of an existing key. |
 | `setexat <key> <ms> "<value>"` / `expireat <key> <ms>` | Same as `setex` / `expire` with an absolute expiry date, in milliseconds since the Unix epoch (the form written to the WAL). |
 | `ttl <key>` | Seconds before the key expires (`-1`: no TTL, `-2`: no key). |
+| `exists <key>` | `true` if the key exists and has not expired, `false` otherwise (`affectedRows` is `1` or `0`). |
+| `count [<mode> <pattern>]` | Number of live keys, or of the keys matching the pattern (same modes as `getby`), without reading any value. |
 | `setnx <key> "<value>"` | Store a value only if the key does not exist (an expired key counts as absent); otherwise returns code `207`. |
 | `cas <key> "<expected>" "<new>"` | Atomically replace the value only if it equals `<expected>`, e.g. `cas balance "100" "80"`; otherwise returns code `208`. The TTL is kept. |
 | `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
@@ -312,7 +314,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `MaxConnections` | 1024 | Maximum number of simultaneous client connections. |
 | `AuthTimeout` | 10 | Seconds a client has to finish the TLS handshake and authenticate. |
 | `IdleTimeout` | 300 | Seconds of inactivity before an authenticated connection is closed. |
-| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
+| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`, `exists`, `count`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
 
 The provided `config.yaml` contains a development account (`bob`/`bob`, admin) and only accepts local connections: replace the account before widening `NetworkValidation`.
 

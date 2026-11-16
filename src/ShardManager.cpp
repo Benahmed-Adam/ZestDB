@@ -190,6 +190,20 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->exists(key);
     }
 
+    ResultType ShardManager::count(const ValidationRule& valid) {
+        std::vector<std::future<size_t>> futures;
+        for (auto& shard : this->shards) {
+            Shard* rawShard = shard.get();
+            futures.push_back(threadPool->enqueue([rawShard, &valid]() { return rawShard->count(valid); }));
+        }
+
+        size_t total = 0;
+        for (auto& f : futures) {
+            total += f.get();
+        }
+        return { ResultType::Code::Success, std::to_string(total), static_cast<long long>(total) };
+    }
+
     void ShardManager::flush() {
         std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {

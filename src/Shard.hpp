@@ -35,6 +35,7 @@ namespace Zest {
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 
         ResultType exists(const std::string& key);
+        size_t count(const ValidationRule& valid);
 
         std::vector<std::string> matchingKeys(const ValidationRule& valid);
 

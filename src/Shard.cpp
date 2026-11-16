@@ -508,6 +508,11 @@ namespace Zest {
         return { ResultType::Code::Success, found ? "true" : "false", found ? 1 : 0 };
     }
 
+    size_t Shard::count(const ValidationRule& valid) {
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+        return this->indexManager->count(valid.func);
+    }
+
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<std::string> keys;
