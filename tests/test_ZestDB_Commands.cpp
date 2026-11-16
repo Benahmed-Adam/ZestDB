@@ -886,8 +886,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd values are quoted and unescape \\\" 
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd rejects values that are not properly quoted", "[commands][quoting]") {
-    for (const char* cmd : { "s k value", R"(s k "unterminated)", R"(s k "a" b)", R"(s k "a\")", "setex k 60 value", "setnx k value", "sb sw k value", R"(sb sw k "v" lim)",
-                             R"(sb sw k "v" extra)" }) {
+    for (const char* cmd : { "s k value", R"(s k "unterminated)", R"(s k "a" b)", R"(s k "a\")", "setex k 60 value", "setnx k value", "sb sw k value", R"(sb sw k "v" lim)", R"(sb sw k "v" extra)" }) {
         CAPTURE(cmd);
         REQUIRE(db->execCmd(cmd).code == ResultType::Code::InvalidValueFormat);
     }
