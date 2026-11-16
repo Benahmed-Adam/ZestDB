@@ -50,6 +50,9 @@ namespace Zest {
         ResultType setnx(const std::string& key, const std::string& value);
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value);
 
+        ResultType restore(const std::string& zipname);
+        ResultType listSaves() const;
+
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
