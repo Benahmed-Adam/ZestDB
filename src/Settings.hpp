@@ -50,6 +50,8 @@ namespace Zest {
             IntegerOverflow = 206,
             KeyExists = 207,
             ValueMismatch = 208,
+            ArchiveNotFound = 209,
+            InvalidArchive = 210,
 
             AuthFailed = 300,
             PermissionDenied = 301,
@@ -65,7 +67,8 @@ namespace Zest {
             ReadFailed = 501,
             WriteFailed = 502,
             WalWriteFailed = 503,
-            ArchiveFailed = 504
+            ArchiveFailed = 504,
+            RestoreFailed = 505
         };
         Code code;
         std::string response = "";

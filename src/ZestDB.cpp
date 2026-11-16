@@ -188,6 +188,7 @@ namespace Zest {
 
         this->srv->Get("/", [this](const httplib::Request&, httplib::Response& res) {
             try {
+                std::shared_lock<std::shared_mutex> lock(this->writeMtx);
                 res.status = 200;
 
                 json result = json::object();
@@ -495,19 +496,20 @@ namespace Zest {
         return j.dump(-1, ' ', false, json::error_handler_t::replace);
     }
 
+    struct ResetFlag {
+        std::atomic<bool>& flag;
+
+        ~ResetFlag() {
+            flag = false;
+        }
+    };
+
     bool ZestDB::createArchive() {
         if (this->archiving.exchange(true)) {
             ZestLog(LogLevel::Warning, "An archive is already being created");
             return false;
         }
-
-        struct ResetFlag {
-            std::atomic<bool>& flag;
-
-            ~ResetFlag() {
-                flag = false;
-            }
-        } resetFlag{ this->archiving };
+        ResetFlag resetFlag{ this->archiving };
 
         fs::path snapshot;
         std::error_code ec;
@@ -603,6 +605,128 @@ namespace Zest {
                 fs::remove_all(snapshot, ec);
             }
             return false;
+        }
+    }
+
+    static ResultType::Code extractShards(const fs::path& archivePath, const fs::path& target) {
+        libzippp::ZipArchive archive(archivePath.string());
+        if (!archive.open(libzippp::ZipArchive::ReadOnly)) {
+            return ResultType::Code::InvalidArchive;
+        }
+
+        size_t files = 0;
+        for (const auto& entry : archive.getEntries()) {
+            const fs::path name = fs::path(entry.getName()).lexically_normal();
+            if (name.has_root_path() || std::find(name.begin(), name.end(), fs::path("..")) != name.end()) {
+                archive.close();
+                return ResultType::Code::InvalidArchive;
+            }
+            if (name.empty() || *name.begin() != "shards") {
+                continue;
+            }
+
+            const fs::path out = target / name;
+            if (entry.isDirectory()) {
+                fs::create_directories(out);
+                continue;
+            }
+            fs::create_directories(out.parent_path());
+            std::ofstream file(out, std::ios::binary | std::ios::trunc);
+            if (out.filename() == "WAL") {
+                if (entry.getSize() > 0) {
+                    ZestLog(LogLevel::Warning, std::format("Restore: {} is not empty and is not replayed", name.generic_string()));
+                }
+            } else if (entry.readContent(file) != LIBZIPPP_OK || !file.flush()) {
+                archive.close();
+                return ResultType::Code::RestoreFailed;
+            }
+            files++;
+        }
+        archive.close();
+        return files > 0 ? ResultType::Code::Success : ResultType::Code::InvalidArchive;
+    }
+
+    static bool swapShards(const fs::path& live, const fs::path& restored, const fs::path& previous) {
+        std::error_code ec;
+        fs::remove_all(previous, ec);
+        const bool hadLive = fs::exists(live, ec);
+        if (hadLive) {
+            fs::rename(live, previous, ec);
+            if (ec) {
+                return false;
+            }
+        }
+        fs::rename(restored, live, ec);
+        if (ec && hadLive) {
+            std::error_code ignored;
+            fs::rename(previous, live, ignored);
+        }
+        return !ec;
+    }
+
+    ResultType ZestDB::restore(const std::string& zipname) {
+        if (zipname.empty() || fs::path(zipname).filename().string() != zipname || fs::path(zipname).extension() != ".zip") {
+            return { ResultType::Code::ArchiveNotFound };
+        }
+
+        fs::path archivePath;
+        fs::path dbPath;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+            archivePath = this->settings.ArchiveStoragePath / zipname;
+            dbPath = this->settings.DbPath;
+        }
+        if (!fs::is_regular_file(archivePath)) {
+            return { ResultType::Code::ArchiveNotFound };
+        }
+
+        if (this->archiving.exchange(true)) {
+            ZestLog(LogLevel::Warning, "Restore: an archive is being created or restored");
+            return { ResultType::Code::RestoreFailed };
+        }
+        ResetFlag resetFlag{ this->archiving };
+
+        const fs::path staging = dbPath / ".restore";
+        const fs::path previous = dbPath / ".restore-previous";
+        std::error_code ec;
+        try {
+            fs::remove_all(staging, ec);
+            const ResultType::Code extracted = extractShards(archivePath, staging);
+            if (extracted != ResultType::Code::Success) {
+                fs::remove_all(staging, ec);
+                return { extracted };
+            }
+
+            bool restored = false;
+            {
+                std::unique_lock<std::shared_mutex> lock(this->writeMtx);
+                this->shardManager.reset();
+                restored = swapShards(dbPath / "shards", staging / "shards", previous);
+                try {
+                    this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
+                } catch (const std::exception& e) {
+                    ZestLog(LogLevel::Error, std::format("Restore: the restored shards cannot be opened ({}), going back to the previous data", e.what()));
+                    this->shardManager.reset();
+                    if (restored) {
+                        fs::remove_all(dbPath / "shards", ec);
+                        fs::rename(previous, dbPath / "shards", ec);
+                    }
+                    restored = false;
+                    this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
+                }
+            }
+
+            fs::remove_all(staging, ec);
+            fs::remove_all(previous, ec);
+            if (!restored) {
+                return { ResultType::Code::RestoreFailed };
+            }
+            ZestLog(LogLevel::Info, std::format("Restored the database from {}", archivePath.string()));
+            return { ResultType::Code::Success };
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Restore failed: {}", e.what()));
+            fs::remove_all(staging, ec);
+            return { ResultType::Code::RestoreFailed };
         }
     }
 
@@ -974,6 +1098,8 @@ namespace Zest {
     }
 
     bool ZestDB::syncWAL() {
+        // Called by the server outside execCmd: the lock keeps a restore from replacing the shards meanwhile
+        std::shared_lock<std::shared_mutex> lock(this->writeMtx);
         return this->shardManager->syncWAL();
     }
 
@@ -1066,7 +1192,7 @@ namespace Zest {
         }
 
         const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas";
-        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save";
+        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
@@ -1075,7 +1201,7 @@ namespace Zest {
         std::unique_lock<std::shared_mutex> uniqueLock(this->writeMtx, std::defer_lock);
         if (cmd == "r" || cmd == "scfg") {
             uniqueLock.lock();
-        } else if (cmd != "f" && cmd != "save") {
+        } else if (cmd != "f" && cmd != "save" && cmd != "restore") {
             sharedLock.lock();
         }
 
@@ -1422,6 +1548,12 @@ namespace Zest {
         } else if (cmd == "gcfg") {
             result.code = ResultType::Code::Success;
             result.response = this->getConfig();
+        } else if (cmd == "restore") {
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingArguments;
+            } else {
+                result = this->restore(std::string(words[1]));
+            }
         } else if (cmd == "save") {
             if (this->createArchive()) {
                 result.code = ResultType::Code::Success;
@@ -1435,7 +1567,7 @@ namespace Zest {
 
         if (!this->replaying.load()) {
             if (result.code == ResultType::Code::Success && isWrite) {
-                if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), walCommand.empty() ? command : walCommand) || (syncWal && !this->syncWAL()))) {
+                if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), walCommand.empty() ? command : walCommand) || (syncWal && !this->shardManager->syncWAL()))) {
                     result = { ResultType::Code::WalWriteFailed, "", result.affectedRows };
                 }
             }
@@ -1481,6 +1613,8 @@ namespace Zest {
             << "\n";
         oss << "scfg <param> <value>                   - Set config parameter"
             << "\n";
+        oss << "save                                   - Create a zip archive of the database" << "\n";
+        oss << "restore <archive.zip>                  - Replace the database with an archive of ArchiveStoragePath" << "\n";
         oss << "help                                   - Show this help"
             << "\n";
         oss << "\n";
