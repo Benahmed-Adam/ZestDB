@@ -510,95 +510,20 @@ Uses `clang-format` with the provided `.clang-format` configuration.
 
 ## Benchmarks
 
-The `benchmark/` folder contains Python scripts (3.10+, standard library only) that measure a running server over the TCP protocol. Start the server first (`make run`), then run the scripts from the `benchmark/` folder:
+The `benchmark/` folder contains Python scripts (standard library only) that measure a running server over the TCP protocol:
 
-| Script | Measures |
-| --- | --- |
-| `bench_kv.py` | Throughput and latency (avg, median, p95, p99) per batch and per command of every single-key command, for several volumes and batch sizes. |
-| `bench_bulk.py` | Latency of `count`, `keys`, `getby`, `setby` and `delby` for each mode (`sw`, `ct`, `ew`, `re`) and with `lim`, over a populated database; with `--archive`, also `save`, `lsaves` and `restore`. |
-| `bench_concurrency.py` | Aggregate throughput with 1 to N clients in parallel (one process each), for a GET/SET mix (`--workload getset`) or for every client incrementing the same counters (`--workload incr`). |
-| `zest_client.py` | Shared client: framing, authentication, statistics. |
+- `bench_kv.py` covers every single-key command;
+- `bench_bulk.py` covers the pattern and archive commands;
+- `bench_concurrency.py` measures parallel clients.
 
-```bash
-cd benchmark
-python3 bench_kv.py --entries 100000,1000000 --batches 1,100,10000 --cleanup
-python3 bench_bulk.py --entries 100000 --repeat 5 --archive
-python3 bench_concurrency.py --clients 1,2,4,8,16,32,64,128 --ops 50000 --read-pct 80
-python3 bench_concurrency.py --clients 1,2,4,8,16 --ops 50000 --workload incr
-```
+Highlights from the latest run, with client and server on the same machine and 0 errors:
 
-`bench_kv.py` runs these modes in order, each on the state the previous ones left; `--modes set,get,incr-new` runs only some of them:
+| Workload | Result |
+| --- | ---: |
+| `set`, batches of 10,000 | ~750k ops/s |
+| `get`, cold / hot keys | ~370-470k / ~0.9-1M ops/s |
+| `incr` / `cas` (read-modify-write) | ~250-420k ops/s |
+| 16 concurrent clients, 80% GET | ~600k ops/s |
+| `count` over 100,000 keys | ~1 ms |
 
-| Mode | Command | Case | Expected code |
-| --- | --- | --- | ---: |
-| `set` | `s k "v"` | new key | `0` |
-| `get` / `get-miss` | `g k` | key present / absent | `0` / `200` |
-| `get-hot` | `g k` | as many reads as `get`, cycling over 1% of the keys (the case a cache is for) | `0` |
-| `exists` / `exists-miss` | `exists k` | key present / absent | `0` |
-| `setnx-new` / `setnx-existing` | `setnx k "v"` | key absent / present | `0` / `207` |
-| `cas-match` / `cas-mismatch` | `cas k "v" "w"` | value equal / different | `0` / `208` |
-| `incr-new` / `incr-existing` / `decr` | `incr k`, `incr k 5`, `decr k` | key absent / present | `0` |
-| `setex` / `ttl` / `expire` / `persist` | TTL commands | key present | `0` |
-| `del` / `del-miss` | `d k` | key present / absent | `0` / `200` |
-
-A response is counted as an error only when its code differs from the expected one, so the refusals above are not errors. With `--workload incr`, `bench_concurrency.py` also checks that no increment was lost: the `Lost` column must stay at `0`.
-
-Every script accepts `--host`, `--port`, `--user`, `--password` (default `bob` / `bob`) and `--json <file>` to save the results for comparison. The scripts write keys prefixed with `tk_` (`bench_kv.py`, removed with `--cleanup`), `bench_user:` / `bench_order:` and `bench_conc_` (removed at the end). Run them on a test database: the default `bench_kv.py` run writes 1 million keys.
-
-### Results
-
-The results below were measured before the new commands were added to the benchmarks (only `set` / `get`, the pattern commands and the GET/SET mix), with `bench_concurrency.py --clients 1,2,4,8,16,32,64,128`, client and server on the same machine (WSL2 Ubuntu, localhost, 12 cores), 32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`, automatic archiving off. Numbers depend on the hardware: use them to compare runs, not as absolute figures.
-
-#### SET / GET (`bench_kv.py`)
-
-| Mode | Entries | Batch | Throughput (ops/s) | Avg per command (ms) | p99 per batch (ms) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| SET | 100,000 | 1 | 13,678 | 0.0705 | 0.262 |
-| GET | 100,000 | 1 | 15,852 | 0.0608 | 0.196 |
-| SET | 100,000 | 100 | 276,446 | 0.0034 | 1.070 |
-| GET | 100,000 | 100 | 255,433 | 0.0037 | 1.010 |
-| SET | 100,000 | 10,000 | 410,658 | 0.0023 | 26.321 |
-| GET | 100,000 | 10,000 | 367,474 | 0.0026 | 31.188 |
-| SET | 1,000,000 | 1 | 16,043 | 0.0601 | 0.197 |
-| GET | 1,000,000 | 1 | 19,716 | 0.0491 | 0.157 |
-| SET | 1,000,000 | 100 | 335,933 | 0.0028 | 0.708 |
-| GET | 1,000,000 | 100 | 312,646 | 0.0030 | 0.660 |
-| SET | 1,000,000 | 10,000 | 485,080 | 0.0019 | 56.925 |
-| GET | 1,000,000 | 10,000 | 419,474 | 0.0023 | 34.023 |
-
-- **Batching matters most**: one command per request is bound by the network round trip (~14-20k ops/s); batches of 100 give ~20x more, batches of 10,000 reach ~410-485k SET/s and ~370-420k GET/s.
-- **Volume**: throughput holds from 100,000 to 1 million keys; the per-command latency stays in the microseconds.
-- **No errors** across the 6.6 million operations.
-
-#### Pattern commands (`bench_bulk.py`, 100,000 keys)
-
-| Scenario | Command | Rows | Median (ms) |
-| --- | --- | ---: | ---: |
-| getby prefix, lim 100 | `gb sw bench_user: lim 100` | 100 | 0.65 |
-| getby prefix, all | `gb sw bench_user:` | 50,000 | 21.02 |
-| getby contains | `gb ct :12` | 1,111 | 4.24 |
-| getby suffix | `gb ew 99` | 1,000 | 2.81 |
-| getby regex | `gb re bench_user:\d*8` | 10,000 | 15.42 |
-| getby regex, no match | `gb re (a+)+$` | 0 | 4.30 |
-| setby prefix, lim 1000 | `sb sw bench_order: "updated" lim 1000` | 1,000 | 6.89 |
-| setby prefix, all | `sb sw bench_order: "updated"` | 50,000 | 12.12 |
-| delby prefix, lim 1000 | `db sw bench_order: lim 1000` | 1,000 | 7.29 |
-| delby prefix, all | `db sw bench_` | 99,000 | 250.82 |
-
-- Keys are matched in memory (the whole index is kept in RAM), so a scan of 100,000 keys with no match costs ~4 ms; the rest of the cost grows with the number of rows read or modified.
-- The catastrophic-backtracking regex `(a+)+$` costs no more than a plain scan.
-
-#### Concurrent clients (`bench_concurrency.py`, 80% GET / 20% SET, 50,000 ops per client, batch 100)
-
-| Clients | Total ops | Throughput (ops/s) | Median batch (ms) | p99 batch (ms) |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 50,000 | 392,334 | 0.209 | 0.792 |
-| 2 | 100,000 | 465,032 | 0.390 | 0.762 |
-| 4 | 200,000 | 476,870 | 0.783 | 1.576 |
-| 8 | 400,000 | 507,256 | 1.502 | 2.539 |
-| 16 | 800,000 | 565,354 | 2.047 | 5.357 |
-| 32 | 1,600,000 | 544,194 | 5.064 | 9.299 |
-| 64 | 3,200,000 | 511,576 | 10.957 | 20.485 |
-| 128 | 6,400,000 | 492,270 | 25.017 | 39.593 |
-
-- Each session runs on one of the server's IO threads (one `io_context` per core), so clients are served in parallel. Throughput holds at ~470-565k ops/s from 2 to 128 clients with no errors, while latency grows with the queue. The ceiling comes from the Python clients running on the same cores as the server: this measures the whole setup, not the server alone.
+See [benchmark/README.md](benchmark/README.md) for how to run them, the full results and the analysis.
