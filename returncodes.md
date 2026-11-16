@@ -55,6 +55,8 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 206 | `IntegerOverflow` | `incr` / `decr`: the result would leave the 64-bit integer range; the value is left unchanged. |
 | 207 | `KeyExists` | `setnx`: the key already exists; its value is left unchanged. |
 | 208 | `ValueMismatch` | `cas`: the current value differs from the expected one; it is left unchanged. |
+| 209 | `ArchiveNotFound` | `restore`: no such `.zip` file in `ArchiveStoragePath` (a path, rather than a file name, is refused the same way). |
+| 210 | `InvalidArchive` | `restore`: the file is not a readable zip, holds no `shards/` data, or has an entry that would be written outside the database folder. The database is left unchanged. |
 
 ## 3xx - Authentication and permissions
 
@@ -82,4 +84,5 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 501 | `ReadFailed` | The value could not be read from its data segment. |
 | 502 | `WriteFailed` | The value could not be written to a data segment. |
 | 503 | `WalWriteFailed` | The write was applied but could not be logged in the WAL. |
-| 504 | `ArchiveFailed` | `save` could not create the archive (or one is already in progress). |
+| 504 | `ArchiveFailed` | `save` could not create the archive (or an archive or a restore is already in progress). |
+| 505 | `RestoreFailed` | `restore` could not extract or swap the files, or an archive or a restore is already in progress. The database keeps its previous data. |

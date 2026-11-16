@@ -931,6 +931,95 @@ TEST_CASE("ZestDB journals escaped values and replays them exactly", "[commands]
     REQUIRE(db.get("replayed").response == R"(x "y" \ z)");
 }
 
+static std::string onlyArchive(const fs::path& archiveDir) {
+    for (const auto& entry : fs::directory_iterator(archiveDir)) {
+        if (entry.path().extension() == ".zip") {
+            return entry.path().filename().string();
+        }
+    }
+    return "";
+}
+
+static void writeZip(const fs::path& path, const std::vector<std::pair<std::string, std::string>>& entries) {
+    libzippp::ZipArchive zip(path.string());
+    REQUIRE(zip.open(libzippp::ZipArchive::New));
+    for (const auto& [name, content] : entries) {
+        REQUIRE(zip.addData(name, content.data(), content.size()));
+    }
+    REQUIRE(zip.close() == LIBZIPPP_OK);
+}
+
+TEST_CASE("ZestDB restore brings the database back to the archived state", "[commands][restore]") {
+    TempDbDir tmp("zestdb_test_restore", "", 29575);
+    std::string archive;
+    {
+        ZestDB db;
+        db.execCmd(R"(s a "1")");
+        db.execCmd(R"(s b "2")");
+        db.execCmd(R"(setex t 60 "x")");
+        REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
+        archive = onlyArchive(tmp.dir / "archive");
+        REQUIRE_FALSE(archive.empty());
+
+        db.execCmd(R"(s a "changed")");
+        db.execCmd("d b");
+        db.execCmd(R"(s c "new")");
+
+        auto restored = db.execCmd("restore " + archive);
+        REQUIRE(restored.code == ResultType::Code::Success);
+        REQUIRE(db.get("a").response == "1");
+        REQUIRE(db.get("b").response == "2");
+        REQUIRE(db.get("c").code == ResultType::Code::KeyNotFound);
+        const int ttl = std::stoi(db.execCmd("ttl t").response);
+        REQUIRE(ttl > 0);
+        REQUIRE(ttl <= 60);
+
+        REQUIRE(db.execCmd(R"(s d "after")").code == ResultType::Code::Success);
+        REQUIRE_FALSE(fs::exists(tmp.dir / "db" / ".restore"));
+        REQUIRE_FALSE(fs::exists(tmp.dir / "db" / ".restore-previous"));
+    }
+    ZestDB reopened;
+    REQUIRE(reopened.get("a").response == "1");
+    REQUIRE(reopened.get("d").response == "after");
+}
+
+TEST_CASE("ZestDB restore only accepts archive names from ArchiveStoragePath", "[commands][restore]") {
+    TempDbDir tmp("zestdb_test_restore_names", "", 29577);
+    ZestDB db;
+    db.execCmd(R"(s a "1")");
+    REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
+    const std::string archive = onlyArchive(tmp.dir / "archive");
+    fs::copy_file(tmp.dir / "archive" / archive, tmp.dir / "outside.zip");
+
+    REQUIRE(db.execCmd("restore").code == ResultType::Code::MissingArguments);
+    REQUIRE(db.execCmd("restore missing.zip").code == ResultType::Code::ArchiveNotFound);
+    REQUIRE(db.execCmd("restore ../outside.zip").code == ResultType::Code::ArchiveNotFound);
+    REQUIRE(db.execCmd("restore " + (tmp.dir / "outside.zip").string()).code == ResultType::Code::ArchiveNotFound);
+    REQUIRE(db.execCmd("restore " + archive, Role::Write).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db.get("a").response == "1");
+}
+
+TEST_CASE("ZestDB restore refuses invalid archives and keeps the data", "[commands][restore]") {
+    TempDbDir tmp("zestdb_test_restore_invalid", "", 29579);
+    ZestDB db;
+    db.execCmd(R"(s a "1")");
+    fs::create_directories(tmp.dir / "archive");
+
+    std::ofstream(tmp.dir / "archive" / "garbage.zip") << "not a zip file";
+    REQUIRE(db.execCmd("restore garbage.zip").code == ResultType::Code::InvalidArchive);
+
+    writeZip(tmp.dir / "archive" / "empty.zip", { { "notes.txt", "no shards here" } });
+    REQUIRE(db.execCmd("restore empty.zip").code == ResultType::Code::InvalidArchive);
+
+    writeZip(tmp.dir / "archive" / "slip.zip", { { "shards/0/WAL", "" }, { "../../evil.txt", "escaped" } });
+    REQUIRE(db.execCmd("restore slip.zip").code == ResultType::Code::InvalidArchive);
+    REQUIRE_FALSE(fs::exists(tmp.dir / "evil.txt"));
+    REQUIRE_FALSE(fs::exists(tmp.dir.parent_path() / "evil.txt"));
+
+    REQUIRE(db.get("a").response == "1");
+    REQUIRE(db.execCmd(R"(s b "2")").code == ResultType::Code::Success);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;
