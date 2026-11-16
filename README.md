@@ -96,7 +96,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 
 ### HTTP Monitoring Server
 - A separate HTTP server (`WebPort`, default `1237`) exposes live per-shard performance statistics under `/`.
-- Statistics include request counts, cache misses, average latency and cache-miss percentage for each operation type (`get`, `set`, `del`, `getby`, `setby`, `delby`) plus an aggregate total.
+- Statistics include request counts, cache misses, average latency and cache-miss percentage for each operation type (`get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`) plus an aggregate total. `exists`, `count` and `keys` only read the in-memory index, so they never record a cache miss; `count` and `keys` are counted once per shard, `exists` on the key's shard only.
 
 ### Performance Monitoring
 - Per-shard, lock-free atomic counters track request counts, cache misses and latency for every operation type.

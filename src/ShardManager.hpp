@@ -51,7 +51,7 @@ namespace Zest {
 
     private:
         int getShardId(const std::string& key) const;
-        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid);
+        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
 
         Settings settings;
         int numShards;

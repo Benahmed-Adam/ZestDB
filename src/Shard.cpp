@@ -502,23 +502,35 @@ namespace Zest {
     }
 
     ResultType Shard::exists(const std::string& key) {
+        auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         IndexEntry entry = this->indexManager->search(key);
         const bool found = entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone;
+        auto end = std::chrono::high_resolution_clock::now();
+        this->perfMonitor.addExistsStats(false, std::chrono::duration<double, std::milli>(end - start).count());
         return { ResultType::Code::Success, found ? "true" : "false", found ? 1 : 0 };
     }
 
     size_t Shard::count(const ValidationRule& valid) {
+        auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
-        return this->indexManager->count(valid.func);
+        const size_t n = this->indexManager->count(valid.func);
+        auto end = std::chrono::high_resolution_clock::now();
+        this->perfMonitor.addCountStats(false, std::chrono::duration<double, std::milli>(end - start).count());
+        return n;
     }
 
-    std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
+    std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid, bool recordKeysStats) {
+        auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<std::string> keys = this->indexManager->keys(valid.func);
         if (keys.size() > valid.limit) {
             std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);
+        }
+        if (recordKeysStats) {
+            auto end = std::chrono::high_resolution_clock::now();
+            this->perfMonitor.addKeysStats(false, std::chrono::duration<double, std::milli>(end - start).count());
         }
         return keys;
     }

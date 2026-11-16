@@ -93,11 +93,11 @@ namespace Zest {
         return { ResultType::Code::Success, std::move(merged), totalMatches };
     }
 
-    std::vector<std::string> ShardManager::firstMatchingKeys(const ValidationRule& valid) {
+    std::vector<std::string> ShardManager::firstMatchingKeys(const ValidationRule& valid, bool recordKeysStats) {
         std::vector<std::future<std::vector<std::string>>> perShard;
         for (auto& shard : this->shards) {
             Shard* rawShard = shard.get();
-            perShard.push_back(this->threadPool->enqueue([rawShard, &valid]() { return rawShard->matchingKeys(valid); }));
+            perShard.push_back(this->threadPool->enqueue([rawShard, &valid, recordKeysStats]() { return rawShard->matchingKeys(valid, recordKeysStats); }));
         }
         std::vector<std::string> keys;
         for (auto& f : perShard) {
@@ -205,7 +205,7 @@ namespace Zest {
     }
 
     ResultType ShardManager::keys(const ValidationRule& valid) {
-        const std::vector<std::string> keys = this->firstMatchingKeys(valid);
+        const std::vector<std::string> keys = this->firstMatchingKeys(valid, true);
         return { ResultType::Code::Success, nlohmann::json(keys).dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), static_cast<long long>(keys.size()) };
     }
 

@@ -1168,6 +1168,40 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys rejects malformed arguments", "
     REQUIRE(db->execCmd("keys", Role::Read).code == ResultType::Code::Success);
 }
 
+TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf]") {
+    TempDbDir tmp("zestdb_test_http_stats", "", 29585);
+    ZestDB db;
+    db.execCmd(R"(s k1 "v")");
+    db.execCmd(R"(s k2 "v")");
+    db.execCmd("exists k1");
+    db.execCmd("exists missing");
+    db.execCmd("count");
+    db.execCmd("keys sw k");
+    db.execCmd(R"(sb sw k "w" lim 1)");
+
+    std::thread http([&db] { db.srv->listen("127.0.0.1", 29586); });
+    db.srv->wait_until_ready();
+    httplib::Client client("127.0.0.1", 29586);
+    auto res = client.Get("/");
+    db.srv->stop();
+    http.join();
+    REQUIRE(res);
+    REQUIRE(res->status == 200);
+
+    auto stats = nlohmann::json::parse(res->body)["stats"];
+    unsigned int exists = 0;
+    unsigned int count = 0;
+    unsigned int keys = 0;
+    for (const auto& [shard, perf] : stats.items()) {
+        exists += perf["exists"]["nbRequests"].get<unsigned int>();
+        count += perf["count"]["nbRequests"].get<unsigned int>();
+        keys += perf["keys"]["nbRequests"].get<unsigned int>();
+    }
+    REQUIRE(exists == 2);
+    REQUIRE(count == stats.size());
+    REQUIRE(keys == stats.size());
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

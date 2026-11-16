@@ -37,7 +37,7 @@ namespace Zest {
         ResultType exists(const std::string& key);
         size_t count(const ValidationRule& valid);
 
-        std::vector<std::string> matchingKeys(const ValidationRule& valid);
+        std::vector<std::string> matchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
 
         bool flushData();
         void flush();

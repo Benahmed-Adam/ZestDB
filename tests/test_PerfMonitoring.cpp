@@ -85,3 +85,20 @@ TEST_CASE("getBy/setBy/delBy stats tracked", "[perf]") {
     REQUIRE(j["setby"]["nbRequests"] == 1);
     REQUIRE(j["delby"]["nbRequests"] == 1);
 }
+
+TEST_CASE("exists/count/keys stats tracked and included in the total", "[perf]") {
+    PerfMonitoring pm;
+    pm.addExistsStats(false, 1.0);
+    pm.addExistsStats(false, 3.0);
+    pm.addCountStats(false, 4.0);
+    pm.addKeysStats(false, 6.0);
+    pm.addGetStats(true, 6.0);
+    auto j = pm.getPerformances();
+    REQUIRE(j["exists"]["nbRequests"] == 2);
+    REQUIRE(j["exists"]["avgLatencyMs"] == 2.0);
+    REQUIRE(j["count"]["nbRequests"] == 1);
+    REQUIRE(j["keys"]["nbRequests"] == 1);
+    REQUIRE(j["total"]["nbRequests"] == 5);
+    REQUIRE(j["total"]["nbCacheMisses"] == 1);
+    REQUIRE(j["total"]["avgLatencyMs"] == 4.0);
+}
