@@ -501,6 +501,13 @@ namespace Zest {
         return this->writeLocked(key, value, expiresAt);
     }
 
+    ResultType Shard::exists(const std::string& key) {
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+        IndexEntry entry = this->indexManager->search(key);
+        const bool found = entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone;
+        return { ResultType::Code::Success, found ? "true" : "false", found ? 1 : 0 };
+    }
+
     std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<std::string> keys;

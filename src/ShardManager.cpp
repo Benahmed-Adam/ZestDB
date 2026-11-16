@@ -185,6 +185,11 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->incr(key, delta, expiresAt);
     }
 
+    ResultType ShardManager::exists(const std::string& key) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->exists(key);
+    }
+
     void ShardManager::flush() {
         std::vector<std::future<bool>> results;
         for (auto& shard : this->shards) {

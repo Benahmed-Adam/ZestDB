@@ -287,6 +287,20 @@ TEST_CASE_METHOD(ShardFixture, "Shard concurrent cas retries never lose an updat
     REQUIRE(shard.get("counter").response == std::to_string(threads * perThread));
 }
 
+TEST_CASE_METHOD(ShardFixture, "Shard exists finds keys that are not in the cache", "[shard][exists]") {
+    settings.CacheSize = 10;
+    Shard shard(settings, 0);
+    for (int i = 0; i < 100; i++) {
+        shard.set(std::format("k{}", i), "v");
+    }
+    for (int i = 0; i < 100; i++) {
+        REQUIRE(shard.exists(std::format("k{}", i)).response == "true");
+    }
+    shard.del("k5");
+    REQUIRE(shard.exists("k5").response == "false");
+    REQUIRE(shard.exists("absent").response == "false");
+}
+
 TEST_CASE_METHOD(ShardFixture, "Shard reloadSettings resizes the cache, 0 disables it", "[shard]") {
     Shard shard(settings, 0);
     shard.set("key1", "value1");

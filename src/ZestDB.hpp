@@ -53,6 +53,8 @@ namespace Zest {
         ResultType restore(const std::string& zipname);
         ResultType listSaves() const;
 
+        ResultType exists(const std::string& key);
+
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;

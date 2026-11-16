@@ -1049,6 +1049,45 @@ TEST_CASE("ZestDB lsaves lists the archives oldest first", "[commands][restore]"
     REQUIRE(db.execCmd("lsaves", Role::Write).code == ResultType::Code::PermissionDenied);
 }
 
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd exists tells whether a key is live", "[commands][exists]") {
+    auto missing = db->execCmd("exists k");
+    REQUIRE(missing.code == ResultType::Code::Success);
+    REQUIRE(missing.response == "false");
+    REQUIRE(missing.affectedRows == 0);
+
+    db->execCmd(R"(s k "v")");
+    auto present = db->execCmd("exists k");
+    REQUIRE(present.response == "true");
+    REQUIRE(present.affectedRows == 1);
+
+    db->execCmd("d k");
+    REQUIRE(db->execCmd("exists k").response == "false");
+
+    db->execCmd(std::format(R"(setexat gone {} "v")", nowMs() - 1));
+    REQUIRE(db->execCmd("exists gone").response == "false");
+    db->execCmd(R"(setex later 60 "v")");
+    REQUIRE(db->execCmd("exists later").response == "true");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd exists validates the key and is allowed to readers", "[commands][exists]") {
+    REQUIRE(db->execCmd("exists").code == ResultType::Code::MissingKey);
+    REQUIRE(db->execCmd("exists " + std::string(300, 'k')).code == ResultType::Code::InvalidKey);
+
+    db->execCmd(R"(s k "v")");
+    REQUIRE(db->execCmd("exists k", Role::Read).response == "true");
+}
+
+TEST_CASE("ZestDB exists finds keys after a restart", "[commands][exists]") {
+    TempDbDir tmp("zestdb_test_exists_restart", "CacheSize: 0\n", 29583);
+    {
+        ZestDB db;
+        db.execCmd(R"(s k "v")");
+    }
+    ZestDB db;
+    REQUIRE(db.execCmd("exists k").response == "true");
+    REQUIRE(db.execCmd("exists other").response == "false");
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

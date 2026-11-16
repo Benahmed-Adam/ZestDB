@@ -978,6 +978,14 @@ namespace Zest {
         return this->shardManager->incr(key, delta, expiresAt);
     }
 
+    ResultType ZestDB::exists(const std::string& key) {
+        if (!this->validateKey(key)) {
+            return { ResultType::Code::InvalidKey };
+        }
+
+        return this->shardManager->exists(key);
+    }
+
     static bool isRegexTooComplex(std::string_view pattern) {
         constexpr size_t maxLength = 1024;
         constexpr size_t maxDepth = 32;
@@ -1406,6 +1414,12 @@ namespace Zest {
                     result = this->delBy(valid);
                 }
             }
+        } else if (cmd == "exists") {
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingKey;
+            } else {
+                result = this->exists(std::string(words[1]));
+            }
         } else if (cmd == "h") {
             result.code = ResultType::Code::Success;
             result.response = this->help();
@@ -1603,6 +1617,7 @@ namespace Zest {
         oss << "setex <key> <seconds> \"<value>\"        - Set a value that expires after <seconds>" << "\n";
         oss << "expire <key> <seconds>                 - Make an existing key expire after <seconds>" << "\n";
         oss << "ttl <key>                              - Seconds before expiry (-1: no TTL, -2: no key)" << "\n";
+        oss << "exists <key>                           - true if the key exists and has not expired, false otherwise" << "\n";
         oss << "persist <key>                          - Remove the TTL of a key" << "\n";
         oss << "incr <key> [n]                         - Add n (default 1) to an integer value, 0 if absent" << "\n";
         oss << "decr <key> [n]                         - Subtract n (default 1) from an integer value" << "\n";
