@@ -463,8 +463,8 @@ make format
 Uses `clang-format` with the provided `.clang-format` configuration.
 
 ### Continuous integration
-- `c-cpp.yml` (workflow `CI`) runs on every push and pull request to `main`: build and tests on Linux and on Windows (MSVC), then a check that the Docker image builds.
-- `docker.yml` runs once `CI` passes on a push to `main` (a direct commit or a merged pull request), and pushes the image to Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
+- `c-cpp.yml` (workflow `CI`) runs on every push and pull request to `main`: build and tests on Linux and on Windows (MSVC). On pull requests it then checks that the Docker image builds.
+- `docker.yml` runs once `CI` passes on a push to `main` (a direct commit or a merged pull request), and builds the image once and pushes it to Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
 
 ---
 
