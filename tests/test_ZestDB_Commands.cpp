@@ -1020,6 +1020,35 @@ TEST_CASE("ZestDB restore refuses invalid archives and keeps the data", "[comman
     REQUIRE(db.execCmd(R"(s b "2")").code == ResultType::Code::Success);
 }
 
+TEST_CASE("ZestDB lsaves lists the archives oldest first", "[commands][restore]") {
+    TempDbDir tmp("zestdb_test_lsaves", "", 29581);
+    ZestDB db;
+
+    auto empty = db.execCmd("lsaves");
+    REQUIRE(empty.code == ResultType::Code::Success);
+    REQUIRE(empty.response == "[]");
+    REQUIRE(empty.affectedRows == 0);
+
+    db.execCmd(R"(s a "1")");
+    REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    db.execCmd(R"(s a "2")");
+    REQUIRE(db.execCmd("save").code == ResultType::Code::Success);
+    std::ofstream(tmp.dir / "archive" / "notes.txt") << "not an archive";
+
+    auto listed = db.execCmd("lsaves");
+    REQUIRE(listed.affectedRows == 2);
+    const auto names = nlohmann::json::parse(listed.response).get<std::vector<std::string>>();
+    REQUIRE(names.size() == 2);
+    REQUIRE(names[0] < names[1]);
+    REQUIRE(names[0].starts_with("zestdb_archive_"));
+
+    REQUIRE(db.execCmd("restore " + names[0]).code == ResultType::Code::Success);
+    REQUIRE(db.get("a").response == "1");
+
+    REQUIRE(db.execCmd("lsaves", Role::Write).code == ResultType::Code::PermissionDenied);
+}
+
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;

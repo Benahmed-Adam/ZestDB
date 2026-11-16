@@ -113,6 +113,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - The entire database directory can be zipped into a versioned archive stored in a separate `ArchiveStoragePath`.
 - Automatic archiving at a configurable `ArchiveCreationDelay` (in seconds), resuming from the most recent archive on restart.
 - Manual archiving on demand via the `save` command (admin role).
+- `lsaves` (admin role) lists the available archives, oldest first.
 - `restore <archive.zip>` (admin role) replaces the database with an archive of `ArchiveStoragePath`. The archive is extracted first while the database keeps serving; commands are then blocked only while the shards are closed, swapped and reopened. If anything fails, the previous data is kept. The archive's WAL is not replayed (archives are taken right after a flush, so it is empty).
 - Commands are blocked only while the shards are flushed and the file sizes recorded. Compaction is paused while the flushed files are copied to a snapshot, and the zip is built from that copy.
 - `ArchiveRetention` keeps the N most recent archives and deletes the older ones.
@@ -192,6 +193,7 @@ Commands are whitespace-delimited and case-insensitive. Values are always writte
 | `gcfg` | Print the full active configuration as JSON. |
 | `save` | Manually create a zip archive of the database. |
 | `restore <archive.zip>` | Replace the database with an archive from `ArchiveStoragePath` (e.g. `restore zestdb_archive_2026-11-15_10-00-00.zip`). Everything written since that archive is lost. |
+| `lsaves` | List the archives of `ArchiveStoragePath` as a JSON array, oldest first (e.g. `["zestdb_archive_2026-11-15_10-00-00.zip"]`); `affectedRows` is their number. |
 | `help` / `h` | Print command and usage help. |
 
 ### Pattern Modes
@@ -248,7 +250,7 @@ zestdb> g name
 | `ArchiveCreationDelay` | int | Seconds between automatic archives. |
 | `AutoArchiveSaving` | bool | Enable/disable automatic archiving. |
 
-`scfg`, `reload`, `gcfg`, `save`, `restore` and `flush` require the `admin` role. `useSSL`, the ports and the connection limits can only be changed in `config.yaml`, followed by a restart.
+`scfg`, `reload`, `gcfg`, `save`, `restore`, `lsaves` and `flush` require the `admin` role. `useSSL`, the ports and the connection limits can only be changed in `config.yaml`, followed by a restart.
 
 ---
 
@@ -310,7 +312,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `MaxConnections` | 1024 | Maximum number of simultaneous client connections. |
 | `AuthTimeout` | 10 | Seconds a client has to finish the TLS handshake and authenticate. |
 | `IdleTimeout` | 300 | Seconds of inactivity before an authenticated connection is closed. |
-| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
+| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
 
 The provided `config.yaml` contains a development account (`bob`/`bob`, admin) and only accepts local connections: replace the account before widening `NetworkValidation`.
 

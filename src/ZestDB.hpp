@@ -51,6 +51,7 @@ namespace Zest {
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value);
 
         ResultType restore(const std::string& zipname);
+        ResultType listSaves() const;
 
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();

@@ -730,6 +730,19 @@ namespace Zest {
         }
     }
 
+    ResultType ZestDB::listSaves() const {
+        std::vector<std::string> names;
+        std::error_code ec;
+        for (auto it = fs::directory_iterator(this->settings.ArchiveStoragePath, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+            if (it->is_regular_file(ec) && it->path().extension() == ".zip") {
+                names.push_back(it->path().filename().string());
+            }
+        }
+        std::sort(names.begin(), names.end());
+
+        return { ResultType::Code::Success, json(names).dump(-1, ' ', false, json::error_handler_t::replace), static_cast<long long>(names.size()) };
+    }
+
     bool ZestDB::validateToken(const std::string& username, const std::string& token) const {
         return this->authenticate(username, token).has_value();
     }
@@ -1192,7 +1205,7 @@ namespace Zest {
         }
 
         const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas";
-        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore";
+        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore" || cmd == "lsaves";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
@@ -1561,6 +1574,8 @@ namespace Zest {
                 result.code = ResultType::Code::ArchiveFailed;
                 return result;
             }
+        } else if (cmd == "lsaves") {
+            result = this->listSaves();
         } else {
             result.code = ResultType::Code::UnknownCommand;
         }
@@ -1615,6 +1630,7 @@ namespace Zest {
             << "\n";
         oss << "save                                   - Create a zip archive of the database" << "\n";
         oss << "restore <archive.zip>                  - Replace the database with an archive of ArchiveStoragePath" << "\n";
+        oss << "lsaves                                 - List the archives of ArchiveStoragePath, oldest first" << "\n";
         oss << "help                                   - Show this help"
             << "\n";
         oss << "\n";
