@@ -54,8 +54,9 @@ class ZestClient:
         self.sock.close()
 
 
-def count_errors(reply: bytes) -> int:
-    return len(re.findall(rb'"code":[1-9]', reply))
+def count_errors(reply: bytes, expected: int = 0) -> int:
+    """Count the responses whose code is not the expected one (some scenarios expect a refusal, e.g. 207)."""
+    return sum(1 for code in re.findall(rb'"code":(\d+)', reply) if int(code) != expected)
 
 
 def summarize(latencies_ms: list[float]) -> dict:
