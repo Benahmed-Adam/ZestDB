@@ -20,6 +20,14 @@ def populate(client, num: int) -> None:
 
 def scenarios() -> list[tuple[str, str]]:
     return [
+        ("count all", "count"),
+        ("count prefix", "count sw bench_user:"),
+        ("count regex", r"count re bench_user:\d*8"),
+        ("count no match", "count sw nothing:"),
+        ("keys prefix, lim 100", "keys sw bench_user: lim 100"),
+        ("keys all, lim 1000", "keys lim 1000"),
+        ("keys prefix, all", "keys sw bench_user:"),
+        ("keys regex", r"keys re bench_user:\d*8"),
         ("getby prefix, lim 100", "gb sw bench_user: lim 100"),
         ("getby prefix, all", "gb sw bench_user:"),
         ("getby contains", "gb ct :12"),
@@ -33,10 +41,24 @@ def scenarios() -> list[tuple[str, str]]:
     ]
 
 
+def measure(client, name: str, cmd: str, runs: int) -> dict:
+    latencies, resp = [], {}
+    for _ in range(runs):
+        ms, reply = client.timed([cmd])
+        resp = json.loads(reply)
+        if resp["code"] != 0:
+            sys.exit(f"{cmd!r} failed with code {resp['code']} (see returncodes.md)")
+        latencies.append(ms)
+    result = {"scenario": name, "command": cmd, "rows": resp["affectedRows"], "latency_ms": summarize(latencies), "response": resp["response"]}
+    print(f"  {name:<26} {result['rows']:>8,} rows  {result['latency_ms']['med']:>10.2f} ms (median)")
+    return result
+
+
 def main() -> None:
     p = base_parser(__doc__)
     p.add_argument("--entries", type=int, default=100_000, help="keys to populate (default: 100000)")
-    p.add_argument("--repeat", type=int, default=5, help="runs per scenario (default: 5); delby runs once")
+    p.add_argument("--repeat", type=int, default=5, help="runs per scenario (default: 5); delby, save and restore run once")
+    p.add_argument("--archive", action="store_true", help="also measure save, lsaves and restore (restore replaces the database with the archive just taken)")
     args = p.parse_args()
 
     client = connect(args)
@@ -46,18 +68,15 @@ def main() -> None:
     print("done")
 
     results = []
+    if args.archive:
+        results.append(measure(client, "save", "save", 1))
+        results.append(measure(client, "lsaves", "lsaves", args.repeat))
+        latest = results[-1]["response"][-1]
+        results.append(measure(client, "restore", f"restore {latest}", 1))
     for name, cmd in scenarios():
-        runs = 1 if cmd.startswith("db") else args.repeat
-        latencies, rows = [], 0
-        for _ in range(runs):
-            ms, reply = client.timed([cmd])
-            resp = json.loads(reply)
-            if resp["code"] != 0:
-                sys.exit(f"{cmd!r} failed with code {resp['code']} (see returncodes.md)")
-            latencies.append(ms)
-            rows = resp["affectedRows"]
-        results.append({"scenario": name, "command": cmd, "rows": rows, "latency_ms": summarize(latencies)})
-        print(f"  {name:<26} {rows:>8,} rows  {results[-1]['latency_ms']['med']:>10.2f} ms (median)")
+        results.append(measure(client, name, cmd, 1 if cmd.startswith("db") else args.repeat))
+    for r in results:
+        del r["response"]
 
     client.close()
 

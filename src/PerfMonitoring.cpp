@@ -24,16 +24,20 @@ namespace Zest {
     json PerfMonitoring::getPerformances() const {
         json result = json::object();
 
-        result["get"] = statsToJson(this->gStats);
-        result["set"] = statsToJson(this->sStats);
-        result["del"] = statsToJson(this->dStats);
-        result["getby"] = statsToJson(this->gbStats);
-        result["setby"] = statsToJson(this->sbStats);
-        result["delby"] = statsToJson(this->dbStats);
+        const std::pair<const char*, const Stats*> all[] = {
+            { "get", &this->gStats },    { "set", &this->sStats },    { "del", &this->dStats },   { "getby", &this->gbStats }, { "setby", &this->sbStats },
+            { "delby", &this->dbStats }, { "exists", &this->eStats }, { "count", &this->cStats }, { "keys", &this->kStats },
+        };
 
-        unsigned int totalRequests = this->gStats.nbRequests + this->sStats.nbRequests + this->dStats.nbRequests + this->gbStats.nbRequests + this->sbStats.nbRequests + this->dbStats.nbRequests;
-        unsigned int totalCacheMisses = this->gStats.nbCacheMisses + this->sStats.nbCacheMisses + this->dStats.nbCacheMisses + this->gbStats.nbCacheMisses + this->sbStats.nbCacheMisses + this->dbStats.nbCacheMisses;
-        double totalLatency = this->gStats.totalLatency + this->sStats.totalLatency + this->dStats.totalLatency + this->gbStats.totalLatency + this->sbStats.totalLatency + this->dbStats.totalLatency;
+        unsigned int totalRequests = 0;
+        unsigned int totalCacheMisses = 0;
+        double totalLatency = 0.0;
+        for (const auto& [name, stats] : all) {
+            result[name] = statsToJson(*stats);
+            totalRequests += stats->nbRequests;
+            totalCacheMisses += stats->nbCacheMisses;
+            totalLatency += stats->totalLatency;
+        }
 
         result["total"] = { { "nbRequests", totalRequests },
                             { "nbCacheMisses", totalCacheMisses },
@@ -43,58 +47,49 @@ namespace Zest {
         return result;
     }
 
-    void PerfMonitoring::addGetStats(bool isCacheMiss, double latency) {
-        this->gStats.nbRequests++;
-        this->gStats.totalLatency += latency;
+    void PerfMonitoring::record(Stats& stats, bool isCacheMiss, double latency) {
+        stats.nbRequests++;
+        stats.totalLatency += latency;
 
         if (isCacheMiss) {
-            this->gStats.nbCacheMisses++;
+            stats.nbCacheMisses++;
         }
+    }
+
+    void PerfMonitoring::addGetStats(bool isCacheMiss, double latency) {
+        record(this->gStats, isCacheMiss, latency);
     }
 
     void PerfMonitoring::addSetStats(bool isCacheMiss, double latency) {
-        this->sStats.nbRequests++;
-        this->sStats.totalLatency += latency;
-
-        if (isCacheMiss) {
-            this->sStats.nbCacheMisses++;
-        }
+        record(this->sStats, isCacheMiss, latency);
     }
 
     void PerfMonitoring::addDelStats(bool isCacheMiss, double latency) {
-        this->dStats.nbRequests++;
-        this->dStats.totalLatency += latency;
-
-        if (isCacheMiss) {
-            this->dStats.nbCacheMisses++;
-        }
+        record(this->dStats, isCacheMiss, latency);
     }
 
     void PerfMonitoring::addGetByStats(bool isCacheMiss, double latency) {
-        this->gbStats.nbRequests++;
-        this->gbStats.totalLatency += latency;
-
-        if (isCacheMiss) {
-            this->gbStats.nbCacheMisses++;
-        }
+        record(this->gbStats, isCacheMiss, latency);
     }
 
     void PerfMonitoring::addSetByStats(bool isCacheMiss, double latency) {
-        this->sbStats.nbRequests++;
-        this->sbStats.totalLatency += latency;
-
-        if (isCacheMiss) {
-            this->sbStats.nbCacheMisses++;
-        }
+        record(this->sbStats, isCacheMiss, latency);
     }
 
     void PerfMonitoring::addDelByStats(bool isCacheMiss, double latency) {
-        this->dbStats.nbRequests++;
-        this->dbStats.totalLatency += latency;
+        record(this->dbStats, isCacheMiss, latency);
+    }
 
-        if (isCacheMiss) {
-            this->dbStats.nbCacheMisses++;
-        }
+    void PerfMonitoring::addExistsStats(bool isCacheMiss, double latency) {
+        record(this->eStats, isCacheMiss, latency);
+    }
+
+    void PerfMonitoring::addCountStats(bool isCacheMiss, double latency) {
+        record(this->cStats, isCacheMiss, latency);
+    }
+
+    void PerfMonitoring::addKeysStats(bool isCacheMiss, double latency) {
+        record(this->kStats, isCacheMiss, latency);
     }
 
 } // namespace Zest

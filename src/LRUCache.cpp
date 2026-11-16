@@ -47,6 +47,19 @@ namespace Zest {
         this->map[key] = { { entry, value }, this->lru_list.begin() };
     }
 
+    void LRUCache::update(const IndexEntry& entry, const std::string& value) {
+        std::lock_guard<std::mutex> lock(this->mtx);
+
+        auto it = this->map.find(entry.key);
+        if (it == this->map.end()) {
+            return;
+        }
+
+        this->lru_list.erase(it->second.second);
+        this->lru_list.push_front(entry.key);
+        it->second = { { entry, value }, this->lru_list.begin() };
+    }
+
     void LRUCache::resize(unsigned int cap) {
         std::lock_guard<std::mutex> lock(this->mtx);
 

@@ -886,8 +886,7 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd values are quoted and unescape \\\" 
 }
 
 TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd rejects values that are not properly quoted", "[commands][quoting]") {
-    for (const char* cmd : { "s k value", R"(s k "unterminated)", R"(s k "a" b)", R"(s k "a\")", "setex k 60 value", "setnx k value", "sb sw k value", R"(sb sw k "v" lim)",
-                             R"(sb sw k "v" extra)" }) {
+    for (const char* cmd : { "s k value", R"(s k "unterminated)", R"(s k "a" b)", R"(s k "a\")", "setex k 60 value", "setnx k value", "sb sw k value", R"(sb sw k "v" lim)", R"(sb sw k "v" extra)" }) {
         CAPTURE(cmd);
         REQUIRE(db->execCmd(cmd).code == ResultType::Code::InvalidValueFormat);
     }
@@ -1047,6 +1046,160 @@ TEST_CASE("ZestDB lsaves lists the archives oldest first", "[commands][restore]"
     REQUIRE(db.get("a").response == "1");
 
     REQUIRE(db.execCmd("lsaves", Role::Write).code == ResultType::Code::PermissionDenied);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd exists tells whether a key is live", "[commands][exists]") {
+    auto missing = db->execCmd("exists k");
+    REQUIRE(missing.code == ResultType::Code::Success);
+    REQUIRE(missing.response == "false");
+    REQUIRE(missing.affectedRows == 0);
+
+    db->execCmd(R"(s k "v")");
+    auto present = db->execCmd("exists k");
+    REQUIRE(present.response == "true");
+    REQUIRE(present.affectedRows == 1);
+
+    db->execCmd("d k");
+    REQUIRE(db->execCmd("exists k").response == "false");
+
+    db->execCmd(std::format(R"(setexat gone {} "v")", nowMs() - 1));
+    REQUIRE(db->execCmd("exists gone").response == "false");
+    db->execCmd(R"(setex later 60 "v")");
+    REQUIRE(db->execCmd("exists later").response == "true");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd exists validates the key and is allowed to readers", "[commands][exists]") {
+    REQUIRE(db->execCmd("exists").code == ResultType::Code::MissingKey);
+    REQUIRE(db->execCmd("exists " + std::string(300, 'k')).code == ResultType::Code::InvalidKey);
+
+    db->execCmd(R"(s k "v")");
+    REQUIRE(db->execCmd("exists k", Role::Read).response == "true");
+}
+
+TEST_CASE("ZestDB exists finds keys after a restart", "[commands][exists]") {
+    TempDbDir tmp("zestdb_test_exists_restart", "CacheSize: 0\n", 29583);
+    {
+        ZestDB db;
+        db.execCmd(R"(s k "v")");
+    }
+    ZestDB db;
+    REQUIRE(db.execCmd("exists k").response == "true");
+    REQUIRE(db.execCmd("exists other").response == "false");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd count counts live keys, optionally by pattern", "[commands][count]") {
+    auto empty = db->execCmd("count");
+    REQUIRE(empty.code == ResultType::Code::Success);
+    REQUIRE(empty.response == "0");
+    REQUIRE(empty.affectedRows == 0);
+
+    for (int i = 0; i < 50; i++) {
+        db->execCmd(std::format(R"(s user:{} "u")", i));
+        db->execCmd(std::format(R"(s order:{} "o")", i));
+    }
+    auto all = db->execCmd("count");
+    REQUIRE(all.response == "100");
+    REQUIRE(all.affectedRows == 100);
+
+    REQUIRE(db->execCmd("count sw user:").response == "50");
+    REQUIRE(db->execCmd("count SW user:").response == "50");
+    REQUIRE(db->execCmd("count ew :7").response == "2");
+    REQUIRE(db->execCmd("count ct :4").response == "22");
+    REQUIRE(db->execCmd(R"(count re order:\d)").response == "10");
+    REQUIRE(db->execCmd("count sw nothing").response == "0");
+
+    db->execCmd("db sw order:");
+    db->execCmd(std::format(R"(setexat user:0 {} "u")", nowMs() - 1));
+    REQUIRE(db->execCmd("count").response == "49");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd count rejects incomplete or invalid patterns", "[commands][count]") {
+    REQUIRE(db->execCmd("count sw").code == ResultType::Code::MissingPattern);
+    REQUIRE(db->execCmd("count xx abc").code == ResultType::Code::InvalidRegex);
+    REQUIRE(db->execCmd(R"(count re (a)\1)").code == ResultType::Code::InvalidRegex);
+    REQUIRE(db->execCmd("count", Role::Read).code == ResultType::Code::Success);
+}
+
+static std::vector<std::string> keysOf(const ResultType& result) {
+    return nlohmann::json::parse(result.response).get<std::vector<std::string>>();
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys lists the live keys sorted", "[commands][keys]") {
+    auto empty = db->execCmd("keys");
+    REQUIRE(empty.code == ResultType::Code::Success);
+    REQUIRE(empty.response == "[]");
+    REQUIRE(empty.affectedRows == 0);
+
+    for (const char* key : { "user:3", "order:1", "user:1", "user:2", "order:2" }) {
+        db->execCmd(std::format(R"(s {} "v")", key));
+    }
+    auto all = db->execCmd("keys");
+    REQUIRE(keysOf(all) == std::vector<std::string>{ "order:1", "order:2", "user:1", "user:2", "user:3" });
+    REQUIRE(all.affectedRows == 5);
+
+    REQUIRE(keysOf(db->execCmd("keys sw user:")) == std::vector<std::string>{ "user:1", "user:2", "user:3" });
+    REQUIRE(keysOf(db->execCmd("keys ew :2")) == std::vector<std::string>{ "order:2", "user:2" });
+
+    db->execCmd("d user:2");
+    db->execCmd(std::format(R"(setexat order:1 {} "v")", nowMs() - 1));
+    REQUIRE(keysOf(db->execCmd("keys")) == std::vector<std::string>{ "order:2", "user:1", "user:3" });
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys with lim returns the smallest keys", "[commands][keys]") {
+    for (int i = 0; i < 20; i++) {
+        db->execCmd(std::format(R"(s k{:02} "v")", i));
+    }
+    auto limited = db->execCmd("keys lim 3");
+    REQUIRE(keysOf(limited) == std::vector<std::string>{ "k00", "k01", "k02" });
+    REQUIRE(limited.affectedRows == 3);
+
+    REQUIRE(keysOf(db->execCmd("keys sw k1 lim 2")) == std::vector<std::string>{ "k10", "k11" });
+    REQUIRE(keysOf(db->execCmd("keys sw k1 LIM 50")).size() == 10);
+    REQUIRE(db->execCmd("keys lim 0").response == "[]");
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd keys rejects malformed arguments", "[commands][keys]") {
+    REQUIRE(db->execCmd("keys sw").code == ResultType::Code::MissingPattern);
+    REQUIRE(db->execCmd("keys xx abc").code == ResultType::Code::InvalidRegex);
+    for (const char* cmd : { "keys lim", "keys lim abc", "keys lim -1", "keys sw a lim", "keys sw a extra", "keys sw a lim 2 extra" }) {
+        CAPTURE(cmd);
+        REQUIRE(db->execCmd(cmd).code == ResultType::Code::InvalidLimit);
+    }
+    REQUIRE(db->execCmd("keys", Role::Read).code == ResultType::Code::Success);
+}
+
+TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf]") {
+    TempDbDir tmp("zestdb_test_http_stats", "", 29585);
+    ZestDB db;
+    db.execCmd(R"(s k1 "v")");
+    db.execCmd(R"(s k2 "v")");
+    db.execCmd("exists k1");
+    db.execCmd("exists missing");
+    db.execCmd("count");
+    db.execCmd("keys sw k");
+    db.execCmd(R"(sb sw k "w" lim 1)");
+
+    std::thread http([&db] { db.srv->listen("127.0.0.1", 29586); });
+    db.srv->wait_until_ready();
+    httplib::Client client("127.0.0.1", 29586);
+    auto res = client.Get("/");
+    db.srv->stop();
+    http.join();
+    REQUIRE(res);
+    REQUIRE(res->status == 200);
+
+    auto stats = nlohmann::json::parse(res->body)["stats"];
+    unsigned int exists = 0;
+    unsigned int count = 0;
+    unsigned int keys = 0;
+    for (const auto& [shard, perf] : stats.items()) {
+        exists += perf["exists"]["nbRequests"].get<unsigned int>();
+        count += perf["count"]["nbRequests"].get<unsigned int>();
+        keys += perf["keys"]["nbRequests"].get<unsigned int>();
+    }
+    REQUIRE(exists == 2);
+    REQUIRE(count == stats.size());
+    REQUIRE(keys == stats.size());
 }
 
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {

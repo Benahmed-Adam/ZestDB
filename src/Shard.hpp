@@ -34,7 +34,10 @@ namespace Zest {
         ResultType setnx(const std::string& key, const std::string& value);
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 
-        std::vector<std::string> matchingKeys(const ValidationRule& valid);
+        ResultType exists(const std::string& key);
+        size_t count(const ValidationRule& valid);
+
+        std::vector<std::string> matchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
 
         bool flushData();
         void flush();

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <filesystem>
 #include <fstream>
@@ -53,6 +54,25 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager hides expired entries and dr
     IndexManager reloaded(settings);
     REQUIRE(reloaded.search("later").expiresAt == later.expiresAt);
     REQUIRE(reloaded.getAll().size() == 1);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager count skips expired keys and applies the filter", "[indexmanager][count]") {
+    IndexManager im(settings);
+    im.insert(makeEntry("a1"));
+    im.insert(makeEntry("a2"));
+    im.insert(makeEntry("b1"));
+    IndexEntry expired = makeEntry("a3");
+    expired.expiresAt = nowMs() - 1;
+    im.insert(expired);
+
+    REQUIRE(im.count() == 3);
+    REQUIRE(im.count([](std::string_view key) { return key.starts_with("a"); }) == 2);
+    REQUIRE(im.count([](std::string_view) { return false; }) == 0);
+
+    std::vector<std::string> aKeys = im.keys([](std::string_view key) { return key.starts_with("a"); });
+    std::sort(aKeys.begin(), aKeys.end());
+    REQUIRE(aKeys == std::vector<std::string>{ "a1", "a2" });
+    REQUIRE(im.keys().size() == 3);
 }
 
 TEST_CASE_METHOD(IndexManagerFixture, "IndexManager insert and search", "[indexmanager]") {

@@ -31,6 +31,10 @@ namespace Zest {
         ResultType setnx(const std::string& key, const std::string& value);
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 
+        ResultType exists(const std::string& key);
+        ResultType count(const ValidationRule& valid);
+        ResultType keys(const ValidationRule& valid);
+
         void flush();
         void stop();
         std::vector<std::shared_lock<std::shared_mutex>> pauseCompaction();
@@ -47,7 +51,7 @@ namespace Zest {
 
     private:
         int getShardId(const std::string& key) const;
-        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid);
+        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
 
         Settings settings;
         int numShards;

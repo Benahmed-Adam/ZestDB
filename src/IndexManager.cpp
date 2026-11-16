@@ -146,13 +146,27 @@ namespace Zest {
         return res;
     }
 
-    std::vector<std::string> IndexManager::keys() {
+    size_t IndexManager::count(const std::function<bool(std::string_view)>& matches) {
+        std::unique_lock<std::mutex> lock(this->mtx);
+
+        const uint64_t now = nowMs();
+        size_t n = 0;
+        for (const auto& [key, loc] : this->memoryTree) {
+            const bool expired = loc.expiresAt != 0 && loc.expiresAt <= now;
+            if (!expired && (!matches || matches(key))) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    std::vector<std::string> IndexManager::keys(const std::function<bool(std::string_view)>& matches) {
         std::unique_lock<std::mutex> lock(this->mtx);
         std::vector<std::string> res;
-        res.reserve(this->memoryTree.size());
         const uint64_t now = nowMs();
         for (const auto& [key, loc] : this->memoryTree) {
-            if (!toEntry(key, loc).isExpired(now)) {
+            const bool expired = loc.expiresAt != 0 && loc.expiresAt <= now;
+            if (!expired && (!matches || matches(key))) {
                 res.push_back(key);
             }
         }

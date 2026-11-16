@@ -96,7 +96,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 
 ### HTTP Monitoring Server
 - A separate HTTP server (`WebPort`, default `1237`) exposes live per-shard performance statistics under `/`.
-- Statistics include request counts, cache misses, average latency and cache-miss percentage for each operation type (`get`, `set`, `del`, `getby`, `setby`, `delby`) plus an aggregate total.
+- Statistics include request counts, cache misses, average latency and cache-miss percentage for each operation type (`get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`) plus an aggregate total. `exists`, `count` and `keys` only read the in-memory index, so they never record a cache miss; `count` and `keys` are counted once per shard, `exists` on the key's shard only.
 
 ### Performance Monitoring
 - Per-shard, lock-free atomic counters track request counts, cache misses and latency for every operation type.
@@ -181,6 +181,9 @@ Commands are whitespace-delimited and case-insensitive. Values are always writte
 | `expire <key> <seconds>` / `persist <key>` | Set or remove the TTL of an existing key. |
 | `setexat <key> <ms> "<value>"` / `expireat <key> <ms>` | Same as `setex` / `expire` with an absolute expiry date, in milliseconds since the Unix epoch (the form written to the WAL). |
 | `ttl <key>` | Seconds before the key expires (`-1`: no TTL, `-2`: no key). |
+| `exists <key>` | `true` if the key exists and has not expired, `false` otherwise (`affectedRows` is `1` or `0`). |
+| `count [<mode> <pattern>]` | Number of live keys, or of the keys matching the pattern (same modes as `getby`), without reading any value. |
+| `keys [<mode> <pattern>] [lim <n>]` | Live keys as a sorted JSON array, or the keys matching the pattern; with `lim`, the `n` smallest ones (e.g. `keys sw user: lim 100`). Values are not read. |
 | `setnx <key> "<value>"` | Store a value only if the key does not exist (an expired key counts as absent); otherwise returns code `207`. |
 | `cas <key> "<expected>" "<new>"` | Atomically replace the value only if it equals `<expected>`, e.g. `cas balance "100" "80"`; otherwise returns code `208`. The TTL is kept. |
 | `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
@@ -312,7 +315,7 @@ Configuration is provided through `config.yaml` in the working directory. All fi
 | `MaxConnections` | 1024 | Maximum number of simultaneous client connections. |
 | `AuthTimeout` | 10 | Seconds a client has to finish the TLS handshake and authenticate. |
 | `IdleTimeout` | 300 | Seconds of inactivity before an authenticated connection is closed. |
-| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
+| `users` | empty | List of `{user, role, tokenHash}` entries. `role` is `read` (`get`, `getby`, `ttl`, `exists`, `count`, `keys`), `write` (+ `set`, `del`, `setby`, `delby`, `setex`, `expire`, `persist`, `incr`, `decr`, `setnx`, `cas`, the default) or `admin` (+ `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`). `tokenHash` is `sha256(token)`, where the token is `sha256(user+password)` (see below). A plaintext `password` field is still accepted but deprecated. |
 
 The provided `config.yaml` contains a development account (`bob`/`bob`, admin) and only accepts local connections: replace the account before widening `NetworkValidation`.
 
@@ -511,23 +514,40 @@ The `benchmark/` folder contains Python scripts (3.10+, standard library only) t
 
 | Script | Measures |
 | --- | --- |
-| `bench_kv.py` | `set` / `get` throughput and latency (avg, median, p95, p99) per batch and per command, for several volumes and batch sizes. |
-| `bench_bulk.py` | Latency of `getby` / `setby` / `delby` for each mode (`sw`, `ct`, `ew`, `re`) and with `lim`, over a populated database. |
-| `bench_concurrency.py` | Aggregate throughput with 1 to N clients in parallel (one process each), for a GET/SET mix. |
+| `bench_kv.py` | Throughput and latency (avg, median, p95, p99) per batch and per command of every single-key command, for several volumes and batch sizes. |
+| `bench_bulk.py` | Latency of `count`, `keys`, `getby`, `setby` and `delby` for each mode (`sw`, `ct`, `ew`, `re`) and with `lim`, over a populated database; with `--archive`, also `save`, `lsaves` and `restore`. |
+| `bench_concurrency.py` | Aggregate throughput with 1 to N clients in parallel (one process each), for a GET/SET mix (`--workload getset`) or for every client incrementing the same counters (`--workload incr`). |
 | `zest_client.py` | Shared client: framing, authentication, statistics. |
 
 ```bash
 cd benchmark
 python3 bench_kv.py --entries 100000,1000000 --batches 1,100,10000 --cleanup
-python3 bench_bulk.py --entries 100000 --repeat 5
+python3 bench_bulk.py --entries 100000 --repeat 5 --archive
 python3 bench_concurrency.py --clients 1,2,4,8,16,32,64,128 --ops 50000 --read-pct 80
+python3 bench_concurrency.py --clients 1,2,4,8,16 --ops 50000 --workload incr
 ```
+
+`bench_kv.py` runs these modes in order, each on the state the previous ones left; `--modes set,get,incr-new` runs only some of them:
+
+| Mode | Command | Case | Expected code |
+| --- | --- | --- | ---: |
+| `set` | `s k "v"` | new key | `0` |
+| `get` / `get-miss` | `g k` | key present / absent | `0` / `200` |
+| `get-hot` | `g k` | as many reads as `get`, cycling over 1% of the keys (the case a cache is for) | `0` |
+| `exists` / `exists-miss` | `exists k` | key present / absent | `0` |
+| `setnx-new` / `setnx-existing` | `setnx k "v"` | key absent / present | `0` / `207` |
+| `cas-match` / `cas-mismatch` | `cas k "v" "w"` | value equal / different | `0` / `208` |
+| `incr-new` / `incr-existing` / `decr` | `incr k`, `incr k 5`, `decr k` | key absent / present | `0` |
+| `setex` / `ttl` / `expire` / `persist` | TTL commands | key present | `0` |
+| `del` / `del-miss` | `d k` | key present / absent | `0` / `200` |
+
+A response is counted as an error only when its code differs from the expected one, so the refusals above are not errors. With `--workload incr`, `bench_concurrency.py` also checks that no increment was lost: the `Lost` column must stay at `0`.
 
 Every script accepts `--host`, `--port`, `--user`, `--password` (default `bob` / `bob`) and `--json <file>` to save the results for comparison. The scripts write keys prefixed with `tk_` (`bench_kv.py`, removed with `--cleanup`), `bench_user:` / `bench_order:` and `bench_conc_` (removed at the end). Run them on a test database: the default `bench_kv.py` run writes 1 million keys.
 
 ### Results
 
-Measured with the three commands above (`bench_concurrency.py` with `--clients 1,2,4,8,16,32,64,128`), client and server on the same machine (WSL2 Ubuntu, localhost, 12 cores), 32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`, automatic archiving off. Numbers depend on the hardware: use them to compare runs, not as absolute figures.
+The results below were measured before the new commands were added to the benchmarks (only `set` / `get`, the pattern commands and the GET/SET mix), with `bench_concurrency.py --clients 1,2,4,8,16,32,64,128`, client and server on the same machine (WSL2 Ubuntu, localhost, 12 cores), 32 shards, `CacheSize: 2000`, `FlushInterval: 10`, `fsyncOnWrite: false`, automatic archiving off. Numbers depend on the hardware: use them to compare runs, not as absolute figures.
 
 #### SET / GET (`bench_kv.py`)
 

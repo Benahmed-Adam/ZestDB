@@ -20,6 +20,7 @@ namespace Zest {
 
         CacheEntry get(const std::string& key);
         void put(const IndexEntry& entry, const std::string& value);
+        void update(const IndexEntry& entry, const std::string& value);
         void remove(const std::string& key);
         void resize(unsigned int cap);
 

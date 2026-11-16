@@ -104,7 +104,8 @@ namespace Zest {
         void insert(const IndexEntry& entry);
         std::vector<IndexEntry> getAll(unsigned int limit = UINT_MAX, const std::function<bool()>& stopEarly = {});
         std::vector<IndexEntry> findMatching(const std::function<bool(std::string_view)>& matches, const std::function<bool()>& stopEarly = {});
-        std::vector<std::string> keys();
+        size_t count(const std::function<bool(std::string_view)>& matches = {});
+        std::vector<std::string> keys(const std::function<bool(std::string_view)>& matches = {});
         std::vector<IndexEntry> compact();
         bool flush();
 

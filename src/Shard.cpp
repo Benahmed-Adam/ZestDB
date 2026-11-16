@@ -263,7 +263,7 @@ namespace Zest {
 
         this->indexManager->insert(entry);
 
-        this->cache->put(entry, value);
+        this->cache->update(entry, value);
 
         auto end = std::chrono::high_resolution_clock::now();
         double latency = std::chrono::duration<double, std::milli>(end - start).count();
@@ -397,7 +397,7 @@ namespace Zest {
 
             this->indexManager->insert(newEntry);
 
-            this->cache->put(newEntry, value);
+            this->cache->update(newEntry, value);
 
             matchCount++;
         }
@@ -501,15 +501,36 @@ namespace Zest {
         return this->writeLocked(key, value, expiresAt);
     }
 
-    std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid) {
+    ResultType Shard::exists(const std::string& key) {
+        auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
-        std::vector<std::string> keys;
-        for (auto& entry : this->indexManager->findMatching(valid.func)) {
-            keys.push_back(std::move(entry.key));
-        }
+        IndexEntry entry = this->indexManager->search(key);
+        const bool found = entry.segmentId != INVALID_SEGMENT_ID && !entry.isTombstone;
+        auto end = std::chrono::high_resolution_clock::now();
+        this->perfMonitor.addExistsStats(false, std::chrono::duration<double, std::milli>(end - start).count());
+        return { ResultType::Code::Success, found ? "true" : "false", found ? 1 : 0 };
+    }
+
+    size_t Shard::count(const ValidationRule& valid) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+        const size_t n = this->indexManager->count(valid.func);
+        auto end = std::chrono::high_resolution_clock::now();
+        this->perfMonitor.addCountStats(false, std::chrono::duration<double, std::milli>(end - start).count());
+        return n;
+    }
+
+    std::vector<std::string> Shard::matchingKeys(const ValidationRule& valid, bool recordKeysStats) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::shared_lock<std::shared_mutex> lock(this->readMtx);
+        std::vector<std::string> keys = this->indexManager->keys(valid.func);
         if (keys.size() > valid.limit) {
             std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);
+        }
+        if (recordKeysStats) {
+            auto end = std::chrono::high_resolution_clock::now();
+            this->perfMonitor.addKeysStats(false, std::chrono::duration<double, std::milli>(end - start).count());
         }
         return keys;
     }
