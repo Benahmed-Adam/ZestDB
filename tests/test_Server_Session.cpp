@@ -89,7 +89,6 @@ public:
 
     std::string sendRaw(const std::string& bytes) {
         asio::error_code ec;
-        // Writing to a socket the server already closed fails on Windows (connection reset) but succeeds on Linux: both mean "closed"
         asio::write(sock, asio::buffer(bytes), ec);
         if (ec) {
             return "";
@@ -234,7 +233,6 @@ TEST_CASE_METHOD(SessionFixture, "Session locks a user out after repeated failed
     Client lockedOut;
     REQUIRE(login(lockedOut, "bob", "bob").find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
 
-    // Same address (127.0.0.1, as behind ngrok): another user still gets in
     Client other;
     REQUIRE(login(other, "reader", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
