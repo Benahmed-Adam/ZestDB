@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 import socket
+import ssl
 import statistics
 import struct
 import sys
@@ -24,10 +25,16 @@ def build_frame(commands: list[str]) -> bytes:
 
 
 class ZestClient:
-    def __init__(self, host: str, port: int, user: str, password: str):
+    def __init__(self, host: str, port: int, user: str, password: str, use_ssl: bool = False):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.sock.connect((host, port))
+        if use_ssl:
+            # Encrypted but unverified: the server usually runs with a self-signed cert.pem
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            self.sock = ctx.wrap_socket(self.sock, server_hostname=host)
         resp = json.loads(self.send([f"Authorization: {user}.{sha256_hex(user + password)}"]))
         if resp.get("code") != 0:
             self.close()
@@ -79,12 +86,18 @@ def base_parser(description: str) -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=7321)
     p.add_argument("--user", default="bob")
     p.add_argument("--password", default="bob")
+    p.add_argument("--ssl", action="store_true", help="connect over TLS (server started with useSSL: true); the certificate is not verified")
     p.add_argument("--json", metavar="PATH", help="also write the results to this JSON file")
     return p
 
 
+def conn_args(args: argparse.Namespace) -> tuple:
+    """Plain values (picklable for worker processes) to pass to ZestClient(*conn_args(args))."""
+    return (args.host, args.port, args.user, args.password, args.ssl)
+
+
 def connect(args: argparse.Namespace) -> ZestClient:
-    return ZestClient(args.host, args.port, args.user, args.password)
+    return ZestClient(*conn_args(args))
 
 
 def int_list(text: str) -> list[int]:

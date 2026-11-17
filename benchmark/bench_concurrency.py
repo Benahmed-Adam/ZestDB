@@ -5,7 +5,7 @@ import multiprocessing as mp
 import sys
 import time
 
-from zest_client import ZestClient, base_parser, connect, count_errors, int_list, summarize, write_json
+from zest_client import ZestClient, base_parser, conn_args, connect, count_errors, int_list, summarize, write_json
 
 
 HOT_PREFIX = "bench_conc_hot_"
@@ -19,8 +19,8 @@ def command(workload: str, wid: int, i: int, read_pct: int, hot_keys: int) -> st
     return f"g {k}" if i % 100 < read_pct else f's {k} "v{i}"'
 
 
-def worker(conn_args: tuple, wid: int, ops: int, batch_size: int, read_pct: int, workload: str, hot_keys: int, barrier, results) -> None:
-    client = ZestClient(*conn_args)
+def worker(client_args: tuple, wid: int, ops: int, batch_size: int, read_pct: int, workload: str, hot_keys: int, barrier, results) -> None:
+    client = ZestClient(*client_args)
     if workload == "getset":
         keys = [f"bench_conc_{wid}_{i}" for i in range(ops)]
         for start in range(0, ops, 10_000):
@@ -48,9 +48,8 @@ def hot_total(client) -> int:
 def run(args, client, clients: int) -> dict:
     if args.workload == "incr":
         client.send([f"db sw {HOT_PREFIX}"])
-    conn_args = (args.host, args.port, args.user, args.password)
     barrier, results = mp.Barrier(clients), mp.Queue()
-    procs = [mp.Process(target=worker, args=(conn_args, w, args.ops, args.batch, args.read_pct, args.workload, args.hot_keys, barrier, results)) for w in range(clients)]
+    procs = [mp.Process(target=worker, args=(conn_args(args), w, args.ops, args.batch, args.read_pct, args.workload, args.hot_keys, barrier, results)) for w in range(clients)]
     for proc in procs:
         proc.start()
     outs = [results.get() for _ in procs]

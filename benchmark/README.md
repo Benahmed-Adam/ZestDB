@@ -39,6 +39,7 @@ Every script accepts these options:
 
 - `--host` and `--port`;
 - `--user` and `--password` (default `bob` / `bob`);
+- `--ssl`, to connect over TLS to a server started with `useSSL: true`. The certificate is not verified, so a self-signed `cert.pem` works as is;
 - `--json <file>`, to save the results for comparison.
 
 The scripts write keys under these prefixes:
