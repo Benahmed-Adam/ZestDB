@@ -772,3 +772,167 @@ TEST_CASE_METHOD(ScriptFixture, "script reload errors", "[scripts][reload]") {
     REQUIRE(db->execCmd("script reload").code == ResultType::Code::MissingArguments);
     REQUIRE(db->execCmd("script reload lib", Role::Write).code == ResultType::Code::PermissionDenied);
 }
+
+// ---------------------------------------------------------------- scripts_examples
+
+class ExamplesFixture : public ScriptFixture {
+public:
+    ExamplesFixture() {
+        const fs::path dir = fs::path(__FILE__).parent_path().parent_path() / "scripts_examples";
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.path().extension() != ".lua") {
+                continue;
+            }
+            std::ifstream in(entry.path(), std::ios::binary);
+            std::stringstream code;
+            code << in.rdbuf();
+            const ResultType loaded = db->loadScript(entry.path().stem().string(), code.str());
+            INFO(entry.path().filename().string());
+            REQUIRE(loaded.code == ResultType::Code::Success);
+            loadedCount++;
+        }
+    }
+
+    std::string call(const std::string& command) {
+        const ResultType r = db->execCmd(command);
+        INFO(command);
+        REQUIRE(r.code == ResultType::Code::Success);
+        return r.response;
+    }
+
+    int loadedCount = 0;
+};
+
+TEST_CASE_METHOD(ExamplesFixture, "every example script loads together with the others", "[scripts][examples]") {
+    REQUIRE(loadedCount == 9);
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example getting_started", "[scripts][examples]") {
+    REQUIRE(call(R"(call hello "Ada")") == "Hello, Ada!");
+    REQUIRE(db->execCmd("call hello").code == ResultType::Code::ScriptError);
+    REQUIRE(call(R"(call visits "home")") == "1");
+    REQUIRE(call(R"(call visits "home")") == "2");
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example validation", "[scripts][examples]") {
+    call(R"(s email:1 "  Ada@Example.COM ")");
+    REQUIRE(call("g email:1") == "ada@example.com");
+    REQUIRE(db->execCmd(R"(s email:2 "not an email")").code == ResultType::Code::TriggerRejected);
+
+    call(R"(s stock:sku1 "12.0")");
+    REQUIRE(call("g stock:sku1") == "12");
+    REQUIRE(db->execCmd(R"(s stock:sku1 "-1")").code == ResultType::Code::TriggerRejected);
+    REQUIRE(db->execCmd(R"(s stock:sku1 "1.5")").code == ResultType::Code::TriggerRejected);
+
+    call(R"(s note:1 "short")");
+    REQUIRE(db->execCmd(std::format("s note:2 \"{}\"", std::string(281, 'x'))).code == ResultType::Code::TriggerRejected);
+
+    call(R"(s config:app "v1")");
+    REQUIRE(db->execCmd("d config:app").code == ResultType::Code::TriggerRejected);
+    REQUIRE(call("g config:app") == "v1");
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example audit", "[scripts][examples]") {
+    call(R"(s order:1 "2 pizzas")");
+    call(R"(s order:2 "1 salad")");
+    call("d order:1");
+    REQUIRE(call("call order_stats") == "written=2 deleted=1 live=1");
+    REQUIRE(call("g stats:orders:last") == "order:2");
+    REQUIRE(std::stoi(call("ttl audit:order:1")) > 0);
+    REQUIRE(call(R"(call order_history "5")") == "2: order:2 = 1 salad\n1: order:1 = 2 pizzas");
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example secondary_index", "[scripts][examples]") {
+    call(R"(s user:1 "name=Ada;email=Ada@Example.com;city=London")");
+    call(R"(s user:2 "name=Bob;email=bob@example.com;city=Paris")");
+    REQUIRE(call(R"(call find_user_by_email "ada@example.com")") == "user:1 name=Ada;email=Ada@Example.com;city=London");
+    REQUIRE(db->execCmd(R"(s user:3 "name=Eve;email=ADA@example.com")").code == ResultType::Code::TriggerRejected);
+    REQUIRE(db->execCmd(R"(s user:3 "name=Eve")").code == ResultType::Code::TriggerRejected);
+    REQUIRE(call(R"(call users_in_city "London")") == "user:1");
+
+    call(R"(s user:1 "name=Ada;email=ada@new.io;city=London")");
+    REQUIRE(call(R"(call find_user_by_email "ada@example.com")").empty());
+    REQUIRE(call(R"(call find_user_by_email "ada@new.io")").starts_with("user:1 "));
+
+    call("d user:1");
+    REQUIRE(call(R"(call find_user_by_email "ada@new.io")").empty());
+    REQUIRE(db->execCmd("g idx:user:email:ada@new.io").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example bank", "[scripts][examples]") {
+    REQUIRE(call(R"(call deposit "alice" "10000")") == "10000");
+    REQUIRE(call(R"(call transfer "alice" "bob" "2500")") == "1");
+    REQUIRE(call(R"(call balance "alice")") == "7500");
+    REQUIRE(call(R"(call balance "bob")") == "2500");
+    REQUIRE(call("g ledger:1") == "alice>bob:2500");
+
+    REQUIRE(db->execCmd(R"(call transfer "alice" "bob" "999999")").code == ResultType::Code::ScriptError);
+    REQUIRE(db->execCmd(R"(call withdraw "bob" "3000")").code == ResultType::Code::ScriptError);
+    REQUIRE(db->execCmd(R"(call deposit "bob" "-5")").code == ResultType::Code::ScriptError);
+    REQUIRE(call(R"(call balance "alice")") == "7500");
+    REQUIRE(call(R"(call balance "bob")") == "2500");
+    REQUIRE(call(R"(call withdraw "bob" "500")") == "2000");
+
+    REQUIRE(db->execCmd(R"(s balance:alice "-5")").code == ResultType::Code::TriggerRejected);
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example rate_limit", "[scripts][examples]") {
+    REQUIRE(call(R"(call allow "key-1" "2" "60")") == "allowed");
+    REQUIRE(call(R"(call allow "key-1" "2" "60")") == "allowed");
+    REQUIRE(call(R"(call allow "key-1" "2" "60")").starts_with("blocked:"));
+    REQUIRE(call(R"(call allow "key-2" "2" "60")") == "allowed");
+    REQUIRE(std::stoi(call("ttl ratelimit:key-1")) > 0);
+
+    call(R"(call reset_limit "key-1")");
+    REQUIRE(call(R"(call allow "key-1" "2" "60")") == "allowed");
+    REQUIRE(db->execCmd(R"(call allow "key-1" "x" "60")").code == ResultType::Code::ScriptError);
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example sessions", "[scripts][examples]") {
+    REQUIRE(call(R"(call session_open "tok-1" "alice" "1800")") == "session:tok-1");
+    REQUIRE(db->execCmd(R"(call session_open "tok-1" "mallory" "1800")").code == ResultType::Code::ScriptError);
+    REQUIRE(call(R"(call session_user "tok-1")") == "alice");
+    REQUIRE(call(R"(call session_touch "tok-1" "60")") == "extended");
+    REQUIRE(std::stoi(call("ttl session:tok-1")) <= 60);
+    REQUIRE(call("call sessions_active") == "1");
+    REQUIRE(call(R"(call session_close "tok-1")") == "closed");
+    REQUIRE(call(R"(call session_close "tok-1")") == "unknown");
+    REQUIRE(call(R"(call session_touch "tok-1" "60")") == "expired");
+    REQUIRE(call("call sessions_active") == "0");
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example locks", "[scripts][examples]") {
+    REQUIRE(call(R"(call lock_acquire "report" "worker-1" "300")") == "acquired");
+    REQUIRE(call(R"(call lock_acquire "report" "worker-2" "300")") == "busy:worker-1");
+    REQUIRE(std::stoi(call("ttl lock:report")) > 0);
+    REQUIRE(call(R"(call lock_release "report" "worker-2")") == "not owner");
+    REQUIRE(call(R"(call lock_owner "report")") == "worker-1");
+    REQUIRE(call(R"(call lock_release "report" "worker-1")") == "released");
+    REQUIRE(call(R"(call lock_release "report" "worker-1")") == "free");
+    REQUIRE(call(R"(call lock_acquire "report" "worker-2" "300")") == "acquired");
+}
+
+TEST_CASE_METHOD(ExamplesFixture, "example maintenance", "[scripts][examples]") {
+    for (int i = 0; i < 5; i++) {
+        call(std::format("s tmp:{} \"x\"", i));
+    }
+    call(R"(s cache:a "1")");
+    call(R"(setex template:invoice 3600 "Dear customer")");
+
+    REQUIRE(call(R"(call inventory "tmp:" "cache:")") == "tmp:=5 cache:=1");
+    REQUIRE(call(R"(call purge "sw" "tmp:" "3")") == "3");
+    REQUIRE(call(R"(call purge "sw" "tmp:" "3")") == "2");
+    REQUIRE(call(R"(call purge "sw" "tmp:" "3")") == "0");
+
+    REQUIRE(call(R"(call expire_matching "sw" "cache:" "600")") == "1");
+    REQUIRE(std::stoi(call("ttl cache:a")) > 0);
+    REQUIRE(call(R"(call persist_matching "sw" "cache:")") == "1");
+    REQUIRE(call("ttl cache:a") == "-1");
+
+    REQUIRE(call(R"(call copy_key "template:invoice" "invoice:42")") == "copied");
+    REQUIRE(call("g invoice:42") == "Dear customer");
+    REQUIRE(std::stoi(call("ttl invoice:42")) > 0);
+    REQUIRE(call(R"(call rename_key "invoice:42" "invoice:43")") == "renamed");
+    REQUIRE(db->execCmd("g invoice:42").code == ResultType::Code::KeyNotFound);
+    REQUIRE(db->execCmd(R"(call rename_key "template:invoice" "invoice:43")").code == ResultType::Code::ScriptError);
+}
