@@ -77,6 +77,8 @@ target_include_directories(asio SYSTEM INTERFACE ${ASIO_INCLUDE_DIR})
 # Lua ships no CMake: build the library from its sources, without the lua/luac programs
 file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/src/*.c)
 list(REMOVE_ITEM LUA_SOURCES ${lua_SOURCE_DIR}/src/lua.c ${lua_SOURCE_DIR}/src/luac.c)
+# Built as C++ so a Lua error is a C++ exception that unwinds our frames (destructors run) instead of a longjmp over them
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
 add_library(lua STATIC ${LUA_SOURCES})
 target_include_directories(lua SYSTEM PUBLIC ${lua_SOURCE_DIR}/src)
 if(UNIX)
@@ -86,7 +88,7 @@ endif()
 
 add_library(sol2 INTERFACE)
 target_include_directories(sol2 SYSTEM INTERFACE ${sol2_SOURCE_DIR}/include)
-target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1)
+target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1 SOL_USING_CXX_LUA=1)
 target_link_libraries(sol2 INTERFACE lua)
 
 FetchContent_Declare(Catch2
@@ -110,6 +112,8 @@ else()
         -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -Wnon-virtual-dtor -Wno-deprecated-declarations
         $<$<CONFIG:Release>:-O3>
         $<$<CONFIG:Debug>:-g3 -O0>)
+    # GCC reports a false positive inside sol2's table access once inlined (stack_field.hpp)
+    set_source_files_properties(src/ScriptEngine.cpp PROPERTIES COMPILE_OPTIONS -Wno-array-bounds)
 endif()
 if(WIN32)
     # windows.h defines min/max and many short macros (ERROR, small...): keep it lean

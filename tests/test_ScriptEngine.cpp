@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 #include <future>
 #include <string>
 #include <thread>
@@ -709,4 +711,28 @@ TEST_CASE_METHOD(EngineFixture, "ScriptEngine::list is sorted", "[scripts][engin
     auto j = nlohmann::json::parse(engine.list().response);
     REQUIRE(j["scripts"] == nlohmann::json::array({ "a", "b" }));
     REQUIRE(j["functions"] == nlohmann::json::array({ "fa", "fb" }));
+}
+
+TEST_CASE_METHOD(ScriptFixture, "print and zest.log write to the server log", "[scripts][log]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_function("talk", function()
+            print("hello", 42, true, nil)
+            zest.log("careful", "warning")
+            zest.log("plain")
+        end)
+        zest.register_function("bad_level", function() zest.log("x", "loud") end)
+        print("loading")
+    )lua").code == ResultType::Code::Success);
+
+    std::ostringstream captured;
+    std::streambuf* original = std::cout.rdbuf(captured.rdbuf());
+    const ResultType talk = db->execCmd("call talk");
+    std::cout.rdbuf(original);
+
+    INFO(captured.str());
+    REQUIRE(talk.code == ResultType::Code::Success);
+    REQUIRE(captured.str().find(R"(Lua: hello\x0942\x09true\x09nil)") != std::string::npos);
+    REQUIRE(captured.str().find("Lua: careful") != std::string::npos);
+    REQUIRE(captured.str().find("Lua: plain") != std::string::npos);
+    REQUIRE(db->execCmd("call bad_level").code == ResultType::Code::ScriptError);
 }

@@ -83,6 +83,11 @@ namespace Zest {
         static std::string responseToJson(const ResultType& resp);
 
     private:
+        bool scripted() const;
+        ResultType beforeWrite(const std::string& key, std::string& value);
+        ResultType finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result);
+        ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
+        ResultType delBy(ValidationRule& valid, bool perRow);
         ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
         ResultType casBy(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
         ResultType checkWrite(const std::string& key, const std::string& value) const;

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
@@ -59,18 +60,22 @@ namespace Zest {
 
     private:
         struct Registry {
+            std::map<std::string, std::string> scripts;
             std::vector<Trigger> triggers;
             std::vector<ScriptFunction> functions;
         };
 
+        struct LuaContext;
         struct ThreadState;
 
         ThreadState& stateForThisThread();
+        void setupState(LuaContext& ctx) const;
         ResultType validate(const std::string& name, const std::string& code, Registry& out) const;
-        std::vector<const Trigger*> matchingTriggers(TriggerPhase phase, TriggerEvent event, std::string_view key) const;
+        std::vector<std::string> matchingTriggers(TriggerPhase phase, TriggerEvent event, std::string_view key) const;
         static bool isValidName(std::string_view name);
 
         ZestDB& db;
+        const uint64_t id;
         std::filesystem::path scriptsDir;
 
         mutable std::shared_mutex registryMtx;
