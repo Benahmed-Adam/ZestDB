@@ -743,6 +743,22 @@ namespace Zest {
         return { ResultType::Code::Success, json(names).dump(-1, ' ', false, json::error_handler_t::replace), static_cast<long long>(names.size()) };
     }
 
+    ResultType ZestDB::loadScript(const std::string&, const std::string&) {
+        return { ResultType::Code::InternalError };
+    }
+
+    ResultType ZestDB::dropScript(const std::string&) {
+        return { ResultType::Code::InternalError };
+    }
+
+    ResultType ZestDB::listScripts() const {
+        return { ResultType::Code::InternalError };
+    }
+
+    ResultType ZestDB::call(const std::string&, const std::vector<std::string>&) {
+        return { ResultType::Code::InternalError };
+    }
+
     bool ZestDB::validateToken(const std::string& username, const std::string& token) const {
         return this->authenticate(username, token).has_value();
     }

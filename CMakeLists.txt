@@ -49,7 +49,13 @@ FetchContent_Declare(libzippp
 FetchContent_Declare(asio
     URL https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-38-2.tar.gz
     SOURCE_SUBDIR none)
-FetchContent_MakeAvailable(libzippp asio)
+FetchContent_Declare(lua
+    URL https://www.lua.org/ftp/lua-5.4.8.tar.gz
+    SOURCE_SUBDIR none)
+FetchContent_Declare(sol2
+    URL https://github.com/ThePhD/sol2/archive/refs/tags/v3.5.0.tar.gz
+    SOURCE_SUBDIR none)
+FetchContent_MakeAvailable(libzippp asio lua sol2)
 
 file(COPY ${libzippp_SOURCE_DIR}/src/libzippp.h DESTINATION ${CMAKE_BINARY_DIR}/include/libzippp)
 add_library(libzippp STATIC ${libzippp_SOURCE_DIR}/src/libzippp.cpp)
@@ -68,6 +74,21 @@ endif()
 message(STATUS "Using asio headers from ${ASIO_INCLUDE_DIR}")
 target_include_directories(asio SYSTEM INTERFACE ${ASIO_INCLUDE_DIR})
 
+# Lua ships no CMake: build the library from its sources, without the lua/luac programs
+file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/src/*.c)
+list(REMOVE_ITEM LUA_SOURCES ${lua_SOURCE_DIR}/src/lua.c ${lua_SOURCE_DIR}/src/luac.c)
+add_library(lua STATIC ${LUA_SOURCES})
+target_include_directories(lua SYSTEM PUBLIC ${lua_SOURCE_DIR}/src)
+if(UNIX)
+    target_compile_definitions(lua PRIVATE LUA_USE_POSIX)
+    target_link_libraries(lua PUBLIC m)
+endif()
+
+add_library(sol2 INTERFACE)
+target_include_directories(sol2 SYSTEM INTERFACE ${sol2_SOURCE_DIR}/include)
+target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1)
+target_link_libraries(sol2 INTERFACE lua)
+
 FetchContent_Declare(Catch2
     URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.16.1.tar.gz
     SYSTEM)
@@ -79,7 +100,7 @@ list(REMOVE_ITEM ZEST_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
 
 add_library(zestcore STATIC ${ZEST_SOURCES})
 target_include_directories(zestcore PUBLIC src)
-target_link_libraries(zestcore PUBLIC asio OpenSSL::SSL OpenSSL::Crypto libzippp Threads::Threads)
+target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp Threads::Threads)
 if(MSVC)
     target_compile_options(zestcore PUBLIC /W3 /permissive- /utf-8 /bigobj /Zc:__cplusplus)
     # MSVC's std::regex backtracks (no libstdc++ __polynomial mode): cap the steps per match so a hostile pattern fails fast instead of spending ~1 s per key

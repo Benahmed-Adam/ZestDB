@@ -11,6 +11,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "ShardManager.hpp"
@@ -57,6 +58,13 @@ namespace Zest {
         ResultType count(const ValidationRule& valid);
         ResultType keys(const ValidationRule& valid);
 
+        ResultType loadScript(const std::string& name, const std::string& code);
+        ResultType dropScript(const std::string& name);
+        ResultType listScripts() const;
+        ResultType call(const std::string& name, const std::vector<std::string>& args);
+
+        CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
+
         ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
@@ -86,7 +94,6 @@ namespace Zest {
         void flushLocked();
         void replayWAL();
         std::string help() const;
-        CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
         bool appendToWAL(const std::string& key, const std::string& command);
 
         Settings loadConfig(std::unordered_map<std::string, UserEntry>& usersOut);
@@ -105,6 +112,7 @@ namespace Zest {
         std::atomic<bool> running{ true };
         std::atomic<bool> archiving{ false };
         std::unique_ptr<ShardManager> shardManager;
+        std::unique_ptr<ScriptEngine> scriptEngine;
         std::unique_ptr<Server> socket;
 
         std::atomic<bool> replaying;

@@ -16,6 +16,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | `3xx` | Authentication and permissions |
 | `4xx` | Configuration |
 | `5xx` | Server-side failure |
+| `6xx` | Scripts |
 
 ## 0 - Success
 
@@ -86,3 +87,13 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 503 | `WalWriteFailed` | The write was applied but could not be logged in the WAL. |
 | 504 | `ArchiveFailed` | `save` could not create the archive (or an archive or a restore is already in progress). |
 | 505 | `RestoreFailed` | `restore` could not extract or swap the files, or an archive or a restore is already in progress. The database keeps its previous data. |
+
+## 6xx - Scripts
+
+| Code | Name | Meaning |
+| ---: | --- | --- |
+| 600 | `ScriptError` | A script could not be loaded (syntax error, invalid `register_function` / `register_trigger` call, duplicate name) or raised an error while running. |
+| 601 | `ScriptNotFound` | `script del`: no script has this name. |
+| 602 | `FunctionNotFound` | `call`: no registered function has this name. |
+| 603 | `TriggerRejected` | A `before` trigger rejected the write; nothing was written. |
+| 604 | `ScriptLimitExceeded` | A script exceeded its instruction, memory or trigger-recursion limit. |

@@ -4,6 +4,7 @@ obj/
 *.o
 .vscode/
 DB/
+DBArchives/
 TODO*
 test.py
 cert.pem

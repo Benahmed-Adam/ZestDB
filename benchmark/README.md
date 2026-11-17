@@ -221,7 +221,7 @@ Run on 100,000 keys. Each scenario runs 5 times, except `delby`, `save` and `res
 
 - **Throughput levels off from 4 clients.** Beyond that, latency grows with the queue.
 - **Write-heavy mixes are faster than read-heavy ones**, because writes are grouped in the WAL while cold reads hit the disk.
-- **`incr` on shared counters caps at ~370k ops/s from 2 clients.** Every atomic update goes through the global write lock. That is the cost of losing no increment.
+- **`incr` on shared counters caps at ~370k ops/s from 2 clients.** Every atomic update of a key takes its shard's exclusive lock, so the 16 counters are updated at most 16 at a time. That is the cost of losing no increment.
 - The Python clients run on the same cores as the server, so these figures measure the whole setup, not the server alone.
 
 **Pattern commands**
