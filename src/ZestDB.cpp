@@ -754,6 +754,10 @@ namespace Zest {
         return this->scriptEngine->drop(name);
     }
 
+    ResultType ZestDB::reloadScript(const std::string& name) {
+        return this->scriptEngine->reloadFile(name);
+    }
+
     ResultType ZestDB::listScripts() const {
         return this->scriptEngine->list();
     }
@@ -1736,10 +1740,12 @@ namespace Zest {
             std::string code;
             if (sub == "ls") {
                 result = this->listScripts();
-            } else if ((sub != "load" && sub != "del") || words.size() < 3) {
-                result.code = words.size() < 2 || sub == "load" || sub == "del" ? ResultType::Code::MissingArguments : ResultType::Code::UnknownCommand;
+            } else if ((sub != "load" && sub != "del" && sub != "reload") || words.size() < 3) {
+                result.code = words.size() < 2 || sub == "load" || sub == "del" || sub == "reload" ? ResultType::Code::MissingArguments : ResultType::Code::UnknownCommand;
             } else if (sub == "del") {
                 result = this->dropScript(std::string(words[2]));
+            } else if (sub == "reload") {
+                result = this->reloadScript(std::string(words[2]));
             } else if (words.size() < 4) {
                 result.code = ResultType::Code::MissingValue;
             } else if (!readLastValue(sv, words[3], code)) {
@@ -1826,6 +1832,7 @@ namespace Zest {
         oss << "lsaves                                 - List the archives of ArchiveStoragePath, oldest first" << "\n";
         oss << "script load <name> \"<lua code>\"        - Save a Lua script and register its functions and triggers" << "\n";
         oss << "script del <name>                      - Remove a script with its functions and triggers" << "\n";
+        oss << "script reload <name>                   - Reload DbPath/scripts/<name>.lua after editing it on disk" << "\n";
         oss << "script ls                              - List the scripts, functions and triggers" << "\n";
         oss << "call <function> [\"<arg>\" ...]          - Run a function registered by a script" << "\n";
         oss << "help                                   - Show this help"

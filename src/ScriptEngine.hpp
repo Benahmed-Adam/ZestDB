@@ -48,6 +48,7 @@ namespace Zest {
 
         void loadAll();
         ResultType load(const std::string& name, const std::string& code);
+        ResultType reloadFile(const std::string& name);
         ResultType drop(const std::string& name);
         ResultType list() const;
         void reload();
@@ -70,6 +71,7 @@ namespace Zest {
 
         ThreadState& stateForThisThread();
         void setupState(LuaContext& ctx) const;
+        ResultType install(const std::string& name, const std::string& code, bool writeFile);
         ResultType validate(const std::string& name, const std::string& code, Registry& out) const;
         std::vector<std::string> matchingTriggers(TriggerPhase phase, TriggerEvent event, std::string_view key) const;
         static bool isValidName(std::string_view name);

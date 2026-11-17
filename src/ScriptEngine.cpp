@@ -197,7 +197,23 @@ namespace Zest {
         if (!isValidName(name)) {
             return { ResultType::Code::ScriptError };
         }
+        return this->install(name, code, true);
+    }
 
+    ResultType ScriptEngine::reloadFile(const std::string& name) {
+        if (!isValidName(name)) {
+            return { ResultType::Code::ScriptError };
+        }
+        std::ifstream in(this->scriptsDir / (name + ".lua"), std::ios::binary);
+        if (!in) {
+            return { ResultType::Code::ScriptNotFound };
+        }
+        std::stringstream code;
+        code << in.rdbuf();
+        return this->install(name, code.str(), false);
+    }
+
+    ResultType ScriptEngine::install(const std::string& name, const std::string& code, bool writeFile) {
         Registry added;
         ResultType validated = this->validate(name, code, added);
         if (validated.code != ResultType::Code::Success) {
@@ -210,21 +226,23 @@ namespace Zest {
             return { ResultType::Code::ScriptError };
         }
 
-        std::error_code ec;
-        fs::create_directories(this->scriptsDir, ec);
-        const fs::path target = this->scriptsDir / (name + ".lua");
-        const fs::path tmp = this->scriptsDir / (name + ".lua.tmp");
-        {
-            std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-            if (!(out << code) || !out.flush()) {
+        if (writeFile) {
+            std::error_code ec;
+            fs::create_directories(this->scriptsDir, ec);
+            const fs::path target = this->scriptsDir / (name + ".lua");
+            const fs::path tmp = this->scriptsDir / (name + ".lua.tmp");
+            {
+                std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+                if (!(out << code) || !out.flush()) {
+                    fs::remove(tmp, ec);
+                    return { ResultType::Code::WriteFailed };
+                }
+            }
+            fs::rename(tmp, target, ec);
+            if (ec) {
                 fs::remove(tmp, ec);
                 return { ResultType::Code::WriteFailed };
             }
-        }
-        fs::rename(tmp, target, ec);
-        if (ec) {
-            fs::remove(tmp, ec);
-            return { ResultType::Code::WriteFailed };
         }
 
         std::erase_if(this->registry.functions, [&name](const ScriptFunction& f) { return f.script == name; });

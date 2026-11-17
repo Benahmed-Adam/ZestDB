@@ -736,3 +736,39 @@ TEST_CASE_METHOD(ScriptFixture, "print and zest.log write to the server log", "[
     REQUIRE(captured.str().find("Lua: plain") != std::string::npos);
     REQUIRE(db->execCmd("call bad_level").code == ResultType::Code::ScriptError);
 }
+
+TEST_CASE_METHOD(ScriptFixture, "script reload picks up a file edited on disk", "[scripts][reload]") {
+    REQUIRE(load("lib", R"lua(zest.register_function("v", function() return "1" end))lua").code == ResultType::Code::Success);
+    REQUIRE(load("other", R"lua(zest.register_function("o", function() return "other" end))lua").code == ResultType::Code::Success);
+
+    std::ofstream(testDir / "db" / "scripts" / "lib.lua", std::ios::trunc) << R"lua(zest.register_function("v", function() return "2" end))lua";
+    REQUIRE(db->execCmd("call v").response == "1");
+
+    REQUIRE(db->execCmd("script reload lib").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("call v").response == "2");
+    REQUIRE(db->execCmd("call o").response == "other");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "script reload loads a file added to the folder", "[scripts][reload]") {
+    fs::create_directories(testDir / "db" / "scripts");
+    std::ofstream(testDir / "db" / "scripts" / "dropped.lua") << R"lua(zest.register_function("d", function() return "here" end))lua";
+
+    REQUIRE(db->execCmd("call d").code == ResultType::Code::FunctionNotFound);
+    REQUIRE(db->reloadScript("dropped").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("call d").response == "here");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "script reload keeps the loaded version when the file is broken", "[scripts][reload]") {
+    REQUIRE(load("lib", R"lua(zest.register_function("v", function() return "1" end))lua").code == ResultType::Code::Success);
+    std::ofstream(testDir / "db" / "scripts" / "lib.lua", std::ios::trunc) << "this is not lua (";
+
+    REQUIRE(db->execCmd("script reload lib").code == ResultType::Code::ScriptError);
+    REQUIRE(db->execCmd("call v").response == "1");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "script reload errors", "[scripts][reload]") {
+    REQUIRE(db->execCmd("script reload ghost").code == ResultType::Code::ScriptNotFound);
+    REQUIRE(db->execCmd("script reload ../config").code == ResultType::Code::ScriptError);
+    REQUIRE(db->execCmd("script reload").code == ResultType::Code::MissingArguments);
+    REQUIRE(db->execCmd("script reload lib", Role::Write).code == ResultType::Code::PermissionDenied);
+}
