@@ -29,19 +29,19 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | Code | Name | Meaning |
 | ---: | --- | --- |
 | 100 | `NoCommand` | The command is empty or only whitespace. |
-| 101 | `UnknownCommand` | The command name does not exist. |
+| 101 | `UnknownCommand` | The command name, or the `script` sub-command, does not exist. |
 | 102 | `MissingKey` | The command needs a key. |
-| 103 | `MissingValue` | The command needs a value. |
-| 104 | `MissingPattern` | `delby` needs a mode and a pattern. |
-| 105 | `MissingArguments` | Not enough arguments (`getby`, `expire`, `scfg`...). |
+| 103 | `MissingValue` | The command needs a value (or `script load` needs the code). |
+| 104 | `MissingPattern` | `delby` needs a mode and a pattern; `count` / `keys` got a mode without a pattern. |
+| 105 | `MissingArguments` | Not enough arguments (`getby`, `expire`, `scfg`, `restore`, `script`, `call`...). |
 | 106 | `InvalidMode` | `delby` mode is not `re`, `sw`, `ct` or `ew`. |
-| 107 | `InvalidRegex` | `getby` / `setby`: invalid mode, or regex invalid, too complex or using back-references. |
-| 108 | `InvalidLimit` | `lim` is not a positive integer. |
+| 107 | `InvalidRegex` | `getby` / `setby` / `count` / `keys`: invalid mode, or regex invalid, too complex or using back-references. |
+| 108 | `InvalidLimit` | `lim` is not followed by a whole number. |
 | 109 | `InvalidTtl` | The TTL is not a positive integer (`setex`, `expire`, `setexat`, `expireat`). |
 | 110 | `MalformedBatch` | A command length in the batch frame does not match its content. |
 | 111 | `PayloadTooLarge` | The request exceeds 1 MiB before authentication or 64 MiB after; the connection is closed. |
 | 112 | `InvalidIncrement` | The increment of `incr` / `decr` is not an integer. |
-| 113 | `InvalidValueFormat` | A value is not between double quotes, its closing quote is missing, or something other than `lim <n>` (for `setby`) follows it. |
+| 113 | `InvalidValueFormat` | A value (or a `call` argument) is not between double quotes, its closing quote is missing, or something other than `lim <n>` (for `setby`) follows it. |
 
 ## 2xx - Key or value
 
@@ -83,7 +83,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | ---: | --- | --- |
 | 500 | `InternalError` | The command raised an unexpected exception. |
 | 501 | `ReadFailed` | The value could not be read from its data segment. |
-| 502 | `WriteFailed` | The value could not be written to a data segment. |
+| 502 | `WriteFailed` | The value could not be written to a data segment, or a script file could not be written or removed. |
 | 503 | `WalWriteFailed` | The write was applied but could not be logged in the WAL. |
 | 504 | `ArchiveFailed` | `save` could not create the archive (or an archive or a restore is already in progress). |
 | 505 | `RestoreFailed` | `restore` could not extract or swap the files, or an archive or a restore is already in progress. The database keeps its previous data. |
@@ -92,8 +92,8 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 
 | Code | Name | Meaning |
 | ---: | --- | --- |
-| 600 | `ScriptError` | A script could not be loaded (syntax error, invalid `register_function` / `register_trigger` call, duplicate name) or raised an error while running. |
-| 601 | `ScriptNotFound` | `script del` / `script reload`: no script has this name. |
+| 600 | `ScriptError` | A script could not be loaded (invalid script name, syntax error, invalid `register_function` / `register_trigger` call, name already used by another script) or raised an error while running. |
+| 601 | `ScriptNotFound` | `script del`: no script has this name; `script reload <name>`: `<DbPath>/scripts/<name>.lua` does not exist. |
 | 602 | `FunctionNotFound` | `call`: no registered function has this name. |
 | 603 | `TriggerRejected` | A `before` trigger rejected the write; nothing was written. |
-| 604 | `ScriptLimitExceeded` | A script exceeded its instruction, memory or trigger-recursion limit. |
+| 604 | `ScriptLimitExceeded` | A script exceeded its instruction or memory limit, or scripts and triggers were nested more than 16 levels deep. |
