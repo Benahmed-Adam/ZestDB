@@ -43,6 +43,7 @@ namespace Zest {
         bool appendToWAL(const std::string& key, const std::string& command);
         bool syncWAL();
 
+        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
         void reloadSettings(Settings& set);
 
         const std::vector<std::unique_ptr<Shard>>& getShards() const {
@@ -51,7 +52,6 @@ namespace Zest {
 
     private:
         int getShardId(const std::string& key) const;
-        std::vector<std::string> firstMatchingKeys(const ValidationRule& valid, bool recordKeysStats = false);
 
         Settings settings;
         int numShards;

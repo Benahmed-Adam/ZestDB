@@ -68,7 +68,13 @@ namespace Zest {
             WriteFailed = 502,
             WalWriteFailed = 503,
             ArchiveFailed = 504,
-            RestoreFailed = 505
+            RestoreFailed = 505,
+
+            ScriptError = 600,
+            ScriptNotFound = 601,
+            FunctionNotFound = 602,
+            TriggerRejected = 603,
+            ScriptLimitExceeded = 604
         };
         Code code;
         std::string response = "";

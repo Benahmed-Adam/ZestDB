@@ -11,6 +11,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
 #include "ShardManager.hpp"
@@ -57,7 +58,16 @@ namespace Zest {
         ResultType count(const ValidationRule& valid);
         ResultType keys(const ValidationRule& valid);
 
-        ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
+        ResultType loadScript(const std::string& name, const std::string& code);
+        ResultType dropScript(const std::string& name);
+        ResultType reloadScript(const std::string& name);
+        ResultType reloadScripts();
+        ResultType listScripts() const;
+        ResultType call(const std::string& name, const std::vector<std::string>& args);
+
+        CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
+
+        ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true, const std::string& user = "");
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
         std::optional<Role> authenticate(const std::string& username, const std::string& token) const;
@@ -75,6 +85,11 @@ namespace Zest {
         static std::string responseToJson(const ResultType& resp);
 
     private:
+        bool scripted() const;
+        ResultType beforeWrite(const std::string& key, std::string& value);
+        ResultType finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result);
+        ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
+        ResultType delBy(ValidationRule& valid, bool perRow);
         ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
         ResultType casBy(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
         ResultType checkWrite(const std::string& key, const std::string& value) const;
@@ -86,7 +101,6 @@ namespace Zest {
         void flushLocked();
         void replayWAL();
         std::string help() const;
-        CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
         bool appendToWAL(const std::string& key, const std::string& command);
 
         Settings loadConfig(std::unordered_map<std::string, UserEntry>& usersOut);
@@ -105,6 +119,7 @@ namespace Zest {
         std::atomic<bool> running{ true };
         std::atomic<bool> archiving{ false };
         std::unique_ptr<ShardManager> shardManager;
+        std::unique_ptr<ScriptEngine> scriptEngine;
         std::unique_ptr<Server> socket;
 
         std::atomic<bool> replaying;

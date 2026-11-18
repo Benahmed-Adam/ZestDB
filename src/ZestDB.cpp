@@ -84,6 +84,8 @@ namespace Zest {
         this->boot();
 
         this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
+        this->scriptEngine = std::make_unique<ScriptEngine>(*this, this->settings.DbPath / "scripts");
+        this->scriptEngine->loadAll();
         this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
         this->replayWAL();
@@ -412,6 +414,7 @@ namespace Zest {
             }
             setLoggerDebugMode(this->settings.isDebug);
             this->shardManager->reloadSettings(this->settings);
+            this->scriptEngine->reload();
             this->threadCV.notify_all();
 
             return { ResultType::Code::Success };
@@ -743,6 +746,30 @@ namespace Zest {
         return { ResultType::Code::Success, json(names).dump(-1, ' ', false, json::error_handler_t::replace), static_cast<long long>(names.size()) };
     }
 
+    ResultType ZestDB::loadScript(const std::string& name, const std::string& code) {
+        return this->scriptEngine->load(name, code);
+    }
+
+    ResultType ZestDB::dropScript(const std::string& name) {
+        return this->scriptEngine->drop(name);
+    }
+
+    ResultType ZestDB::reloadScript(const std::string& name) {
+        return this->scriptEngine->reloadFile(name);
+    }
+
+    ResultType ZestDB::reloadScripts() {
+        return this->scriptEngine->loadAll();
+    }
+
+    ResultType ZestDB::listScripts() const {
+        return this->scriptEngine->list();
+    }
+
+    ResultType ZestDB::call(const std::string& name, const std::vector<std::string>& args) {
+        return this->scriptEngine->call(name, args);
+    }
+
     bool ZestDB::validateToken(const std::string& username, const std::string& token) const {
         return this->authenticate(username, token).has_value();
     }
@@ -860,12 +887,65 @@ namespace Zest {
         return { ResultType::Code::Success };
     }
 
+    static std::string quoteValue(std::string_view value) {
+        std::string out = "\"";
+        for (char c : value) {
+            if (c == '"' || c == '\\') {
+                out += '\\';
+            }
+            out += c;
+        }
+        out += '"';
+        return out;
+    }
+
+    static std::string setCommand(const std::string& key, const std::string& value, uint64_t expiresAt) {
+        return expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(value)) : std::format("s {} {}", key, quoteValue(value));
+    }
+
+    bool ZestDB::scripted() const {
+        return !this->replaying.load() && this->scriptEngine && this->scriptEngine->hasTriggers();
+    }
+
+    ResultType ZestDB::beforeWrite(const std::string& key, std::string& value) {
+        if (!this->scripted()) {
+            return { ResultType::Code::Success };
+        }
+        ResultType before = this->scriptEngine->before(TriggerEvent::Set, key, value);
+        if (before.code != ResultType::Code::Success) {
+            return before;
+        }
+        return this->checkWrite(key, value);
+    }
+
+    ResultType ZestDB::finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result) {
+        if (result.code != ResultType::Code::Success) {
+            return result;
+        }
+        if (!this->appendToWAL(key, walCommand)) {
+            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
+        }
+        if (this->scripted()) {
+            ResultType after = this->scriptEngine->after(event, key, value);
+            if (after.code != ResultType::Code::Success) {
+                return after;
+            }
+        }
+        return result;
+    }
+
     ResultType ZestDB::set(const std::string& key, const std::string& value, uint64_t expiresAt) {
         ResultType check = this->checkWrite(key, value);
         if (check.code != ResultType::Code::Success) {
             return check;
         }
-        return this->shardManager->set(key, value, expiresAt);
+        std::string stored = value;
+        ResultType before = this->beforeWrite(key, stored);
+        if (before.code != ResultType::Code::Success) {
+            return before;
+        }
+        ResultType result = this->shardManager->set(key, stored, expiresAt);
+        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
     }
 
     ResultType ZestDB::setnx(const std::string& key, const std::string& value) {
@@ -873,7 +953,13 @@ namespace Zest {
         if (check.code != ResultType::Code::Success) {
             return check;
         }
-        return this->shardManager->setnx(key, value);
+        std::string stored = value;
+        ResultType before = this->beforeWrite(key, stored);
+        if (before.code != ResultType::Code::Success) {
+            return before;
+        }
+        ResultType result = this->shardManager->setnx(key, stored);
+        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, 0), result);
     }
 
     ResultType ZestDB::cas(const std::string& key, const std::string& expected, const std::string& value) {
@@ -886,7 +972,13 @@ namespace Zest {
         if (check.code != ResultType::Code::Success) {
             return check;
         }
-        return this->shardManager->cas(key, expected, value, expiresAt);
+        std::string stored = value;
+        ResultType before = this->beforeWrite(key, stored);
+        if (before.code != ResultType::Code::Success) {
+            return before;
+        }
+        ResultType result = this->shardManager->cas(key, expected, stored, expiresAt);
+        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
     }
 
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
@@ -900,7 +992,11 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
-        return this->shardManager->setTTL(key, expiresAt);
+        ResultType result = this->shardManager->setTTL(key, expiresAt);
+        if (result.code == ResultType::Code::Success && !this->appendToWAL(key, expiresAt != 0 ? std::format("expireat {} {}", key, expiresAt) : std::format("persist {}", key))) {
+            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
+        }
+        return result;
     }
 
     ResultType ZestDB::getTTL(const std::string& key) {
@@ -922,7 +1018,15 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
-        return this->shardManager->del(key);
+        if (this->scripted()) {
+            std::string unused;
+            ResultType before = this->scriptEngine->before(TriggerEvent::Del, key, unused);
+            if (before.code != ResultType::Code::Success) {
+                return before;
+            }
+        }
+        ResultType result = this->shardManager->del(key);
+        return this->finishWrite(TriggerEvent::Del, key, "", std::format("d {}", key), result);
     }
 
     ResultType ZestDB::getBy(ValidationRule& valid) {
@@ -930,6 +1034,10 @@ namespace Zest {
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value) {
+        return this->setBy(valid, value, this->scripted());
+    }
+
+    ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value, bool perRow) {
         const bool enforce = !this->replaying.load();
 
         if (enforce && this->settings.readOnly) {
@@ -950,15 +1058,33 @@ namespace Zest {
             }
         }
 
-        return this->shardManager->setBy(valid, value);
+        if (!perRow) {
+            return this->shardManager->setBy(valid, value);
+        }
+        long long updated = 0;
+        for (const std::string& key : this->shardManager->firstMatchingKeys(valid)) {
+            updated += this->set(key, value).code == ResultType::Code::Success;
+        }
+        return { ResultType::Code::Success, "", updated };
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid) {
+        return this->delBy(valid, this->scripted());
+    }
+
+    ResultType ZestDB::delBy(ValidationRule& valid, bool perRow) {
         if (!this->replaying.load() && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
         }
 
-        return this->shardManager->delBy(valid);
+        if (!perRow) {
+            return this->shardManager->delBy(valid);
+        }
+        long long deleted = 0;
+        for (const std::string& key : this->shardManager->firstMatchingKeys(valid)) {
+            deleted += this->del(key).code == ResultType::Code::Success;
+        }
+        return { ResultType::Code::Success, "", deleted };
     }
 
     ResultType ZestDB::incr(const std::string& key, int64_t delta) {
@@ -975,7 +1101,8 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
-        return this->shardManager->incr(key, delta, expiresAt);
+        ResultType result = this->shardManager->incr(key, delta, expiresAt);
+        return this->finishWrite(TriggerEvent::Set, key, result.response, setCommand(key, result.response, expiresAt), result);
     }
 
     ResultType ZestDB::exists(const std::string& key) {
@@ -1159,18 +1286,6 @@ namespace Zest {
         return readQuoted(sv, pos, out) && onlySpacesFrom(sv, pos);
     }
 
-    static std::string quoteValue(std::string_view value) {
-        std::string out = "\"";
-        for (char c : value) {
-            if (c == '"' || c == '\\') {
-                out += '\\';
-            }
-            out += c;
-        }
-        out += '"';
-        return out;
-    }
-
     static bool parseTTL(std::string_view word, bool relative, uint64_t& expiresAt) {
         if (relative) {
             uint32_t seconds = 0;
@@ -1183,7 +1298,8 @@ namespace Zest {
         return parseNumber(word, expiresAt) && expiresAt != 0;
     }
 
-    ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal) {
+    ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal, const std::string& user) {
+        ScriptEngine::CallerScope caller(user, role);
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
         if (start == std::string_view::npos) {
@@ -1219,8 +1335,8 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas";
-        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore" || cmd == "lsaves";
+        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas" || cmd == "call";
+        const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore" || cmd == "lsaves" || cmd == "script";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
@@ -1233,7 +1349,7 @@ namespace Zest {
             sharedLock.lock();
         }
 
-        std::string walCommand;
+        bool rowsLogged = false;
 
         if (cmd == "g") {
             if (words.size() < 2) {
@@ -1264,9 +1380,7 @@ namespace Zest {
             } else if (!readLastValue(sv, words[3], value)) {
                 result.code = ResultType::Code::InvalidValueFormat;
             } else {
-                const std::string key(words[1]);
-                result = this->set(key, value, ttl);
-                walCommand = std::format("setexat {} {} {}", key, ttl, quoteValue(value));
+                result = this->set(std::string(words[1]), value, ttl);
             }
         } else if (cmd == "expire" || cmd == "expireat") {
             uint64_t ttl = 0;
@@ -1276,7 +1390,6 @@ namespace Zest {
                 result.code = ResultType::Code::InvalidTtl;
             } else {
                 result = this->setTTL(std::string(words[1]), ttl);
-                walCommand = std::format("expireat {} {}", words[1], ttl);
             }
         } else if (cmd == "persist") {
             if (words.size() < 2) {
@@ -1299,9 +1412,7 @@ namespace Zest {
             } else if (!readLastValue(sv, words[2], value)) {
                 result.code = ResultType::Code::InvalidValueFormat;
             } else {
-                const std::string key(words[1]);
-                result = this->setnx(key, value);
-                walCommand = std::format("s {} {}", key, quoteValue(value));
+                result = this->setnx(std::string(words[1]), value);
             }
         } else if (cmd == "cas") {
             std::string expected;
@@ -1318,10 +1429,7 @@ namespace Zest {
             } else if (!readQuoted(sv, valuePos, value) || !onlySpacesFrom(sv, valuePos)) {
                 result.code = ResultType::Code::InvalidValueFormat;
             } else {
-                const std::string key(words[1]);
-                uint64_t expiresAt = 0;
-                result = this->casBy(key, expected, value, expiresAt);
-                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(value)) : std::format("s {} {}", key, quoteValue(value));
+                result = this->cas(std::string(words[1]), expected, value);
             }
         } else if (cmd == "incr" || cmd == "decr") {
             int64_t delta = 1;
@@ -1332,10 +1440,7 @@ namespace Zest {
             } else if (cmd == "decr" && delta == INT64_MIN) {
                 result.code = ResultType::Code::IntegerOverflow;
             } else {
-                const std::string key(words[1]);
-                uint64_t expiresAt = 0;
-                result = this->incrBy(key, cmd == "incr" ? delta : -delta, expiresAt);
-                walCommand = expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(result.response)) : std::format("s {} {}", key, quoteValue(result.response));
+                result = this->incr(std::string(words[1]), cmd == "incr" ? delta : -delta);
             }
         } else if (cmd == "d") {
             if (words.size() < 2) {
@@ -1394,7 +1499,8 @@ namespace Zest {
                         result.code = ResultType::Code::InvalidRegex;
                     } else {
                         valid.limit = limit;
-                        result = this->setBy(valid, value);
+                        rowsLogged = this->scripted();
+                        result = this->setBy(valid, value, rowsLogged);
                     }
                 }
             }
@@ -1418,7 +1524,8 @@ namespace Zest {
                     result.code = ResultType::Code::InvalidMode;
                 } else {
                     valid.limit = limit;
-                    result = this->delBy(valid);
+                    rowsLogged = this->scripted();
+                    result = this->delBy(valid, rowsLogged);
                 }
             }
         } else if (cmd == "exists") {
@@ -1633,15 +1740,54 @@ namespace Zest {
             }
         } else if (cmd == "lsaves") {
             result = this->listSaves();
+        } else if (cmd == "script") {
+            const std::string sub = words.size() > 1 ? toLowerStr(words[1]) : "";
+            std::string code;
+            if (sub == "ls") {
+                result = this->listScripts();
+            } else if (sub == "reload" && words.size() == 2) {
+                result = this->reloadScripts();
+            } else if ((sub != "load" && sub != "del" && sub != "reload") || words.size() < 3) {
+                result.code = words.size() < 2 || sub == "load" || sub == "del" || sub == "reload" ? ResultType::Code::MissingArguments : ResultType::Code::UnknownCommand;
+            } else if (sub == "del") {
+                result = this->dropScript(std::string(words[2]));
+            } else if (sub == "reload") {
+                result = this->reloadScript(std::string(words[2]));
+            } else if (words.size() < 4) {
+                result.code = ResultType::Code::MissingValue;
+            } else if (!readLastValue(sv, words[3], code)) {
+                result.code = ResultType::Code::InvalidValueFormat;
+            } else {
+                result = this->loadScript(std::string(words[2]), code);
+            }
+        } else if (cmd == "call") {
+            if (words.size() < 2) {
+                result.code = ResultType::Code::MissingArguments;
+            } else {
+                std::vector<std::string> args;
+                size_t argPos = static_cast<size_t>(words[1].data() - sv.data()) + words[1].size();
+                bool argsOk = true;
+                while (argsOk && !onlySpacesFrom(sv, argPos)) {
+                    std::string arg;
+                    argsOk = readQuoted(sv, argPos, arg);
+                    args.push_back(std::move(arg));
+                }
+                result = argsOk ? this->call(std::string(words[1]), args) : ResultType{ ResultType::Code::InvalidValueFormat };
+            }
         } else {
             result.code = ResultType::Code::UnknownCommand;
         }
 
-        if (!this->replaying.load()) {
-            if (result.code == ResultType::Code::Success && isWrite) {
-                if (words.size() >= 2 && (!this->appendToWAL(std::string(words[1]), walCommand.empty() ? command : walCommand) || (syncWal && !this->shardManager->syncWAL()))) {
-                    result = { ResultType::Code::WalWriteFailed, "", result.affectedRows };
-                }
+        if (!this->replaying.load() && isWrite) {
+            bool walOk = true;
+            if (result.code == ResultType::Code::Success && (cmd == "sb" || cmd == "db") && !rowsLogged) {
+                walOk = this->appendToWAL(std::string(words[1]), command);
+            }
+            if (syncWal) {
+                walOk = this->shardManager->syncWAL() && walOk;
+            }
+            if (!walOk && result.code == ResultType::Code::Success) {
+                result = { ResultType::Code::WalWriteFailed, "", result.affectedRows };
             }
         }
 
@@ -1691,6 +1837,12 @@ namespace Zest {
         oss << "save                                   - Create a zip archive of the database" << "\n";
         oss << "restore <archive.zip>                  - Replace the database with an archive of ArchiveStoragePath" << "\n";
         oss << "lsaves                                 - List the archives of ArchiveStoragePath, oldest first" << "\n";
+        oss << "script load <name> \"<lua code>\"        - Save a Lua script and register its functions and triggers" << "\n";
+        oss << "script del <name>                      - Remove a script with its functions and triggers" << "\n";
+        oss << "script reload <name>                   - Reload DbPath/scripts/<name>.lua after editing it on disk" << "\n";
+        oss << "script reload                          - Reload every script of DbPath/scripts (removed files are unloaded)" << "\n";
+        oss << "script ls                              - List the scripts, functions and triggers" << "\n";
+        oss << "call <function> [\"<arg>\" ...]          - Run a function registered by a script" << "\n";
         oss << "help                                   - Show this help"
             << "\n";
         oss << "\n";
