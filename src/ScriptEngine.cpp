@@ -155,7 +155,7 @@ namespace Zest {
         return out;
     }
 
-    void ScriptEngine::loadAll() {
+    ResultType ScriptEngine::loadAll() {
         std::vector<fs::path> files;
         std::error_code ec;
         for (auto it = fs::directory_iterator(this->scriptsDir, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
@@ -166,6 +166,7 @@ namespace Zest {
         std::sort(files.begin(), files.end());
 
         Registry fresh;
+        std::vector<std::string> failed;
         for (const fs::path& file : files) {
             const std::string name = file.stem().string();
             std::ifstream in(file, std::ios::binary);
@@ -175,10 +176,12 @@ namespace Zest {
             Registry one;
             if (!isValidName(name) || this->validate(name, code.str(), one).code != ResultType::Code::Success) {
                 ZestLog(LogLevel::Error, std::format("Scripts: {} is invalid and was not loaded", file.string()));
+                failed.push_back(name);
                 continue;
             }
             if (conflicts(names(fresh.functions), names(one.functions)) || conflicts(names(fresh.triggers), names(one.triggers))) {
                 ZestLog(LogLevel::Error, std::format("Scripts: {} registers a name another script already uses, it was not loaded", file.string()));
+                failed.push_back(name);
                 continue;
             }
             fresh.scripts.merge(one.scripts);
@@ -186,11 +189,19 @@ namespace Zest {
             std::move(one.triggers.begin(), one.triggers.end(), std::back_inserter(fresh.triggers));
         }
 
+        std::vector<std::string> loaded;
+        for (const auto& [name, code] : fresh.scripts) {
+            loaded.push_back(name);
+        }
+
         std::unique_lock<std::shared_mutex> lock(this->registryMtx);
         this->registry = std::move(fresh);
         this->anyTrigger = !this->registry.triggers.empty();
         this->generation++;
-        ZestLog(LogLevel::Info, std::format("Scripts: {} loaded", this->registry.scripts.size()));
+        ZestLog(LogLevel::Info, std::format("Scripts: {} loaded, {} failed", loaded.size(), failed.size()));
+
+        nlohmann::json j = { { "loaded", loaded }, { "failed", failed } };
+        return { ResultType::Code::Success, j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), static_cast<long long>(loaded.size()) };
     }
 
     ResultType ScriptEngine::load(const std::string& name, const std::string& code) {

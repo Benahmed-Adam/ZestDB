@@ -769,8 +769,43 @@ TEST_CASE_METHOD(ScriptFixture, "script reload keeps the loaded version when the
 TEST_CASE_METHOD(ScriptFixture, "script reload errors", "[scripts][reload]") {
     REQUIRE(db->execCmd("script reload ghost").code == ResultType::Code::ScriptNotFound);
     REQUIRE(db->execCmd("script reload ../config").code == ResultType::Code::ScriptError);
-    REQUIRE(db->execCmd("script reload").code == ResultType::Code::MissingArguments);
     REQUIRE(db->execCmd("script reload lib", Role::Write).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db->execCmd("script reload", Role::Write).code == ResultType::Code::PermissionDenied);
+}
+
+TEST_CASE_METHOD(ScriptFixture, "script reload without a name reloads the whole folder", "[scripts][reload]") {
+    REQUIRE(load("edited", R"lua(zest.register_function("e", function() return "old" end))lua").code == ResultType::Code::Success);
+    REQUIRE(load("removed", R"lua(zest.register_function("r", function() return "r" end))lua").code == ResultType::Code::Success);
+    REQUIRE(load("kept", R"lua(zest.register_function("k", function() return "k" end))lua").code == ResultType::Code::Success);
+
+    const fs::path dir = testDir / "db" / "scripts";
+    std::ofstream(dir / "edited.lua", std::ios::trunc) << R"lua(zest.register_function("e", function() return "new" end))lua";
+    std::ofstream(dir / "added.lua") << R"lua(zest.register_function("a", function() return "a" end))lua";
+    std::ofstream(dir / "broken.lua") << "this is not lua (";
+    fs::remove(dir / "removed.lua");
+
+    auto r = db->execCmd("script reload");
+    REQUIRE(r.code == ResultType::Code::Success);
+    REQUIRE(r.affectedRows == 3);
+    auto j = nlohmann::json::parse(r.response);
+    REQUIRE(j["loaded"] == nlohmann::json::array({ "added", "edited", "kept" }));
+    REQUIRE(j["failed"] == nlohmann::json::array({ "broken" }));
+
+    REQUIRE(db->execCmd("call e").response == "new");
+    REQUIRE(db->execCmd("call a").response == "a");
+    REQUIRE(db->execCmd("call k").response == "k");
+    REQUIRE(db->execCmd("call r").code == ResultType::Code::FunctionNotFound);
+}
+
+TEST_CASE_METHOD(ScriptFixture, "script reload of an empty folder unloads everything", "[scripts][reload]") {
+    REQUIRE(db->reloadScripts().code == ResultType::Code::Success);
+    REQUIRE(load("lib", R"lua(zest.register_function("f", function() return "1" end))lua").code == ResultType::Code::Success);
+    fs::remove(testDir / "db" / "scripts" / "lib.lua");
+
+    auto r = db->reloadScripts();
+    REQUIRE(r.code == ResultType::Code::Success);
+    REQUIRE(r.affectedRows == 0);
+    REQUIRE(db->execCmd("call f").code == ResultType::Code::FunctionNotFound);
 }
 
 // ---------------------------------------------------------------- scripts_examples

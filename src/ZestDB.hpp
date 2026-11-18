@@ -61,6 +61,7 @@ namespace Zest {
         ResultType loadScript(const std::string& name, const std::string& code);
         ResultType dropScript(const std::string& name);
         ResultType reloadScript(const std::string& name);
+        ResultType reloadScripts();
         ResultType listScripts() const;
         ResultType call(const std::string& name, const std::vector<std::string>& args);
 

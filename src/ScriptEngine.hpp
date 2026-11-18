@@ -46,7 +46,7 @@ namespace Zest {
         ScriptEngine(const ScriptEngine&) = delete;
         ScriptEngine& operator=(const ScriptEngine&) = delete;
 
-        void loadAll();
+        ResultType loadAll();
         ResultType load(const std::string& name, const std::string& code);
         ResultType reloadFile(const std::string& name);
         ResultType drop(const std::string& name);

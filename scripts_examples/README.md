@@ -21,6 +21,8 @@ They can all be loaded together: no two files register the same name or watch ov
 Two ways, both reserved to the `admin` role:
 
 - **Copy the file** to `<DbPath>/scripts/<name>.lua`, then run `script reload <name>`. Every file in that folder is also loaded when the server starts.
+  - `script reload` without a name reloads the whole folder: edited files are reloaded, new files loaded and deleted files unloaded.
+  - It answers `{"loaded": [...], "failed": [...]}`. A file that fails is logged and skipped, and the others still load.
 - **Send it** with `script load <name> "<code>"`. The code is a quoted value: escape `"` as `\"` and `\` as `\\`.
 
 ```

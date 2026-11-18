@@ -758,6 +758,10 @@ namespace Zest {
         return this->scriptEngine->reloadFile(name);
     }
 
+    ResultType ZestDB::reloadScripts() {
+        return this->scriptEngine->loadAll();
+    }
+
     ResultType ZestDB::listScripts() const {
         return this->scriptEngine->list();
     }
@@ -1740,6 +1744,8 @@ namespace Zest {
             std::string code;
             if (sub == "ls") {
                 result = this->listScripts();
+            } else if (sub == "reload" && words.size() == 2) {
+                result = this->reloadScripts();
             } else if ((sub != "load" && sub != "del" && sub != "reload") || words.size() < 3) {
                 result.code = words.size() < 2 || sub == "load" || sub == "del" || sub == "reload" ? ResultType::Code::MissingArguments : ResultType::Code::UnknownCommand;
             } else if (sub == "del") {
@@ -1833,6 +1839,7 @@ namespace Zest {
         oss << "script load <name> \"<lua code>\"        - Save a Lua script and register its functions and triggers" << "\n";
         oss << "script del <name>                      - Remove a script with its functions and triggers" << "\n";
         oss << "script reload <name>                   - Reload DbPath/scripts/<name>.lua after editing it on disk" << "\n";
+        oss << "script reload                          - Reload every script of DbPath/scripts (removed files are unloaded)" << "\n";
         oss << "script ls                              - List the scripts, functions and triggers" << "\n";
         oss << "call <function> [\"<arg>\" ...]          - Run a function registered by a script" << "\n";
         oss << "help                                   - Show this help"
