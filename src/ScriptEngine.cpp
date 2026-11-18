@@ -87,8 +87,9 @@ namespace Zest {
                 lua_gc(result.lua_state(), LUA_GCCOLLECT);
             }
             const sol::error err = result.get<sol::error>();
-            const std::string message = outOfMemory ? std::format("{}: not enough memory", LIMIT_MARK) : err.what();
-            ZestLog(LogLevel::Debug, std::format("Script {}: {}", what, message));
+            const std::string full = outOfMemory ? std::format("{}: not enough memory", LIMIT_MARK) : err.what();
+            ZestLog(LogLevel::Debug, std::format("Script {}: {}", what, full));
+            const std::string message = full.substr(0, full.find("\nstack traceback:"));
             return { outOfMemory || message.find(LIMIT_MARK) != std::string::npos ? ResultType::Code::ScriptLimitExceeded : fallback, message };
         }
 
@@ -157,6 +158,11 @@ namespace Zest {
 
     ScriptEngine::ScriptEngine(ZestDB& database, std::filesystem::path dir)
         : db(database), id(nextEngineId.fetch_add(1)), scriptsDir(std::move(dir)) {
+        std::error_code ec;
+        fs::create_directories(this->scriptsDir, ec);
+        if (ec) {
+            ZestLog(LogLevel::Warning, std::format("Scripts: cannot create {}: {}", this->scriptsDir.string(), ec.message()));
+        }
     }
 
     ScriptEngine::~ScriptEngine() = default;
