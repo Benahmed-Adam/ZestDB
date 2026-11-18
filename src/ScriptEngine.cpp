@@ -29,6 +29,20 @@ namespace Zest {
 
         std::atomic<uint64_t> nextEngineId{ 1 };
 
+        thread_local std::optional<ScriptEngine::Caller> currentCaller;
+
+        const char* roleName(Role role) {
+            switch (role) {
+            case Role::Read:
+                return "read";
+            case Role::Write:
+                return "write";
+            case Role::Admin:
+                return "admin";
+            }
+            return "unknown";
+        }
+
         struct Limits {
             uint64_t instructions = 0;
             size_t memory = 0;
@@ -69,6 +83,9 @@ namespace Zest {
 
         ResultType failure(sol::protected_function_result& result, ResultType::Code fallback, std::string_view what) {
             const bool outOfMemory = result.status() == sol::call_status::memory;
+            if (outOfMemory) {
+                lua_gc(result.lua_state(), LUA_GCCOLLECT);
+            }
             const sol::error err = result.get<sol::error>();
             const std::string message = outOfMemory ? std::format("{}: not enough memory", LIMIT_MARK) : err.what();
             ZestLog(LogLevel::Debug, std::format("Script {}: {}", what, message));
@@ -128,6 +145,15 @@ namespace Zest {
         uint64_t generation = 0;
         std::unique_ptr<LuaContext> ctx;
     };
+
+    ScriptEngine::CallerScope::CallerScope(const std::string& user, Role role)
+        : previous(currentCaller) {
+        currentCaller = Caller{ user, role };
+    }
+
+    ScriptEngine::CallerScope::~CallerScope() {
+        currentCaller = this->previous;
+    }
 
     ScriptEngine::ScriptEngine(ZestDB& database, std::filesystem::path dir)
         : db(database), id(nextEngineId.fetch_add(1)), scriptsDir(std::move(dir)) {
@@ -550,6 +576,19 @@ namespace Zest {
             if (ctx.registry) {
                 ctx.registry->triggers.push_back({ *name, ctx.script, *phase == "before" ? TriggerPhase::Before : TriggerPhase::After, *event == "set" ? TriggerEvent::Set : TriggerEvent::Del, std::move(rule) });
             }
+        });
+
+        zest.set_function("caller", [requireRun](sol::this_state ts) -> sol::object {
+            requireRun("caller");
+            if (!currentCaller) {
+                return sol::make_object(ts, sol::lua_nil);
+            }
+            sol::table caller = sol::state_view(ts).create_table();
+            if (!currentCaller->user.empty()) {
+                caller["user"] = currentCaller->user;
+            }
+            caller["role"] = roleName(currentCaller->role);
+            return sol::make_object(ts, caller);
         });
 
         zest.set_function("get", [this, requireRun](const std::string& key, sol::this_state ts) -> sol::object {

@@ -5,8 +5,8 @@ Each file is a complete script you can load as is. Together they cover every par
 | File | Shows | Real-world use |
 | --- | --- | --- |
 | [`getting_started.lua`](getting_started.lua) | `register_function`, arguments, return values, `zest.incr`, `zest.log`, `print` | The shape of every script; a page counter |
-| [`validation.lua`](validation.lua) | `before` `set` triggers that clean or reject a value, a `before` `del` trigger, `sw` and `re` filters | Normalised emails, stock that cannot go negative, length limits, protected keys |
-| [`audit.lua`](audit.lua) | `after` `set` / `del` triggers, writes with a TTL, `zest.count` | Statistics and an audit trail kept for a week |
+| [`validation.lua`](validation.lua) | `before` `set` triggers that clean or reject a value, a `before` `del` trigger, `sw` and `re` filters, `zest.caller` | Normalised emails, stock that cannot go negative, length limits, admin-only and protected keys |
+| [`audit.lua`](audit.lua) | `after` `set` / `del` triggers, writes with a TTL, `zest.count`, `zest.caller` | Statistics and an audit trail of who changed what, kept for a week |
 | [`secondary_index.lua`](secondary_index.lua) | `before` + `after` triggers working together, `zest.keys` scans | Find a user by email, a unique email constraint |
 | [`bank.lua`](bank.lua) | Procedures with checks and compensation | Deposits, withdrawals and transfers between accounts |
 | [`rate_limit.lua`](rate_limit.lua) | A counter with a TTL as a time window | Limit an API key to N requests per minute |
@@ -53,6 +53,7 @@ While a file is being loaded, it may only call `register_function` and `register
 | `zest.cas(key, expected, value)` | `true` if the value was replaced |
 | `zest.count([mode, pattern])` | The number of live keys |
 | `zest.keys([mode, pattern [, lim]])` | A table of keys, sorted |
+| `zest.caller()` | The client that sent the command, as `{ user = "bob", role = "write" }`, or `nil` for a write the server makes on its own. `user` is absent outside an authenticated session (local console). It cannot be called while loading. |
 | `zest.log(message [, level])` / `print(...)` | Writes to the server log. The `level` is `debug`, `info` (default), `warning` or `error`; `print` logs at info. |
 
 A failed call (read-only mode, invalid key, value too large...) raises a Lua error. You can catch it with `pcall`.

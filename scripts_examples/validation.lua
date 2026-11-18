@@ -53,6 +53,21 @@ zest.register_trigger{
     end,
 }
 
+-- Permissions per key: config:* can only be written by an admin.
+-- zest.caller() is the client that sent the command ({ user = "bob", role = "write" }),
+-- or nil for writes the server makes itself.
+--   s config:app "v2"   as bob (write)  -> 603
+zest.register_trigger{
+    name = "config_admin_only", phase = "before", event = "set", mode = "sw", pattern = "config:",
+    fn = function(key, value)
+        local caller = zest.caller()
+        if caller ~= nil and caller.role ~= "admin" then
+            error(key .. " can only be changed by an admin")
+        end
+        return value
+    end,
+}
+
 -- A regex filter (mode "re" matches the whole key): these keys cannot be deleted.
 --   d config:app   -> 603
 zest.register_trigger{

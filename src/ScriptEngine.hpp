@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <string_view>
@@ -40,6 +41,23 @@ namespace Zest {
 
     class ScriptEngine {
     public:
+        struct Caller {
+            std::string user;
+            Role role;
+        };
+
+        class CallerScope {
+        public:
+            CallerScope(const std::string& user, Role role);
+            ~CallerScope();
+
+            CallerScope(const CallerScope&) = delete;
+            CallerScope& operator=(const CallerScope&) = delete;
+
+        private:
+            std::optional<Caller> previous;
+        };
+
         ScriptEngine(ZestDB& db, std::filesystem::path scriptsDir);
         ~ScriptEngine();
 

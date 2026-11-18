@@ -861,6 +861,7 @@ TEST_CASE_METHOD(ExamplesFixture, "example validation", "[scripts][examples]") {
     REQUIRE(db->execCmd(std::format("s note:2 \"{}\"", std::string(281, 'x'))).code == ResultType::Code::TriggerRejected);
 
     call(R"(s config:app "v1")");
+    REQUIRE(db->execCmd(R"(s config:app "v2")", Role::Write, true, "bob").code == ResultType::Code::TriggerRejected);
     REQUIRE(db->execCmd("d config:app").code == ResultType::Code::TriggerRejected);
     REQUIRE(call("g config:app") == "v1");
 }
@@ -872,7 +873,10 @@ TEST_CASE_METHOD(ExamplesFixture, "example audit", "[scripts][examples]") {
     REQUIRE(call("call order_stats") == "written=2 deleted=1 live=1");
     REQUIRE(call("g stats:orders:last") == "order:2");
     REQUIRE(std::stoi(call("ttl audit:order:1")) > 0);
-    REQUIRE(call(R"(call order_history "5")") == "2: order:2 = 1 salad\n1: order:1 = 2 pizzas");
+    REQUIRE(call(R"(call order_history "5")") == "2: order:2 = 1 salad by admin\n1: order:1 = 2 pizzas by admin");
+
+    REQUIRE(db->execCmd(R"(s order:3 "soup")", Role::Write, true, "bob").code == ResultType::Code::Success);
+    REQUIRE(call("g audit:order:3") == "order:3 = soup by bob");
 }
 
 TEST_CASE_METHOD(ExamplesFixture, "example secondary_index", "[scripts][examples]") {
@@ -1038,6 +1042,11 @@ TEST_CASE_METHOD(ScriptFixture, "limits return a message saying which limit was 
             local t = {}
             for i = 1, 1e9 do t[i] = string.rep("x", 1024) end
         end)
+        zest.register_function("alloc", function()
+            local t = {}
+            for i = 1, 10240 do t[i] = string.rep("y", 1024) end
+            return #t
+        end)
         zest.register_trigger{ name = "ping", phase = "after", event = "set", mode = "sw", pattern = "loop:",
             fn = function(key, value) zest.set(key, tostring(tonumber(value) + 1)) end }
     )lua").code == ResultType::Code::Success);
@@ -1049,8 +1058,10 @@ TEST_CASE_METHOD(ScriptFixture, "limits return a message saying which limit was 
     auto hog = db->execCmd("call hog");
     REQUIRE(hog.code == ResultType::Code::ScriptLimitExceeded);
     REQUIRE(contains(hog.response, "not enough memory"));
+    REQUIRE(db->execCmd("call alloc").response == "10240");
 
     auto loop = db->execCmd(R"(s loop:1 "0")");
+    INFO(loop.response);
     REQUIRE(loop.code == ResultType::Code::ScriptLimitExceeded);
     REQUIRE(contains(loop.response, "nested more than 16 levels"));
 }
@@ -1087,4 +1098,72 @@ TEST_CASE_METHOD(ScriptFixture, "an error inside an after trigger is returned wi
     REQUIRE(r.code == ResultType::Code::ScriptError);
     REQUIRE(contains(r.response, "audit store unavailable"));
     REQUIRE(db->execCmd("g o:1").response == "x");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "zest.caller gives the user and role that sent the command", "[scripts][caller]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_function("who", function()
+            local caller = zest.caller()
+            if caller == nil then return "none" end
+            return (caller.user or "-") .. ":" .. caller.role
+        end)
+    )lua").code == ResultType::Code::Success);
+
+    REQUIRE(db->execCmd("call who", Role::Write, true, "alice").response == "alice:write");
+    REQUIRE(db->execCmd("call who", Role::Admin, true, "root").response == "root:admin");
+    REQUIRE(db->execCmd("call who").response == "-:admin");
+    REQUIRE(db->call("who", {}).response == "none");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "zest.caller is the client in triggers too, and is reset after the command", "[scripts][caller]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_trigger{ name = "stamp", phase = "after", event = "set", mode = "sw", pattern = "doc:",
+            fn = function(key, value)
+                local caller = zest.caller()
+                zest.set("by:" .. key, caller and (caller.user or caller.role) or "server")
+            end }
+        zest.register_trigger{ name = "admin_only", phase = "before", event = "set", mode = "sw", pattern = "admin:",
+            fn = function(key, value)
+                local caller = zest.caller()
+                if caller ~= nil and caller.role ~= "admin" then error("admins only") end
+                return value
+            end }
+    )lua").code == ResultType::Code::Success);
+
+    REQUIRE(db->execCmd(R"(s doc:1 "x")", Role::Write, true, "bob").code == ResultType::Code::Success);
+    REQUIRE(db->get("by:doc:1").response == "bob");
+
+    REQUIRE(db->set("doc:2", "y").code == ResultType::Code::Success);
+    REQUIRE(db->get("by:doc:2").response == "server");
+
+    auto denied = db->execCmd(R"(s admin:k "v")", Role::Write, true, "bob");
+    REQUIRE(denied.code == ResultType::Code::TriggerRejected);
+    REQUIRE(denied.response.find("admins only") != std::string::npos);
+    REQUIRE(db->execCmd(R"(s admin:k "v")", Role::Admin, true, "root").code == ResultType::Code::Success);
+}
+
+TEST_CASE_METHOD(ScriptFixture, "zest.caller is not available while a script loads", "[scripts][caller]") {
+    auto r = load("lib", "local c = zest.caller()");
+    REQUIRE(r.code == ResultType::Code::ScriptError);
+    REQUIRE(r.response.find("cannot be called while the script loads") != std::string::npos);
+}
+
+TEST_CASE_METHOD(ScriptFixture, "zest.caller is per thread", "[scripts][caller]") {
+    REQUIRE(load("lib", R"lua(zest.register_function("who", function() local c = zest.caller() return c and c.user or "none" end))lua").code == ResultType::Code::Success);
+
+    std::vector<std::future<bool>> futures;
+    for (int t = 0; t < 4; t++) {
+        futures.push_back(std::async(std::launch::async, [this, t]() {
+            const std::string user = "user" + std::to_string(t);
+            for (int i = 0; i < 100; i++) {
+                if (db->execCmd("call who", Role::Write, true, user).response != user) {
+                    return false;
+                }
+            }
+            return true;
+        }));
+    }
+    for (auto& f : futures) {
+        REQUIRE(f.get());
+    }
 }

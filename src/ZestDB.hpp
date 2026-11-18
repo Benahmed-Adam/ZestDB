@@ -67,7 +67,7 @@ namespace Zest {
 
         CreationValidationRuleResult createValidationRule(std::string_view mode, std::string_view pattern) const;
 
-        ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true);
+        ResultType execCmd(const std::string& command, Role role = Role::Admin, bool syncWal = true, const std::string& user = "");
         bool syncWAL();
         bool validateToken(const std::string& username, const std::string& token) const;
         std::optional<Role> authenticate(const std::string& username, const std::string& token) const;

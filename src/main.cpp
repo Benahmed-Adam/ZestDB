@@ -45,7 +45,7 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
             break;
         } else {
             try {
-                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line)) << std::endl;
+                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line, Zest::Role::Admin, true, "ZestLocalAdmin")) << std::endl;
             } catch (const std::exception& e) {
                 Zest::ZestLog(Zest::LogLevel::Error, std::format("Command failed with an exception: {}", e.what()));
             }

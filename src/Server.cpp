@@ -197,7 +197,7 @@ namespace Zest {
         }
 
         try {
-            return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false));
+            return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false, this->username_));
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("Session: command failed with an exception: {}", e.what()));
             return ZestDB::responseToJson({ ResultType::Code::InternalError });

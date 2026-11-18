@@ -236,3 +236,15 @@ TEST_CASE_METHOD(SessionFixture, "Session locks a user out after repeated failed
     Client other;
     REQUIRE(login(other, "reader", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
+
+TEST_CASE_METHOD(SessionFixture, "Session passes its user and role to the scripts", "[session][scripts]") {
+    REQUIRE(db->loadScript("who", "zest.register_function('who', function() local c = zest.caller() return c.user .. ':' .. c.role end)").code == ResultType::Code::Success);
+
+    Client writer;
+    REQUIRE(login(writer, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(writer.send("call who").find("\"response\":\"bob:write\"") != std::string::npos);
+
+    Client admin;
+    REQUIRE(login(admin, "root", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(admin.send("call who").find("\"response\":\"root:admin\"") != std::string::npos);
+}

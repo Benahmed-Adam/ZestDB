@@ -1298,7 +1298,8 @@ namespace Zest {
         return parseNumber(word, expiresAt) && expiresAt != 0;
     }
 
-    ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal) {
+    ResultType ZestDB::execCmd(const std::string& command, Role role, bool syncWal, const std::string& user) {
+        ScriptEngine::CallerScope caller(user, role);
         std::string_view sv(command);
         auto start = sv.find_first_not_of(" \t\r\n");
         if (start == std::string_view::npos) {

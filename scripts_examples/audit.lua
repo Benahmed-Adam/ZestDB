@@ -18,8 +18,11 @@ zest.register_trigger{
     fn = function(key, value)
         local n = zest.incr("stats:orders:written")
         zest.set("stats:orders:last", key)
+        -- who made the change: the user name, or the role for a client without one
+        local caller = zest.caller()
+        local who = caller and (caller.user or caller.role) or "server"
         -- one entry per write, kept a week: the TTL cleans the trail without a job
-        zest.set("audit:order:" .. n, key .. " = " .. value, WEEK)
+        zest.set("audit:order:" .. n, key .. " = " .. value .. " by " .. who, WEEK)
     end,
 }
 
