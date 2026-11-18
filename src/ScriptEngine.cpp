@@ -25,7 +25,7 @@ namespace Zest {
         constexpr int HOOK_STEP = 1000;
         constexpr size_t MAX_MEMORY = size_t{ 64 } << 20;
         constexpr int MAX_DEPTH = 16;
-        constexpr const char* LIMIT_MARK = "ZEST_LIMIT";
+        constexpr const char* LIMIT_MARK = "script limit reached";
 
         std::atomic<uint64_t> nextEngineId{ 1 };
 
@@ -56,23 +56,23 @@ namespace Zest {
             Limits* limits = *static_cast<Limits**>(lua_getextraspace(L));
             limits->instructions += static_cast<uint64_t>(HOOK_STEP);
             if (limits->instructions > MAX_INSTRUCTIONS) {
-                luaL_error(L, "%s: instruction limit reached", LIMIT_MARK);
+                luaL_error(L, "%s: too many instructions", LIMIT_MARK);
             }
         }
 
         [[noreturn]] void fail(const ResultType& result) {
             if (result.code == ResultType::Code::ScriptLimitExceeded) {
-                throw std::runtime_error(LIMIT_MARK);
+                throw std::runtime_error(result.response.empty() ? std::string(LIMIT_MARK) : result.response);
             }
-            throw std::runtime_error(std::format("zest: the command failed with code {}", static_cast<int>(result.code)));
+            throw std::runtime_error(std::format("the command failed with code {}{}", static_cast<int>(result.code), result.response.empty() ? "" : ": " + result.response));
         }
 
-        ResultType::Code failureCode(sol::protected_function_result& result, ResultType::Code fallback, std::string_view what) {
+        ResultType failure(sol::protected_function_result& result, ResultType::Code fallback, std::string_view what) {
             const bool outOfMemory = result.status() == sol::call_status::memory;
             const sol::error err = result.get<sol::error>();
-            const std::string message = err.what();
+            const std::string message = outOfMemory ? std::format("{}: not enough memory", LIMIT_MARK) : err.what();
             ZestLog(LogLevel::Debug, std::format("Script {}: {}", what, message));
-            return outOfMemory || message.find(LIMIT_MARK) != std::string::npos ? ResultType::Code::ScriptLimitExceeded : fallback;
+            return { outOfMemory || message.find(LIMIT_MARK) != std::string::npos ? ResultType::Code::ScriptLimitExceeded : fallback, message };
         }
 
         bool conflicts(const std::vector<std::string>& taken, const std::vector<std::string>& added) {
@@ -206,14 +206,14 @@ namespace Zest {
 
     ResultType ScriptEngine::load(const std::string& name, const std::string& code) {
         if (!isValidName(name)) {
-            return { ResultType::Code::ScriptError };
+            return { ResultType::Code::ScriptError, "invalid script name: use 1 to 64 letters, digits, _ or -" };
         }
         return this->install(name, code, true);
     }
 
     ResultType ScriptEngine::reloadFile(const std::string& name) {
         if (!isValidName(name)) {
-            return { ResultType::Code::ScriptError };
+            return { ResultType::Code::ScriptError, "invalid script name: use 1 to 64 letters, digits, _ or -" };
         }
         std::ifstream in(this->scriptsDir / (name + ".lua"), std::ios::binary);
         if (!in) {
@@ -233,8 +233,7 @@ namespace Zest {
 
         std::unique_lock<std::shared_mutex> lock(this->registryMtx);
         if (conflicts(names(this->registry.functions, name), names(added.functions)) || conflicts(names(this->registry.triggers, name), names(added.triggers))) {
-            ZestLog(LogLevel::Debug, std::format("Script {}: registers a name another script already uses", name));
-            return { ResultType::Code::ScriptError };
+            return { ResultType::Code::ScriptError, std::format("{} registers a function or trigger name another script already uses", name) };
         }
 
         if (writeFile) {
@@ -321,27 +320,26 @@ namespace Zest {
 
         LuaContext::Scope scope(ctx);
         if (!scope.ok) {
-            return { ResultType::Code::ScriptLimitExceeded };
+            return { ResultType::Code::ScriptLimitExceeded, std::format("{}: scripts nested more than {} levels", LIMIT_MARK, MAX_DEPTH) };
         }
         for (const std::string& name : matching) {
             auto it = ctx.triggers.find(name);
             if (it == ctx.triggers.end()) {
-                return { ResultType::Code::ScriptError };
+                return { ResultType::Code::ScriptError, std::format("trigger {} is not loaded", name) };
             }
             if (event == TriggerEvent::Del) {
                 sol::protected_function_result result = it->second(key);
                 if (!result.valid()) {
-                    return { failureCode(result, ResultType::Code::TriggerRejected, name) };
+                    return failure(result, ResultType::Code::TriggerRejected, name);
                 }
                 continue;
             }
             sol::protected_function_result result = it->second(key, value);
             if (!result.valid()) {
-                return { failureCode(result, ResultType::Code::TriggerRejected, name) };
+                return failure(result, ResultType::Code::TriggerRejected, name);
             }
             if (result.get_type() != sol::type::string) {
-                ZestLog(LogLevel::Debug, std::format("Script {}: a before set trigger must return the value to write", name));
-                return { ResultType::Code::ScriptError };
+                return { ResultType::Code::ScriptError, std::format("trigger {} must return the value to write", name) };
             }
             value = result.get<std::string>();
         }
@@ -360,16 +358,16 @@ namespace Zest {
 
         LuaContext::Scope scope(ctx);
         if (!scope.ok) {
-            return { ResultType::Code::ScriptLimitExceeded };
+            return { ResultType::Code::ScriptLimitExceeded, std::format("{}: scripts nested more than {} levels", LIMIT_MARK, MAX_DEPTH) };
         }
         for (const std::string& name : matching) {
             auto it = ctx.triggers.find(name);
             if (it == ctx.triggers.end()) {
-                return { ResultType::Code::ScriptError };
+                return { ResultType::Code::ScriptError, std::format("trigger {} is not loaded", name) };
             }
             sol::protected_function_result result = event == TriggerEvent::Set ? it->second(key, value) : it->second(key);
             if (!result.valid()) {
-                return { failureCode(result, ResultType::Code::ScriptError, name) };
+                return failure(result, ResultType::Code::ScriptError, name);
             }
         }
         return { ResultType::Code::Success };
@@ -384,11 +382,11 @@ namespace Zest {
 
         LuaContext::Scope scope(ctx);
         if (!scope.ok) {
-            return { ResultType::Code::ScriptLimitExceeded };
+            return { ResultType::Code::ScriptLimitExceeded, std::format("{}: scripts nested more than {} levels", LIMIT_MARK, MAX_DEPTH) };
         }
         sol::protected_function_result result = it->second(sol::as_args(args));
         if (!result.valid()) {
-            return { failureCode(result, ResultType::Code::ScriptError, name) };
+            return failure(result, ResultType::Code::ScriptError, name);
         }
 
         std::string response;
@@ -423,7 +421,7 @@ namespace Zest {
         for (const auto& [name, code] : sources) {
             sol::protected_function_result result = ctx->run(name, code);
             if (!result.valid()) {
-                static_cast<void>(failureCode(result, ResultType::Code::ScriptError, name));
+                static_cast<void>(failure(result, ResultType::Code::ScriptError, name));
             }
         }
         ctx->mode = LuaContext::Mode::Run;
@@ -439,7 +437,7 @@ namespace Zest {
 
         sol::protected_function_result result = ctx.run(name, code);
         if (!result.valid()) {
-            return { failureCode(result, ResultType::Code::ScriptError, name) };
+            return failure(result, ResultType::Code::ScriptError, name);
         }
         out.scripts[name] = code;
         return { ResultType::Code::Success };

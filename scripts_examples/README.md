@@ -57,6 +57,12 @@ While a file is being loaded, it may only call `register_function` and `register
 
 A failed call (read-only mode, invalid key, value too large...) raises a Lua error. You can catch it with `pcall`.
 
+When a script stops on an error, the command fails with `600`, `603` or `604`, and `response` holds the error message, with its file and line:
+
+```json
+{"affectedRows":0,"code":603,"response":"validation.lua:24: invalid email for email:2"}
+```
+
 ## Triggers
 
 | Trigger | Receives | Effect |

@@ -1,6 +1,6 @@
 # Return codes
 
-Every response carries a numeric `code`: `0` on success, otherwise one of the error codes below. On an error, `response` is always empty.
+Every response carries a numeric `code`: `0` on success, otherwise one of the error codes below. On an error, `response` is empty, except for the script errors `600`, `603` and `604`, where it holds the Lua error message (for example `lib.lua:3: JSON expected`).
 
 ```json
 {"affectedRows":0,"code":200,"response":""}
@@ -93,7 +93,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | Code | Name | Meaning |
 | ---: | --- | --- |
 | 600 | `ScriptError` | A script could not be loaded (syntax error, invalid `register_function` / `register_trigger` call, duplicate name) or raised an error while running. |
-| 601 | `ScriptNotFound` | `script del`: no script has this name. |
+| 601 | `ScriptNotFound` | `script del` / `script reload`: no script has this name. |
 | 602 | `FunctionNotFound` | `call`: no registered function has this name. |
 | 603 | `TriggerRejected` | A `before` trigger rejected the write; nothing was written. |
 | 604 | `ScriptLimitExceeded` | A script exceeded its instruction, memory or trigger-recursion limit. |

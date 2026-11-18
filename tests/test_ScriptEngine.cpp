@@ -808,8 +808,6 @@ TEST_CASE_METHOD(ScriptFixture, "script reload of an empty folder unloads everyt
     REQUIRE(db->execCmd("call f").code == ResultType::Code::FunctionNotFound);
 }
 
-// ---------------------------------------------------------------- scripts_examples
-
 class ExamplesFixture : public ScriptFixture {
 public:
     ExamplesFixture() {
@@ -970,4 +968,123 @@ TEST_CASE_METHOD(ExamplesFixture, "example maintenance", "[scripts][examples]") 
     REQUIRE(call(R"(call rename_key "invoice:42" "invoice:43")") == "renamed");
     REQUIRE(db->execCmd("g invoice:42").code == ResultType::Code::KeyNotFound);
     REQUIRE(db->execCmd(R"(call rename_key "template:invoice" "invoice:43")").code == ResultType::Code::ScriptError);
+}
+
+static bool contains(const std::string& text, const std::string& part) {
+    return text.find(part) != std::string::npos;
+}
+
+TEST_CASE_METHOD(ScriptFixture, "a failing function returns its error message", "[scripts][errors]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_function("boom", function() error("kaboom") end)
+        zest.register_function("ok", function() return "fine" end)
+    )lua").code == ResultType::Code::Success);
+
+    auto r = db->execCmd("call boom");
+    REQUIRE(r.code == ResultType::Code::ScriptError);
+    INFO(r.response);
+    REQUIRE(contains(r.response, "lib.lua:2:"));
+    REQUIRE(contains(r.response, "kaboom"));
+    REQUIRE(contains(ZestDB::responseToJson(r), "kaboom"));
+
+    REQUIRE(db->execCmd("call ok").response == "fine");
+}
+
+TEST_CASE_METHOD(ScriptFixture, "a rejecting trigger returns its error message", "[scripts][errors]") {
+    REQUIRE(load("json", R"lua(
+        zest.register_trigger{ name = "user_json", phase = "before", event = "set", mode = "sw", pattern = "user:",
+            fn = function(key, value) error("JSON expected for " .. key) end }
+        zest.register_trigger{ name = "no_string", phase = "before", event = "set", mode = "sw", pattern = "num:",
+            fn = function(key, value) return 42 end }
+    )lua").code == ResultType::Code::Success);
+
+    auto rejected = db->execCmd(R"(s user:1 "plain")");
+    REQUIRE(rejected.code == ResultType::Code::TriggerRejected);
+    INFO(rejected.response);
+    REQUIRE(contains(rejected.response, "JSON expected for user:1"));
+
+    auto notString = db->execCmd(R"(s num:1 "1")");
+    REQUIRE(notString.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(notString.response, "no_string must return the value to write"));
+}
+
+TEST_CASE_METHOD(ScriptFixture, "a failure deep in nested calls keeps the original message", "[scripts][errors]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_trigger{ name = "no_neg", phase = "before", event = "set", mode = "sw", pattern = "acc:",
+            fn = function(key, value)
+                if tonumber(value) < 0 then error("negative balance") end
+                return value
+            end }
+        zest.register_function("put", function(key, value) zest.set(key, value) end)
+        zest.register_function("write", function() zest.set("k", "v") end)
+    )lua").code == ResultType::Code::Success);
+
+    auto nested = db->execCmd(R"(call put "acc:1" "-5")");
+    REQUIRE(nested.code == ResultType::Code::ScriptError);
+    INFO(nested.response);
+    REQUIRE(contains(nested.response, "code 603"));
+    REQUIRE(contains(nested.response, "negative balance"));
+
+    REQUIRE(db->execCmd("scfg readonly true").code == ResultType::Code::Success);
+    auto readOnly = db->execCmd("call write");
+    REQUIRE(readOnly.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(readOnly.response, "code 303"));
+}
+
+TEST_CASE_METHOD(ScriptFixture, "limits return a message saying which limit was reached", "[scripts][errors]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_function("spin", function() while true do end end)
+        zest.register_function("hog", function()
+            local t = {}
+            for i = 1, 1e9 do t[i] = string.rep("x", 1024) end
+        end)
+        zest.register_trigger{ name = "ping", phase = "after", event = "set", mode = "sw", pattern = "loop:",
+            fn = function(key, value) zest.set(key, tostring(tonumber(value) + 1)) end }
+    )lua").code == ResultType::Code::Success);
+
+    auto spin = db->execCmd("call spin");
+    REQUIRE(spin.code == ResultType::Code::ScriptLimitExceeded);
+    REQUIRE(contains(spin.response, "too many instructions"));
+
+    auto hog = db->execCmd("call hog");
+    REQUIRE(hog.code == ResultType::Code::ScriptLimitExceeded);
+    REQUIRE(contains(hog.response, "not enough memory"));
+
+    auto loop = db->execCmd(R"(s loop:1 "0")");
+    REQUIRE(loop.code == ResultType::Code::ScriptLimitExceeded);
+    REQUIRE(contains(loop.response, "nested more than 16 levels"));
+}
+
+TEST_CASE_METHOD(ScriptFixture, "load errors return their message", "[scripts][errors]") {
+    auto syntax = load("bad", "zest.register_function(\"f\", function() return end");
+    REQUIRE(syntax.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(syntax.response, "bad.lua:1:"));
+
+    auto loading = load("side", R"lua(zest.set("k", "v"))lua");
+    REQUIRE(loading.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(loading.response, "cannot be called while the script loads"));
+
+    auto definition = load("trg", R"lua(zest.register_trigger{ name = "t", phase = "before", event = "set", mode = "sw", fn = function(k, v) return v end })lua");
+    REQUIRE(definition.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(definition.response, "mode and pattern go together"));
+
+    REQUIRE(load("a", R"lua(zest.register_function("f", function() end))lua").code == ResultType::Code::Success);
+    auto duplicate = load("b", R"lua(zest.register_function("f", function() end))lua");
+    REQUIRE(duplicate.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(duplicate.response, "already uses"));
+
+    REQUIRE(contains(load("../x", "").response, "invalid script name"));
+    REQUIRE(contains(load("spin", "while true do end").response, "too many instructions"));
+}
+
+TEST_CASE_METHOD(ScriptFixture, "an error inside an after trigger is returned with the write already done", "[scripts][errors]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_trigger{ name = "audit", phase = "after", event = "set", mode = "sw", pattern = "o:",
+            fn = function(key, value) error("audit store unavailable") end }
+    )lua").code == ResultType::Code::Success);
+
+    auto r = db->execCmd(R"(s o:1 "x")");
+    REQUIRE(r.code == ResultType::Code::ScriptError);
+    REQUIRE(contains(r.response, "audit store unavailable"));
+    REQUIRE(db->execCmd("g o:1").response == "x");
 }
