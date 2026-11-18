@@ -93,6 +93,16 @@ TEST_CASE_METHOD(ScriptFixture, "script load writes the file under DbPath/script
     REQUIRE(fs::is_regular_file(testDir / "db" / "scripts" / "lib.lua"));
 }
 
+TEST_CASE_METHOD(ScriptFixture, "the scripts folder is created at startup", "[scripts]") {
+    REQUIRE(fs::is_directory(testDir / "db" / "scripts"));
+
+    db->stop();
+    delete db;
+    fs::remove_all(testDir / "db" / "scripts");
+    db = new ZestDB();
+    REQUIRE(fs::is_directory(testDir / "db" / "scripts"));
+}
+
 TEST_CASE_METHOD(ScriptFixture, "script load rejects a syntax error and changes nothing", "[scripts]") {
     REQUIRE(load("bad", "zest.register_function(\"f\", function() return end").code == ResultType::Code::ScriptError);
     REQUIRE_FALSE(fs::exists(testDir / "db" / "scripts" / "bad.lua"));
@@ -987,8 +997,7 @@ TEST_CASE_METHOD(ScriptFixture, "a failing function returns its error message", 
     auto r = db->execCmd("call boom");
     REQUIRE(r.code == ResultType::Code::ScriptError);
     INFO(r.response);
-    REQUIRE(contains(r.response, "lib.lua:2:"));
-    REQUIRE(contains(r.response, "kaboom"));
+    REQUIRE(r.response == "lib.lua:2: kaboom");
     REQUIRE(contains(ZestDB::responseToJson(r), "kaboom"));
 
     REQUIRE(db->execCmd("call ok").response == "fine");
