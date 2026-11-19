@@ -9,5 +9,5 @@
 | [Return codes](return-codes.md) | Every response code and its meaning |
 | [Operations](operations.md) | Running the server, Docker, archives and restore, HTTP monitoring, logging |
 | [Architecture](architecture.md) | Layers, threads, sharding, storage, index, cache, WAL, on-disk formats |
-| [Building and testing](building.md) | Requirements, dependencies, build on Linux and Windows, tests, CI, project structure |
+| [Building and testing](building.md) | Requirements, dependencies, build on Linux and Windows, tests, CI, branches and rulesets, project structure |
 | [Benchmarks](benchmarks.md) | How to run the benchmarks, full results and analysis |

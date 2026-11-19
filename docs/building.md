@@ -87,8 +87,33 @@ Uses `clang-format` with the provided `.clang-format` configuration.
 
 ## Continuous integration
 
-- `c-cpp.yml` (workflow `CI`) runs on every push and pull request to `main`: build and tests on Linux and on Windows (MSVC). On pull requests it then checks that the Docker image builds.
-- `docker.yml` runs once `CI` passes on a push to `main` (a direct commit or a merged pull request), and builds the image once and pushes it to Docker Hub. It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
+- `c-cpp.yml` (workflow `CI`) runs on every push to `main` and `dev`, and on every pull request into them.
+  - The jobs `build` and `build-windows` build and test on Linux and on Windows (MSVC).
+  - On pull requests, the job `docker` then checks that the image builds.
+  - A new push to a pull request cancels the run of its previous commit.
+- `docker.yml` runs once `CI` passes on a push to `main` or `dev` (a merged pull request), builds the image once and pushes it to Docker Hub:
+  - from `main`: `latest` and `sha-<commit>`;
+  - from `dev`: `dev` and `dev-sha-<commit>`.
+
+  It needs the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
+
+## Branches
+
+The project follows gitflow:
+
+| Branch | Role | Receives pull requests from |
+| --- | --- | --- |
+| `main` | Released code; each merge publishes `latest` | `release/*` and `hotfix/*` branches (or `dev`) |
+| `dev` | Integration of the next release; each merge publishes `dev` | feature branches, and `main` after a hotfix |
+| anything else | Work in progress, no rules | |
+
+`main` and `dev` are protected by two repository rulesets:
+- no direct push: every change goes through a pull request (no approval required);
+- the checks `build`, `build-windows` and `docker` must pass;
+- review threads must be resolved;
+- no force-push, no deletion.
+
+Into `main`, the branch must be up to date with `main` and only merge commits are allowed. This keeps `main` and `dev` sharing their history, which squashing would break. Into `dev`, merge commits and squash merges are both allowed.
 
 ## Project structure
 

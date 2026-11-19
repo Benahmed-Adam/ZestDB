@@ -22,7 +22,7 @@ A client that loses its connection without a reply cannot know whether its last 
 
 ## Docker
 
-An image is published on Docker Hub as `benahmedadam/zestdb` (`latest`, and `sha-<commit>` for each commit on `main`). To build it locally: `docker build -t zestdb .` The Docker Hub page is [`docker/README.md`](../docker/README.md): update it with the image.
+An image is published on Docker Hub as `benahmedadam/zestdb`: `latest` and `sha-<commit>` for each merge into `main`, `dev` and `dev-sha-<commit>` for each merge into `dev`. To build it locally: `docker build -t zestdb .` The Docker Hub page is [`docker/README.md`](../docker/README.md): update it with the image.
 ```bash
 docker run -it -p 7321:7321 -p 1237:1237 \
   -v zestdb-data:/data/db -v zestdb-archive:/data/archive \
