@@ -9,6 +9,7 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
+/// Demo load started by `zestdb pop`: writes one million keys (`key_<i>` = `val_<i>`) and logs how long it took.
 void populate(Zest::ZestDB* db) {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -22,6 +23,8 @@ void populate(Zest::ZestDB* db) {
     Zest::ZestLog(Zest::LogLevel::Info, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
+/// The interactive console: reads commands from stdin and runs them as the admin user `ZestLocalAdmin`.
+/// `q` / `quit` stops the database; end of input (Ctrl+D, a closed pipe) leaves the loop.
 void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard) {
     std::string line;
     while (db->isRunning()) {
@@ -53,9 +56,12 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
     }
 }
 
+/// Starts the database, the console, the signal handler and the HTTP stats server.
+/// Threads: the console reads stdin, `ioThread` runs the signal handler, and the main thread serves HTTP until stop().
 int main(int argc, char** argv) {
     Zest::ZestDB db;
 
+    // Keeps ioThread's run() alive while nothing else is queued; released on exit
     auto work = asio::make_work_guard(db.ioCtx);
 
     asio::signal_set signals(db.ioCtx, SIGINT, SIGTERM);

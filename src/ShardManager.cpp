@@ -65,6 +65,8 @@ namespace Zest {
     }
 
     ResultType ShardManager::getBy(ValidationRule& valid) {
+        // The shards share this counter to respect the limit together; it lives on this stack frame, which outlives
+        // every task since the futures are all waited for below
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -76,6 +78,7 @@ namespace Zest {
             futures.push_back(threadPool->enqueue([rawShard, &valid]() { return rawShard->getBy(valid); }));
         }
 
+        // Each shard returns a JSON array: concatenate their contents rather than parsing and re-serialising them
         std::string merged = "[";
         long long totalMatches = 0;
         for (auto& f : futures) {
@@ -113,6 +116,8 @@ namespace Zest {
     }
 
     ResultType ShardManager::setBy(ValidationRule& valid, const std::string& value) {
+        // With a limit, the parallel path would pick whichever keys each shard scans first, which differs from run to run.
+        // The WAL logs this command as is, so the replay must touch the same keys: take the `limit` smallest ones.
         if (valid.limit != UINT_MAX) {
             long long updated = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
@@ -258,6 +263,7 @@ namespace Zest {
             allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }
 
+        // The sequence numbers are global: sorting merges the shards back into the order the writes happened
         std::stable_sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.seq < b.seq; });
         if (!allWalEntries.empty()) {
             WAL::advanceSequence(allWalEntries.back().seq + 1);

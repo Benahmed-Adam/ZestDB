@@ -29,6 +29,8 @@ namespace Zest {
 
     using json = nlohmann::json;
 
+    /// Copies the first `size` bytes of `from` to `to`. Used by archiving: the files keep growing while they are copied,
+    /// and only the part that was flushed when the snapshot was taken is consistent.
     static bool copyPrefix(const fs::path& from, const fs::path& to, std::uintmax_t size) {
         std::ifstream in(from, std::ios::binary);
         std::ofstream out(to, std::ios::binary | std::ios::trunc);
@@ -138,6 +140,7 @@ namespace Zest {
                 }
             }
 
+            // After a restart, wait only for what is left of the delay since the most recent archive
             if (most_recent_time.has_value()) {
                 auto most_recent_system = std::chrono::clock_cast<std::chrono::system_clock>(*most_recent_time);
 
@@ -252,11 +255,13 @@ namespace Zest {
         }
     }
 
+    /// Value of `key` in the YAML node, or `def` when it is absent or null.
     template <typename T>
     static T getOr(fkyaml::node& node, const std::string& key, T def) {
         return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : def;
     }
 
+    /// `read`, `write` or `admin` as a Role, nullopt for anything else.
     static std::optional<Role> parseRole(const std::string& name) {
         if (name == "read") {
             return Role::Read;
@@ -500,6 +505,7 @@ namespace Zest {
         return j.dump(-1, ' ', false, json::error_handler_t::replace);
     }
 
+    /// Clears `flag` when it goes out of scope, on every return path (the `archiving` flag of save and restore).
     struct ResetFlag {
         std::atomic<bool>& flag;
 
@@ -547,6 +553,8 @@ namespace Zest {
                     if (it->is_regular_file()) {
                         fs::path target = snapshot / fs::relative(it->path(), folder_to_zip);
                         fs::create_directories(target.parent_path());
+                        // The WALs were just cleared by the flush, so they are copied now; the other files are only
+                        // appended to, so recording their size here is enough to copy a consistent state after unlocking
                         if (it->path().filename() == "WAL") {
                             fs::copy_file(it->path(), target);
                         } else {
@@ -612,6 +620,10 @@ namespace Zest {
         }
     }
 
+    /// Extracts the `shards/` entries of an archive under `target`. Refuses archives with an absolute path or a `..`
+    /// entry (zip slip), so nothing is written outside `target`. The WAL files are created empty: an archive is taken
+    /// right after a flush, and a non-empty WAL is not replayed.
+    /// @return Success, InvalidArchive (unreadable, no shard data, unsafe entry) or RestoreFailed (write error).
     static ResultType::Code extractShards(const fs::path& archivePath, const fs::path& target) {
         libzippp::ZipArchive archive(archivePath.string());
         if (!archive.open(libzippp::ZipArchive::ReadOnly)) {
@@ -650,6 +662,8 @@ namespace Zest {
         return files > 0 ? ResultType::Code::Success : ResultType::Code::InvalidArchive;
     }
 
+    /// Replaces the `live` shards folder by `restored` with two renames, keeping the old one as `previous`.
+    /// If the second rename fails, the old folder is put back. @return true if `restored` is now live.
     static bool swapShards(const fs::path& live, const fs::path& restored, const fs::path& previous) {
         std::error_code ec;
         fs::remove_all(previous, ec);
@@ -888,6 +902,7 @@ namespace Zest {
         return { ResultType::Code::Success };
     }
 
+    /// `value` between double quotes with `"` and `\` escaped: the form a command (and so a WAL record) expects.
     static std::string quoteValue(std::string_view value) {
         std::string out = "\"";
         for (char c : value) {
@@ -900,6 +915,7 @@ namespace Zest {
         return out;
     }
 
+    /// The WAL record of a write: `s key "value"`, or `setexat key <ms> "value"` when it has an expiry date.
     static std::string setCommand(const std::string& key, const std::string& value, uint64_t expiresAt) {
         return expiresAt != 0 ? std::format("setexat {} {} {}", key, expiresAt, quoteValue(value)) : std::format("s {} {}", key, quoteValue(value));
     }
@@ -1242,12 +1258,14 @@ namespace Zest {
         return this->shardManager->appendToWAL(key, command);
     }
 
+    /// ASCII lowercase copy of `str` (command names and modes are case-insensitive).
     std::string toLowerStr(std::string_view str) {
         std::string result(str);
         std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::tolower(c); });
         return result;
     }
 
+    /// Parses the whole of `str` as a number of type T; false on any extra character or overflow.
     template <typename T>
     static bool parseNumber(std::string_view str, T& out) {
         auto [end, ec] = std::from_chars(str.data(), str.data() + str.size(), out);
@@ -1259,6 +1277,8 @@ namespace Zest {
         return this->shardManager->syncWAL();
     }
 
+    /// Reads a quoted value starting at `pos` (spaces before it are skipped) into `out`, unescaping `\"` and `\\`.
+    /// On success `pos` is moved past the closing quote. False if there is no opening quote or no closing one.
     static bool readQuoted(std::string_view sv, size_t& pos, std::string& out) {
         pos = sv.find_first_not_of(" \t", pos);
         if (pos == std::string_view::npos || sv[pos] != '"') {
@@ -1278,15 +1298,19 @@ namespace Zest {
         return false;
     }
 
+    /// True if nothing but spaces and tabs follows `pos`.
     static bool onlySpacesFrom(std::string_view sv, size_t pos) {
         return sv.find_first_not_of(" \t", pos) == std::string_view::npos;
     }
 
+    /// Reads the quoted value that starts at `word` (a view into `sv`) and must end the command.
     static bool readLastValue(std::string_view sv, std::string_view word, std::string& out) {
         size_t pos = static_cast<size_t>(word.data() - sv.data());
         return readQuoted(sv, pos, out) && onlySpacesFrom(sv, pos);
     }
 
+    /// Parses a TTL into an absolute expiry date in ms: `relative` reads seconds from now (`setex`, `expire`),
+    /// otherwise a date in ms (`setexat`, `expireat`, the forms written to the WAL). Zero is refused.
     static bool parseTTL(std::string_view word, bool relative, uint64_t& expiresAt) {
         if (relative) {
             uint32_t seconds = 0;
@@ -1336,12 +1360,15 @@ namespace Zest {
             cmd = it->second;
         }
 
-        const bool isWrite = cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas" || cmd == "call";
+        const bool isWrite =
+            cmd == "s" || cmd == "d" || cmd == "sb" || cmd == "db" || cmd == "setex" || cmd == "setexat" || cmd == "expire" || cmd == "expireat" || cmd == "persist" || cmd == "incr" || cmd == "decr" || cmd == "setnx" || cmd == "cas" || cmd == "call";
         const bool isAdmin = cmd == "f" || cmd == "r" || cmd == "scfg" || cmd == "gcfg" || cmd == "save" || cmd == "restore" || cmd == "lsaves" || cmd == "script";
         if ((isWrite && role == Role::Read) || (isAdmin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
 
+        // `reload` and `scfg` replace the settings: no other command may run meanwhile. `flush`, `save` and `restore`
+        // take writeMtx themselves, exclusively, so they must not hold it already. Every other command shares it.
         std::shared_lock<std::shared_mutex> sharedLock(this->writeMtx, std::defer_lock);
         std::unique_lock<std::shared_mutex> uniqueLock(this->writeMtx, std::defer_lock);
         if (cmd == "r" || cmd == "scfg") {

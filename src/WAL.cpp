@@ -9,6 +9,7 @@
 
 namespace Zest {
 
+    // Shared by every shard: the sequence numbers order the records of all the WALs, so the replay can merge them
     static std::atomic<uint64_t> nextSeq{ 0 };
 
     WAL::WAL(Settings& set, const std::filesystem::path& walPath)
@@ -77,6 +78,7 @@ namespace Zest {
     }
 
     void WAL::advanceSequence(uint64_t next) {
+        // Atomic max: never move the counter backwards, even if another thread advanced it in the meantime
         uint64_t current = nextSeq.load();
         while (current < next && !nextSeq.compare_exchange_weak(current, next)) {
         }
@@ -99,6 +101,7 @@ namespace Zest {
         uint32_t size;
         uint64_t seq;
         while (this->wal.read(reinterpret_cast<char*>(&size), sizeof(size))) {
+            // A length past the end of the file is a record cut by a crash (or garbage): do not allocate it
             if (static_cast<std::streamoff>(size) > fileSize - this->wal.tellg()) {
                 ZestLog(LogLevel::Warning, "WAL::getCmds - Truncated record, stopping");
                 break;

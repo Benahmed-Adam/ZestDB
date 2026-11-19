@@ -69,6 +69,7 @@ namespace Zest {
 
         this->wal = std::make_unique<WAL>(this->settings, walPath);
 
+        // From here on, the shard's components see the shard folder as their DbPath (segments go to <shard>/seg)
         this->settings.DbPath = shardPath;
         this->settings.IndexPath = indexPath;
         this->settings.WalPath = walPath;
@@ -82,6 +83,7 @@ namespace Zest {
 
         ZestLog(LogLevel::Info, std::format("Shard {} initialized successfully", this->shardId));
 
+        // The cache is warmed on a separate thread while the compactor starts; the constructor still waits for it
         std::promise<void> cachePromise;
         std::future<void> cacheFuture = cachePromise.get_future();
 
@@ -132,6 +134,9 @@ namespace Zest {
             liveBytes[entry.segmentId] += entry.size;
         }
 
+        // A segment that is less than half live data is emptied: its live values are appended again to the current
+        // segment, and the old one is deleted below once nothing points to it. The current segment is never moved,
+        // since it is still being written to.
         const uint32_t current = this->storageManager->currentSegmentId();
         bool moved = false;
         for (auto& entry : entries) {
@@ -152,6 +157,8 @@ namespace Zest {
             moved = true;
         }
 
+        // The relocated copies and their index records must be on disk before the old segments are deleted,
+        // otherwise a crash would leave index entries pointing to a removed file
         if (moved && !(this->storageManager->flush() && this->indexManager->flush())) {
             ZestLog(LogLevel::Error, std::format("Shard {} - flush failed after relocating values, keeping the old segments", this->shardId));
             return;
@@ -246,6 +253,8 @@ namespace Zest {
     ResultType Shard::writeLocked(const std::string& key, const std::string& value, uint64_t expiresAt) {
         auto start = std::chrono::high_resolution_clock::now();
 
+        // The value goes to disk first, then the index points to it: a crash in between leaves an orphan value,
+        // never an index entry pointing to nothing
         IndexEntry entry = this->storageManager->append(value);
 
         if (entry.segmentId == INVALID_SEGMENT_ID) {
@@ -263,6 +272,7 @@ namespace Zest {
 
         this->indexManager->insert(entry);
 
+        // Only refresh a key that is already cached: writes must not evict the keys that are read often
         this->cache->update(entry, value);
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -324,6 +334,7 @@ namespace Zest {
         if (entry.expiresAt <= now) {
             return { ResultType::Code::Success, "-2", 0 };
         }
+        // Rounded up, so a key that still has a few milliseconds left reports 1 second rather than 0
         return { ResultType::Code::Success, std::to_string((entry.expiresAt - now + 999) / 1000), 1 };
     }
 
@@ -331,6 +342,7 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<IndexEntry> entries;
+        // The shards run in parallel and share globalMatchCount: stop scanning once the others already took the whole limit
         entries = this->indexManager->findMatching(valid.func, [&valid]() { return valid.limit != UINT_MAX && valid.globalMatchCount && valid.globalMatchCount->load() >= valid.limit; });
 
         nlohmann::json resultArray = nlohmann::json::array();
@@ -340,6 +352,7 @@ namespace Zest {
             if (entry.isTombstone || entry.segmentId == INVALID_SEGMENT_ID) {
                 continue;
             }
+            // Reserve one slot of the global limit; if another shard took the last one, give it back and stop
             if (valid.limit != UINT_MAX && valid.globalMatchCount) {
                 unsigned int prev = valid.globalMatchCount->fetch_add(1);
                 if (prev >= valid.limit) {
@@ -524,6 +537,7 @@ namespace Zest {
         auto start = std::chrono::high_resolution_clock::now();
         std::shared_lock<std::shared_mutex> lock(this->readMtx);
         std::vector<std::string> keys = this->indexManager->keys(valid.func);
+        // Keep the `limit` smallest keys in O(n) without sorting them all; ShardManager merges the shards and sorts the result
         if (keys.size() > valid.limit) {
             std::nth_element(keys.begin(), keys.begin() + valid.limit, keys.end());
             keys.resize(valid.limit);
@@ -545,6 +559,7 @@ namespace Zest {
     }
 
     void Shard::flush() {
+        // The WAL is only cleared once the data it protects is synced: a failed flush keeps it for the next replay
         if (this->flushData()) {
             this->wal->clear();
         }

@@ -74,6 +74,8 @@ namespace Zest {
 
         IndexEntry result = this->appendToSegment(seg, value);
 
+        // The segment was not full yet, but this value does not fit in what is left of it: start a new segment.
+        // A value is never split across two segments, so the end of the previous one stays unused.
         if (result.segmentId == INVALID_SEGMENT_ID) {
             ZestLog(LogLevel::Debug, std::format("StorageManager::append - segment {} full, creating new segment", seg->getSegmentId()));
             uint32_t nextId = this->latestSegmentId.load() + 1;

@@ -78,6 +78,7 @@ namespace Zest {
 
     void Session::drain() {
         this->draining_ = true;
+        // A request or the handshake is in progress: do_read_size() closes the session once it is answered
         if (!this->waitingForRequest_) {
             return;
         }
@@ -109,6 +110,8 @@ namespace Zest {
                         uint32_t payload_size;
                         is.read(reinterpret_cast<char*>(&payload_size), 4);
                         payload_size = ntohl(payload_size);
+                        // Checked before reading the payload, so a client cannot make the server allocate gigabytes
+                        // (the limit is lower before authentication)
                         if (payload_size > (this->authenticated_ ? MAX_PAYLOAD_SIZE : MAX_UNAUTHENTICATED_PAYLOAD_SIZE)) {
                             ZestLog(LogLevel::Warning, std::format("Session: payload of {} bytes refused", payload_size));
                             this->queue_write(ZestDB::responseToJson({ ResultType::Code::PayloadTooLarge }) + "\n", true);
@@ -169,6 +172,8 @@ namespace Zest {
                         final_result += cmd_result;
                     }
 
+                    // Group commit: every command of the batch appended to the WAL, one sync makes them all durable.
+                    // A batch is never acknowledged before its writes are on disk.
                     if (!this->db_.syncWAL()) {
                         ZestLog(LogLevel::Error, "Session: the WAL could not be written, closing without acknowledging the batch");
                         this->close_stream();
@@ -212,6 +217,8 @@ namespace Zest {
             return ZestDB::responseToJson({ ResultType::Code::Success });
         }
 
+        // The role is looked up on every command rather than kept from the login, so a `reload` that removes the user or
+        // changes its role applies to the open session at once
         std::optional<Role> role = this->db_.roleOf(this->username_);
         if (!role) {
             should_close = true;
@@ -321,6 +328,8 @@ namespace Zest {
         });
         closed.get_future().wait();
 
+        // Ask every session to finish its current request and close. Resetting the work guards lets each worker's run()
+        // return once its sessions are closed, which is what the futures below wait for.
         size_t open = 0;
         {
             std::lock_guard<std::mutex> lock(this->sessionsMtx_);
@@ -386,6 +395,7 @@ namespace Zest {
                     session = std::make_shared<Session>(std::move(socket), this->db_, this->limits_, this->activeSessions_);
                 }
                 {
+                    // Pruned on each connection, so the list does not keep growing with closed sessions
                     std::lock_guard<std::mutex> lock(this->sessionsMtx_);
                     std::erase_if(this->sessions_, [](const std::weak_ptr<Session>& weak) { return weak.expired(); });
                     this->sessions_.push_back(session);

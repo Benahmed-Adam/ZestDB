@@ -31,6 +31,7 @@ namespace Zest {
                     }
 
                     if (task) {
+                        // packaged_task already stores the task's exceptions in its future: this only catches what escapes it
                         try {
                             task();
                         } catch (const std::exception& e) {
