@@ -45,7 +45,7 @@ namespace Zest {
     /// (buffered: execCmd syncs it once per command), then runs the `after` triggers.
     class ZestDB {
     public:
-        /// Reads config.yaml, opens the shards, loads the scripts, starts the TCP server, replays the WAL, then starts
+        /// Reads config.yaml, opens the shards, loads the scripts, replays the WAL, starts the TCP server, then starts
         /// the flush and archive threads and prepares the HTTP stats server (main() makes it listen).
         ZestDB();
         /// Stops the database if stop() was not called.

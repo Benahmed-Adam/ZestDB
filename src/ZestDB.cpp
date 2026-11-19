@@ -88,9 +88,9 @@ namespace Zest {
         this->shardManager = std::make_unique<ShardManager>(this->settings, NUM_SHARDS);
         this->scriptEngine = std::make_unique<ScriptEngine>(*this, this->settings.DbPath / "scripts");
         this->scriptEngine->loadAll();
-        this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
         this->replayWAL();
+        this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
 
         ZestLog(LogLevel::Info, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
