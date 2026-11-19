@@ -218,9 +218,10 @@ namespace Zest {
     }
 
     void ZestDB::stop() {
+        if (!this->running.exchange(false)) {
+            return;
+        }
         ZestLog(LogLevel::Info, "Exiting ZestDB...");
-
-        this->running = false;
 
         this->ioCtx.stop();
         if (this->socket)

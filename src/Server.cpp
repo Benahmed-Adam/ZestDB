@@ -76,12 +76,34 @@ namespace Zest {
         });
     }
 
+    void Session::drain() {
+        this->draining_ = true;
+        if (!this->waitingForRequest_) {
+            return;
+        }
+        if (this->write_queue_.empty()) {
+            this->close_stream();
+        } else {
+            this->closing_ = true;
+        }
+    }
+
     void Session::do_read_size() {
+        if (this->draining_) {
+            if (this->write_queue_.empty()) {
+                this->close_stream();
+            } else {
+                this->closing_ = true;
+            }
+            return;
+        }
         this->touch();
+        this->waitingForRequest_ = true;
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(4), [this, self](std::error_code ec, std::size_t length) {
+                    this->waitingForRequest_ = false;
                     if (!ec && length == 4) {
                         std::istream is(&this->buffer_);
                         uint32_t payload_size;
@@ -273,7 +295,12 @@ namespace Zest {
         }
         this->do_accept();
         for (auto& worker : this->workers_) {
-            this->workerThreads_.emplace_back([&worker] { worker->run(); });
+            std::promise<void> finished;
+            this->workersDone_.push_back(finished.get_future());
+            this->workerThreads_.emplace_back([&worker, done = std::move(finished)]() mutable {
+                worker->run();
+                done.set_value();
+            });
         }
     }
 
@@ -293,8 +320,31 @@ namespace Zest {
             closed.set_value();
         });
         closed.get_future().wait();
+
+        size_t open = 0;
+        {
+            std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+            for (auto& weak : this->sessions_) {
+                if (auto session = weak.lock()) {
+                    open++;
+                    asio::post(session->executor(), [session] { session->drain(); });
+                }
+            }
+            this->sessions_.clear();
+        }
         for (auto& guard : this->workGuards_) {
             guard.reset();
+        }
+        if (open > 0) {
+            ZestLog(LogLevel::Info, std::format("Server: waiting for {} sessions to send their last reply", open));
+        }
+        const auto deadline = std::chrono::steady_clock::now() + DRAIN_TIMEOUT;
+        bool drained = true;
+        for (auto& done : this->workersDone_) {
+            drained = done.wait_until(deadline) == std::future_status::ready && drained;
+        }
+        if (!drained) {
+            ZestLog(LogLevel::Warning, std::format("Server: sessions still busy after {}s, closing them", DRAIN_TIMEOUT.count()));
         }
         for (auto& worker : this->workers_) {
             worker->stop();
@@ -334,6 +384,11 @@ namespace Zest {
                     session = std::make_shared<Session>(asio::ssl::stream<tcp::socket>(std::move(socket), this->ssl_context_), this->db_, this->limits_, this->activeSessions_);
                 } else {
                     session = std::make_shared<Session>(std::move(socket), this->db_, this->limits_, this->activeSessions_);
+                }
+                {
+                    std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+                    std::erase_if(this->sessions_, [](const std::weak_ptr<Session>& weak) { return weak.expired(); });
+                    this->sessions_.push_back(session);
                 }
                 asio::dispatch(executor, [session] { session->start(); });
             }

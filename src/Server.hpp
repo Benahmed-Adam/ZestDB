@@ -5,8 +5,10 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <future>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <variant>
@@ -30,6 +32,10 @@ namespace Zest {
         Session(ZestStream stream, ZestDB& db, Limits limits, std::shared_ptr<std::atomic<size_t>> activeSessions);
         ~Session();
         void start();
+        void drain();
+        asio::any_io_executor executor() {
+            return this->timer_.get_executor();
+        }
 
     private:
         void do_read_size();
@@ -60,6 +66,8 @@ namespace Zest {
 
         std::deque<std::string> write_queue_;
         bool closing_ = false;
+        bool waitingForRequest_ = false;
+        bool draining_ = false;
     };
 
     class Server {
@@ -72,9 +80,14 @@ namespace Zest {
         void do_accept();
         static std::vector<std::unique_ptr<asio::io_context>> makeWorkers();
 
+        static constexpr std::chrono::seconds DRAIN_TIMEOUT{ 5 };
+
         std::vector<std::unique_ptr<asio::io_context>> workers_;
         std::vector<asio::executor_work_guard<asio::io_context::executor_type>> workGuards_;
         std::vector<std::thread> workerThreads_;
+        std::vector<std::future<void>> workersDone_;
+        std::mutex sessionsMtx_;
+        std::vector<std::weak_ptr<Session>> sessions_;
         size_t nextWorker_ = 0;
         std::atomic<bool> stopped_ = false;
 

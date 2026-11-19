@@ -95,7 +95,7 @@ See [the scripting guide](https://github.com/Benahmed-Adam/ZestDB/blob/main/docs
 
 ## Stopping
 
-`docker stop zestdb` sends `SIGTERM`: ZestDB flushes every shard before exiting.
+`docker stop zestdb` sends `SIGTERM`. ZestDB stops accepting connections, lets each session finish its current request and send the reply (up to 5 seconds), then flushes every shard before exiting. Docker kills the container after 10 seconds, which leaves time for both steps.
 
 ## Tags
 
