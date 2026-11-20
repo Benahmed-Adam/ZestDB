@@ -51,6 +51,9 @@ namespace Zest {
         ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
         /// Stores `value` only if `key` does not exist (an expired key counts as absent); KeyExists otherwise.
         ResultType setnx(const std::string& key, const std::string& value);
+        /// Writes `value` to an existing key and keeps its expiry date, returned in `expiresAt` so the caller can log it.
+        /// KeyNotFound if the key does not exist (it is never created). Used by setby, which must not touch the TTL.
+        ResultType replace(const std::string& key, const std::string& value, uint64_t& expiresAt);
         /// Replaces the value of `key` only if it equals `expected`; ValueMismatch otherwise. The expiry date is kept and returned in `expiresAt`.
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 

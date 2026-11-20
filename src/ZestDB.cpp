@@ -965,6 +965,21 @@ namespace Zest {
         return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
     }
 
+    ResultType ZestDB::replace(const std::string& key, const std::string& value) {
+        ResultType check = this->checkWrite(key, value);
+        if (check.code != ResultType::Code::Success) {
+            return check;
+        }
+        std::string stored = value;
+        ResultType before = this->beforeWrite(key, stored);
+        if (before.code != ResultType::Code::Success) {
+            return before;
+        }
+        uint64_t expiresAt = 0;
+        ResultType result = this->shardManager->replace(key, stored, expiresAt);
+        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+    }
+
     ResultType ZestDB::setnx(const std::string& key, const std::string& value) {
         ResultType check = this->checkWrite(key, value);
         if (check.code != ResultType::Code::Success) {
@@ -1080,7 +1095,7 @@ namespace Zest {
         }
         long long updated = 0;
         for (const std::string& key : this->shardManager->firstMatchingKeys(valid)) {
-            updated += this->set(key, value).code == ResultType::Code::Success;
+            updated += this->replace(key, value).code == ResultType::Code::Success;
         }
         return { ResultType::Code::Success, "", updated };
     }

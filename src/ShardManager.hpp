@@ -37,6 +37,7 @@ namespace Zest {
 
         ResultType incr(const std::string& key, int64_t delta, uint64_t& expiresAt);
         ResultType setnx(const std::string& key, const std::string& value);
+        ResultType replace(const std::string& key, const std::string& value, uint64_t& expiresAt);
         ResultType cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt);
 
         ResultType exists(const std::string& key);

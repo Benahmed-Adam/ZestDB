@@ -150,6 +150,8 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
         /// delBy with an explicit choice, like setBy.
         ResultType delBy(ValidationRule& valid, bool perRow);
+        /// One row of setBy when triggers are loaded: set() for an existing key, keeping its expiry date (also logged).
+        ResultType replace(const std::string& key, const std::string& value);
         /// incr that also returns the key's expiry date, needed to log the new value with it.
         ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
         /// cas that also returns the key's expiry date, needed to log the new value with it.

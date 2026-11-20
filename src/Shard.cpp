@@ -250,6 +250,17 @@ namespace Zest {
         return this->writeLocked(key, value, 0);
     }
 
+    ResultType Shard::replace(const std::string& key, const std::string& value, uint64_t& expiresAt) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+        IndexEntry existing = this->indexManager->search(key);
+        if (existing.segmentId == INVALID_SEGMENT_ID || existing.isTombstone) {
+            expiresAt = 0;
+            return { ResultType::Code::KeyNotFound };
+        }
+        expiresAt = existing.expiresAt;
+        return this->writeLocked(key, value, expiresAt);
+    }
+
     ResultType Shard::writeLocked(const std::string& key, const std::string& value, uint64_t expiresAt) {
         auto start = std::chrono::high_resolution_clock::now();
 
@@ -407,6 +418,7 @@ namespace Zest {
             }
 
             newEntry.key = entry.key;
+            newEntry.expiresAt = entry.expiresAt; // setby changes the value, not the expiry
 
             this->indexManager->insert(newEntry);
 

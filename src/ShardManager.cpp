@@ -44,6 +44,11 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->setnx(key, value);
     }
 
+    ResultType ShardManager::replace(const std::string& key, const std::string& value, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->replace(key, value, expiresAt);
+    }
+
     ResultType ShardManager::cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->cas(key, expected, value, expiresAt);
@@ -121,7 +126,8 @@ namespace Zest {
         if (valid.limit != UINT_MAX) {
             long long updated = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
-                updated += this->set(key, value).code == ResultType::Code::Success;
+                uint64_t expiresAt = 0;
+                updated += this->replace(key, value, expiresAt).code == ResultType::Code::Success;
             }
             return { ResultType::Code::Success, "", updated };
         }

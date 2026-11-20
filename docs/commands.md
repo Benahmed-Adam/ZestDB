@@ -22,7 +22,7 @@ Every command returns one JSON object with `code`, `response` and `affectedRows`
 | `cas <key> "<expected>" "<new>"` | Atomically replace the value only if it equals `<expected>`, e.g. `cas balance "100" "80"`; otherwise returns code `208`. The TTL is kept. |
 | `incr <key> [n]` / `decr <key> [n]` | Atomically add or subtract `n` (default 1) to an integer value and return the result; a missing key counts as 0, the TTL is kept. |
 | `getby <mode> <pattern> [lim <n>]` / `gb ...` | Get all entries whose key matches the rule. |
-| `setby <mode> <pattern> "<value>" [lim <n>]` / `sb ...` | Update the value of all matching keys. |
+| `setby <mode> <pattern> "<value>" [lim <n>]` / `sb ...` | Update the value of all matching keys; each key keeps its TTL. With `lim`, the `n` smallest matching keys. |
 | `delby <mode> <pattern> [lim <n>]` / `db ...` | Delete all matching keys. |
 | `script load <name> "<lua code>"` | Save a Lua script and register its functions and triggers (see [scripting](scripting.md)). |
 | `script reload [<name>]` | Reload `<DbPath>/scripts/<name>.lua` after editing it on disk, or every script of the folder without a name. |

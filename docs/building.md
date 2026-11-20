@@ -99,8 +99,6 @@ Uses `clang-format` with the provided `.clang-format` configuration.
 
 ## Branches
 
-The project follows gitflow:
-
 | Branch | Role | Receives pull requests from |
 | --- | --- | --- |
 | `main` | Released code; each merge publishes `latest` | `release/*` and `hotfix/*` branches (or `dev`) |

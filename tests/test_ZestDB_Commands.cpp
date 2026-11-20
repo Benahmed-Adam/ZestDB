@@ -1214,3 +1214,21 @@ TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     REQUIRE(res);
     REQUIRE(res->status == 403);
 }
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby keeps the TTL of the keys", "[commands][ttl]") {
+    db->execCmd(R"(setex t:1 60 "a")");
+    db->execCmd(R"(setex t:2 60 "a")");
+    db->execCmd(R"(s t:3 "a")");
+
+    REQUIRE(db->execCmd(R"(sb sw t: "b")").affectedRows == 3);
+    REQUIRE(db->execCmd("g t:1").response == "b");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+    REQUIRE(db->execCmd("ttl t:3").response == "-1");
+
+    // With a limit, setby goes through another path: the `lim` smallest keys, one by one
+    REQUIRE(db->execCmd(R"(sb sw t: "c" lim 2)").affectedRows == 2);
+    REQUIRE(db->execCmd("g t:2").response == "c");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+    REQUIRE(std::stoi(db->execCmd("ttl t:2").response) > 0);
+    REQUIRE(db->execCmd("ttl t:3").response == "-1");
+}
