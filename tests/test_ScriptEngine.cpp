@@ -1221,7 +1221,8 @@ TEST_CASE_METHOD(ScriptFixture, "setby keeps the TTL when it goes key by key for
     REQUIRE(load("lib", R"lua(
         zest.register_trigger{ name = "upper", phase = "before", event = "set", mode = "sw", pattern = "t:",
             fn = function(key, value) return value:upper() end }
-    )lua").code == ResultType::Code::Success);
+    )lua")
+                .code == ResultType::Code::Success);
     db->execCmd(R"(setex t:1 60 "a")");
     db->execCmd(R"(s t:2 "a")");
 

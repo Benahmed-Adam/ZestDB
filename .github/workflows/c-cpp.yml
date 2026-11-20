@@ -128,7 +128,7 @@ jobs:
     - name: report
       run: |
         mkdir -p coverage
-        gcovr --root . --filter 'src/' --exclude 'src/lib/' --html-details coverage/index.html --txt coverage/summary.txt build/coverage
+        gcovr --root . --filter 'src/' --exclude 'src/lib/' --gcov-ignore-errors=no_working_dir_found --html-details coverage/index.html --txt coverage/summary.txt build/coverage
         { echo '## Coverage of src/'; echo '```'; cat coverage/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
     - uses: actions/upload-artifact@v4
       with:

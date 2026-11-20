@@ -78,17 +78,55 @@ All test files are compiled into a single executable, `build/Release/zestdb_test
 ./build/Release/zestdb_tests "[shard]"
 ```
 
-## Code formatting
+## Code quality checks
+
+Every one of these runs in CI; the commands below run them locally (Linux, GCC or Clang).
+
+### Warnings
+
+GCC builds with `-Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Werror`, MSVC with `/W4 /WX`: a warning fails the build. To list every warning in one go instead of stopping at the first, configure with `-DZESTDB_WARNINGS_AS_ERRORS=OFF`.
+
+### Formatting
 
 ```bash
 make format
 ```
-Uses `clang-format` with the provided `.clang-format` configuration.
+Formats the code with `clang-format` and the provided `.clang-format`. CI checks `src/` and `tests/` with clang-format 21 (`pip install clang-format==21.1.8`); another version may format some lines differently.
+
+### Static analysis
+
+`.clang-tidy` enables the `bugprone-*`, `performance-*` and `modernize-*` checks, minus a few that only restate a style choice. Any finding fails the CI job. Locally, after a configure (which writes `compile_commands.json`):
+```bash
+clang-tidy -p build/Release --extra-arg=-Wno-unknown-warning-option src/*.cpp
+```
+
+### Sanitizers
+
+`ZESTDB_SANITIZE` builds everything, dependencies included, with the given sanitizers; the first error stops the test run.
+```bash
+cmake -S . -B build/asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DZESTDB_SANITIZE=address,undefined
+cmake --build build/asan --parallel && ./build/asan/zestdb_tests
+```
+```bash
+cmake -S . -B build/tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DZESTDB_SANITIZE=thread
+cmake --build build/tsan --parallel && TSAN_OPTIONS=halt_on_error=1 ./build/tsan/zestdb_tests
+```
+On a recent kernel, TSan may stop with `unexpected memory mapping`: run `sudo sysctl vm.mmap_rnd_bits=28` first.
+
+### Coverage
+
+```bash
+cmake -S . -B build/coverage -DCMAKE_BUILD_TYPE=Debug -DZESTDB_COVERAGE=ON
+cmake --build build/coverage --parallel && (cd build/coverage && ./zestdb_tests)
+gcovr --root . --filter src/ --exclude src/lib/ --gcov-ignore-errors=no_working_dir_found --html-details coverage/index.html build/coverage
+```
+In CI, the summary is shown on the run's page and the HTML report is attached as the `coverage` artifact. There is no minimum.
 
 ## Continuous integration
 
 - `c-cpp.yml` (workflow `CI`) runs on every push to `main` and `dev`, and on every pull request into them.
   - The jobs `build` and `build-windows` build and test on Linux and on Windows (MSVC).
+  - `format`, `clang-tidy`, `sanitize-asan`, `sanitize-tsan` and `coverage` run the [code quality checks](#code-quality-checks).
   - On pull requests, the job `docker` then checks that the image builds.
   - A new push to a pull request cancels the run of its previous commit.
 - `docker.yml` runs once `CI` passes on a push to `main` or `dev` (a merged pull request), builds the image once and pushes it to Docker Hub:
@@ -107,7 +145,7 @@ Uses `clang-format` with the provided `.clang-format` configuration.
 
 `main` and `dev` are protected by two repository rulesets:
 - no direct push: every change goes through a pull request (no approval required);
-- the checks `build`, `build-windows` and `docker` must pass;
+- the checks `build`, `build-windows`, `docker`, `format`, `clang-tidy`, `sanitize-asan` and `sanitize-tsan` must pass (`coverage` is informative);
 - review threads must be resolved;
 - no force-push, no deletion.
 
