@@ -246,6 +246,7 @@ namespace Zest {
 
     std::vector<std::shared_lock<std::shared_mutex>> ShardManager::pauseCompaction() {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
+        locks.reserve(this->shards.size());
         for (auto& shard : this->shards) {
             locks.emplace_back(shard->compactionMutex());
         }
@@ -262,9 +263,8 @@ namespace Zest {
 
         std::vector<WalEntry> allWalEntries;
 
-        for (size_t i = 0; i < this->shards.size(); ++i) {
-            WAL& wal = this->shards[i]->getWAL();
-            std::vector<WalEntry> cmds = wal.getCmds();
+        for (auto& shard : this->shards) {
+            std::vector<WalEntry> cmds = shard->getWAL().getCmds();
 
             allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }

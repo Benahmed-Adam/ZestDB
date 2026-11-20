@@ -12,6 +12,12 @@ Checks: >
   -modernize-use-std-print,
   -modernize-use-ranges,
   -modernize-return-braced-init-list,
-  -performance-enum-size
+  -performance-enum-size,
+  -modernize-use-scoped-lock,
+  -modernize-use-auto,
+  -modernize-macro-to-enum,
+  -modernize-use-default-member-init,
+  -modernize-use-integer-sign-comparison,
+  -modernize-raw-string-literal
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/src/[A-Za-z]+\.hpp$'

@@ -42,13 +42,13 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
         iss >> cmd;
 
         if (cmd == "q" || cmd == "quit") {
-            std::cout << "Goodbye!" << std::endl;
+            std::cout << "Goodbye!\n" << std::flush;
             workGuard->reset();
             db->stop();
             break;
         } else {
             try {
-                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line, Zest::Role::Admin, true, "ZestLocalAdmin")) << std::endl;
+                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line, Zest::Role::Admin, true, "ZestLocalAdmin")) << '\n' << std::flush;
             } catch (const std::exception& e) {
                 Zest::ZestLog(Zest::LogLevel::Error, std::format("Command failed with an exception: {}", e.what()));
             }
@@ -58,7 +58,7 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
 
 /// Starts the database, the console, the signal handler and the HTTP stats server.
 /// Threads: the console reads stdin, `ioThread` runs the signal handler, and the main thread serves HTTP until stop().
-int main(int argc, char** argv) {
+static int run(int argc, char** argv) {
     Zest::ZestDB db;
 
     // Keeps ioThread's run() alive while nothing else is queued; released on exit
@@ -93,4 +93,15 @@ int main(int argc, char** argv) {
     }
 
     return 0;
+}
+
+/// Runs the server; a startup failure (missing config.yaml, invalid setting, port in use...) is logged instead of
+/// ending in std::terminate.
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        Zest::ZestLog(Zest::LogLevel::Critical, std::format("ZestDB stopped: {}", e.what()));
+        return 1;
+    }
 }

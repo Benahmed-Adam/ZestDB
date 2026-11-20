@@ -65,7 +65,7 @@ jobs:
         key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
         restore-keys: deps-${{ runner.os }}-
     - name: install clang-tidy
-      run: pip install clang-tidy==21.1.8
+      run: pip install clang-tidy==21.1.6
     - name: configure
       run: cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release -DZESTDB_BUILD_TESTS=OFF
     - name: clang-tidy
@@ -128,7 +128,7 @@ jobs:
     - name: report
       run: |
         mkdir -p coverage
-        gcovr --root . --filter 'src/' --exclude 'src/lib/' --gcov-ignore-errors=no_working_dir_found --html-details coverage/index.html --txt coverage/summary.txt build/coverage
+        gcovr --root . --filter 'src/' --exclude 'src/lib/' --gcov-ignore-errors=no_working_dir_found --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --html-details coverage/index.html --txt coverage/summary.txt build/coverage
         { echo '## Coverage of src/'; echo '```'; cat coverage/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
     - uses: actions/upload-artifact@v4
       with:

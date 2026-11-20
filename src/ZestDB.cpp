@@ -94,7 +94,7 @@ namespace Zest {
 
         ZestLog(LogLevel::Info, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
-        this->flushThread = std::jthread([this](std::stop_token stopToken) {
+        this->flushThread = std::jthread([this](const std::stop_token& stopToken) {
             std::unique_lock<std::mutex> lock(this->flushThreadMtx);
 
             while (this->isRunning() && !stopToken.stop_requested()) {
@@ -115,7 +115,7 @@ namespace Zest {
             }
         });
 
-        this->saveThread = std::jthread([this](std::stop_token stopToken) {
+        this->saveThread = std::jthread([this](const std::stop_token& stopToken) {
             std::unique_lock<std::mutex> lock(this->saveThreadMtx);
 
             unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
@@ -258,7 +258,7 @@ namespace Zest {
     /// Value of `key` in the YAML node, or `def` when it is absent or null.
     template <typename T>
     static T getOr(fkyaml::node& node, const std::string& key, T def) {
-        return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : def;
+        return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : std::move(def);
     }
 
     /// `read`, `write` or `admin` as a Role, nullopt for anything else.
@@ -1249,16 +1249,11 @@ namespace Zest {
                 validMode = false;
             }
         } else if (mode == "sw") {
-            valid.func = [pat = std::string(pattern)](std::string_view key) { return key.substr(0, pat.size()) == pat; };
+            valid.func = [pat = std::string(pattern)](std::string_view key) { return key.starts_with(pat); };
         } else if (mode == "ct") {
             valid.func = [pat = std::string(pattern)](std::string_view key) { return key.find(pat) != std::string_view::npos; };
         } else if (mode == "ew") {
-            valid.func = [pat = std::string(pattern)](std::string_view key) {
-                if (key.size() >= pat.size()) {
-                    return key.compare(key.size() - pat.size(), pat.size(), pat) == 0;
-                }
-                return false;
-            };
+            valid.func = [pat = std::string(pattern)](std::string_view key) { return key.ends_with(pat); };
         } else {
             validMode = false;
         }

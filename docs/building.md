@@ -118,7 +118,7 @@ On a recent kernel, TSan may stop with `unexpected memory mapping`: run `sudo sy
 ```bash
 cmake -S . -B build/coverage -DCMAKE_BUILD_TYPE=Debug -DZESTDB_COVERAGE=ON
 cmake --build build/coverage --parallel && (cd build/coverage && ./zestdb_tests)
-gcovr --root . --filter src/ --exclude src/lib/ --gcov-ignore-errors=no_working_dir_found --html-details coverage/index.html build/coverage
+gcovr --root . --filter src/ --exclude src/lib/ --gcov-ignore-errors=no_working_dir_found --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --html-details coverage/index.html build/coverage
 ```
 In CI, the summary is shown on the run's page and the HTML report is attached as the `coverage` artifact. There is no minimum.
 

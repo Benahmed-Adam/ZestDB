@@ -92,7 +92,7 @@ namespace Zest {
             promise.set_value();
         });
 
-        this->compactorThread = std::jthread([this](std::stop_token stopToken) {
+        this->compactorThread = std::jthread([this](const std::stop_token& stopToken) {
             std::unique_lock<std::mutex> lock(this->compactorThreadMtx);
 
             ZestLog(LogLevel::Info, "Starting the compactor...");
@@ -165,6 +165,7 @@ namespace Zest {
         }
 
         std::vector<uint32_t> usedSegmentIds;
+        usedSegmentIds.reserve(entries.size());
         for (const auto& entry : entries) {
             usedSegmentIds.push_back(entry.segmentId);
         }

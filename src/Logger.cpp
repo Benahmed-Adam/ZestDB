@@ -67,7 +67,7 @@ namespace Zest {
         }
 
         std::ostringstream logEntry;
-        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << safeMessage << "\x1b[0m" << std::endl;
+        logEntry << levelToColorCode(level) << "[" << timestamp << "] " << levelToString(level) << ": " << safeMessage << "\x1b[0m" << '\n';
 
         std::lock_guard<std::mutex> lock(logMutex);
 

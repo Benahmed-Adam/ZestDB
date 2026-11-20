@@ -196,7 +196,7 @@ namespace Zest {
             const std::string authPrefix = "Authorization: ";
             const size_t dotPos = cmd.find('.', authPrefix.size());
             should_close = true;
-            if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
+            if (!cmd.starts_with(authPrefix) || dotPos == std::string::npos) {
                 return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
 
@@ -276,6 +276,7 @@ namespace Zest {
     std::vector<std::unique_ptr<asio::io_context>> Server::makeWorkers() {
         std::vector<std::unique_ptr<asio::io_context>> workers;
         const unsigned int threads = std::max(1u, std::thread::hardware_concurrency());
+        workers.reserve(threads);
         for (unsigned int i = 0; i < threads; i++) {
             workers.push_back(std::make_unique<asio::io_context>(1));
         }
@@ -312,7 +313,11 @@ namespace Zest {
     }
 
     Server::~Server() {
-        this->stop();
+        try {
+            this->stop();
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", e.what()));
+        }
     }
 
     void Server::stop() {
@@ -322,7 +327,7 @@ namespace Zest {
         std::promise<void> closed;
         asio::post(this->acceptor_.get_executor(), [this, &closed] {
             std::error_code ignored;
-            this->acceptor_.close(ignored);
+            static_cast<void>(this->acceptor_.close(ignored));
             this->accept_retry_timer_.cancel();
             closed.set_value();
         });
@@ -385,7 +390,7 @@ namespace Zest {
             if (this->activeSessions_->load() >= this->maxConnections_) {
                 ZestLog(LogLevel::Warning, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
                 std::error_code ignored;
-                socket.close(ignored);
+                static_cast<void>(socket.close(ignored));
             } else {
                 auto executor = socket.get_executor();
                 std::shared_ptr<Session> session;
