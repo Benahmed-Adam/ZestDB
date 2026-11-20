@@ -1,0 +1,17 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  -modernize-use-designated-initializers,
+  -modernize-use-std-print,
+  -modernize-use-ranges,
+  -modernize-return-braced-init-list,
+  -performance-enum-size
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/src/[A-Za-z]+\.hpp$'

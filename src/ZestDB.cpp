@@ -298,15 +298,16 @@ namespace Zest {
 
             auto node = fkyaml::node::deserialize(buffer.str());
 
+            const Settings defaults;
             result.DbPath = getOr<std::string>(node, "DbPath", current_path.string());
-            result.SegSize = getOr<unsigned long>(node, "SegSize", 128000);
-            result.MaxKeySize = getOr<unsigned int>(node, "MaxKeySize", 64);
-            result.MaxValueSize = getOr<unsigned int>(node, "MaxValueSize", 10000);
-            result.CacheSize = getOr<unsigned int>(node, "CacheSize", 1000);
-            result.CompactingInterval = getOr<unsigned int>(node, "CompactingInterval", 3600);
-            result.FlushInterval = getOr<unsigned int>(node, "FlushInterval", 120);
-            int dbPort = getOr<int>(node, "DBPort", 7321);
-            int webPort = getOr<int>(node, "WebPort", 1237);
+            result.SegSize = getOr<unsigned long>(node, "SegSize", defaults.SegSize);
+            result.MaxKeySize = getOr<unsigned int>(node, "MaxKeySize", defaults.MaxKeySize);
+            result.MaxValueSize = getOr<unsigned int>(node, "MaxValueSize", defaults.MaxValueSize);
+            result.CacheSize = getOr<unsigned int>(node, "CacheSize", defaults.CacheSize);
+            result.CompactingInterval = getOr<unsigned int>(node, "CompactingInterval", defaults.CompactingInterval);
+            result.FlushInterval = getOr<unsigned int>(node, "FlushInterval", defaults.FlushInterval);
+            int dbPort = getOr<int>(node, "DBPort", defaults.DBPort);
+            int webPort = getOr<int>(node, "WebPort", defaults.WebPort);
             if (dbPort < 1 || dbPort > 65535 || webPort < 1 || webPort > 65535) {
                 ZestLog(LogLevel::Critical, "DBPort and WebPort must be between 1 and 65535");
                 throw std::runtime_error("Port out of range");
@@ -314,28 +315,28 @@ namespace Zest {
             result.DBPort = static_cast<uint16_t>(dbPort);
             result.WebPort = static_cast<uint16_t>(webPort);
 
-            result.NetworkValidationStr = getOr<std::string>(node, "NetworkValidation", ".*");
+            result.NetworkValidationStr = getOr<std::string>(node, "NetworkValidation", defaults.NetworkValidationStr);
             if (result.NetworkValidationStr.empty()) {
                 result.NetworkValidationStr = ".*";
             }
 
-            result.isDebug = getOr<bool>(node, "isDebug", false);
-            result.jsonOnly = getOr<bool>(node, "jsonOnly", false);
-            result.readOnly = getOr<bool>(node, "readOnly", false);
-            result.fsyncOnWrite = getOr<bool>(node, "fsyncOnWrite", true);
+            result.isDebug = getOr<bool>(node, "isDebug", defaults.isDebug);
+            result.jsonOnly = getOr<bool>(node, "jsonOnly", defaults.jsonOnly);
+            result.readOnly = getOr<bool>(node, "readOnly", defaults.readOnly);
+            result.fsyncOnWrite = getOr<bool>(node, "fsyncOnWrite", defaults.fsyncOnWrite);
 
-            result.useSSL = getOr<bool>(node, "useSSL", false);
+            result.useSSL = getOr<bool>(node, "useSSL", defaults.useSSL);
             result.SSLCertPath = getOr<std::string>(node, "SSLCertPath", "");
             result.SSLKeyPath = getOr<std::string>(node, "SSLKeyPath", "");
 
             result.ArchiveStoragePath = getOr<std::string>(node, "ArchiveStoragePath", (current_path / "archive/").string());
-            result.ArchiveCreationDelay = getOr<unsigned int>(node, "ArchiveCreationDelay", 3600);
-            result.AutoArchiveSaving = getOr<bool>(node, "AutoArchiveSaving", true);
-            result.ArchiveRetention = getOr<unsigned int>(node, "ArchiveRetention", 10);
+            result.ArchiveCreationDelay = getOr<unsigned int>(node, "ArchiveCreationDelay", defaults.ArchiveCreationDelay);
+            result.AutoArchiveSaving = getOr<bool>(node, "AutoArchiveSaving", defaults.AutoArchiveSaving);
+            result.ArchiveRetention = getOr<unsigned int>(node, "ArchiveRetention", defaults.ArchiveRetention);
 
-            result.MaxConnections = getOr<unsigned int>(node, "MaxConnections", 1024);
-            result.AuthTimeout = getOr<unsigned int>(node, "AuthTimeout", 10);
-            result.IdleTimeout = getOr<unsigned int>(node, "IdleTimeout", 300);
+            result.MaxConnections = getOr<unsigned int>(node, "MaxConnections", defaults.MaxConnections);
+            result.AuthTimeout = getOr<unsigned int>(node, "AuthTimeout", defaults.AuthTimeout);
+            result.IdleTimeout = getOr<unsigned int>(node, "IdleTimeout", defaults.IdleTimeout);
 
             if (result.useSSL && (result.SSLCertPath == "" || result.SSLKeyPath == "")) {
                 ZestLog(LogLevel::Critical, "SSL enabled and not certificate or key path provided !");
@@ -1696,7 +1697,7 @@ namespace Zest {
                     this->settings.NetworkValidationStr = std::move(valueStrStr);
                     this->settings.NetworkValidation = std::move(testRegex);
                     valueSet = true;
-                } catch (const std::regex_error& e) {
+                } catch (const std::regex_error&) {
                     result.code = ResultType::Code::InvalidConfigValue;
                     return result;
                 }

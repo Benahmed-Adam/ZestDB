@@ -88,6 +88,7 @@ namespace Zest {
 
     /// The configuration read from config.yaml (see docs/configuration.md for each field).
     /// Each shard keeps a copy in which DbPath, IndexPath and WalPath point to its own files.
+    /// The initial values are the defaults of a field missing from config.yaml (loadConfig reads them from here).
     struct Settings {
         std::filesystem::path DbPath;
         std::filesystem::path IndexPath;
@@ -96,31 +97,31 @@ namespace Zest {
         std::filesystem::path SSLKeyPath;
         std::filesystem::path ArchiveStoragePath;
 
-        unsigned long SegSize;
-        unsigned int MaxKeySize;
-        unsigned int MaxValueSize;
-        unsigned int CacheSize;
-        unsigned int CompactingInterval;
-        unsigned int FlushInterval;
-        uint16_t DBPort;
-        uint16_t WebPort;
+        unsigned long SegSize = 128000;
+        unsigned int MaxKeySize = 64;
+        unsigned int MaxValueSize = 10000;
+        unsigned int CacheSize = 1000;
+        unsigned int CompactingInterval = 3600;
+        unsigned int FlushInterval = 120;
+        uint16_t DBPort = 7321;
+        uint16_t WebPort = 1237;
 
         std::regex NetworkValidation; // compiled from NetworkValidationStr
-        std::string NetworkValidationStr;
+        std::string NetworkValidationStr = ".*";
 
-        unsigned int ArchiveCreationDelay;
-        unsigned int ArchiveRetention;
+        unsigned int ArchiveCreationDelay = 3600;
+        unsigned int ArchiveRetention = 10;
 
-        unsigned int MaxConnections;
-        unsigned int AuthTimeout;
-        unsigned int IdleTimeout;
+        unsigned int MaxConnections = 1024;
+        unsigned int AuthTimeout = 10;
+        unsigned int IdleTimeout = 300;
 
-        bool AutoArchiveSaving;
-        bool isDebug;
-        bool useSSL;
-        bool jsonOnly;
-        bool readOnly;
-        bool fsyncOnWrite;
+        bool AutoArchiveSaving = true;
+        bool isDebug = false;
+        bool useSSL = false;
+        bool jsonOnly = false;
+        bool readOnly = false;
+        bool fsyncOnWrite = true;
     };
 
 } // namespace Zest

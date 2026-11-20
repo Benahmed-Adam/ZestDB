@@ -82,7 +82,8 @@ namespace Zest {
             return this->settings.SegSize + 1;
         }
 
-        unsigned long newOffset = startOffset + value.size();
+        // Fits: write() returned early unless startOffset + value.size() <= SegSize, itself an unsigned long
+        unsigned long newOffset = startOffset + static_cast<unsigned long>(value.size());
         this->currentOffset.store(newOffset);
 
         return startOffset;
