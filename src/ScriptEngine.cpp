@@ -250,6 +250,7 @@ namespace Zest {
         }
 
         std::vector<std::string> loaded;
+        loaded.reserve(fresh.scripts.size());
         for (const auto& [name, code] : fresh.scripts) {
             loaded.push_back(name);
         }
@@ -349,6 +350,7 @@ namespace Zest {
     ResultType ScriptEngine::list() const {
         std::shared_lock<std::shared_mutex> lock(this->registryMtx);
         std::vector<std::string> scripts;
+        scripts.reserve(this->registry.scripts.size());
         for (const auto& [name, code] : this->registry.scripts) {
             scripts.push_back(name);
         }
@@ -577,7 +579,7 @@ namespace Zest {
 
         sol::table zest = lua.create_named_table("zest");
 
-        zest.set_function("log", [](const std::string& message, sol::optional<std::string> level) {
+        zest.set_function("log", [](const std::string& message, const sol::optional<std::string>& level) {
             static const std::unordered_map<std::string, LogLevel> levels = { { "debug", LogLevel::Debug }, { "info", LogLevel::Info }, { "warning", LogLevel::Warning }, { "error", LogLevel::Error } };
             auto it = levels.find(level.value_or("info"));
             if (it == levels.end()) {
@@ -738,7 +740,7 @@ namespace Zest {
             return r.code == ResultType::Code::Success;
         });
 
-        zest.set_function("count", [this, requireRun, ruleFrom](sol::optional<std::string> mode, sol::optional<std::string> pattern) {
+        zest.set_function("count", [this, requireRun, ruleFrom](const sol::optional<std::string>& mode, const sol::optional<std::string>& pattern) {
             requireRun("count");
             ResultType r = this->db.count(ruleFrom(mode, pattern));
             if (r.code != ResultType::Code::Success) {
@@ -747,7 +749,7 @@ namespace Zest {
             return static_cast<int64_t>(r.affectedRows);
         });
 
-        zest.set_function("keys", [this, requireRun, ruleFrom](sol::optional<std::string> mode, sol::optional<std::string> pattern, sol::optional<int64_t> lim) {
+        zest.set_function("keys", [this, requireRun, ruleFrom](const sol::optional<std::string>& mode, const sol::optional<std::string>& pattern, sol::optional<int64_t> lim) {
             requireRun("keys");
             ValidationRule rule = ruleFrom(mode, pattern);
             if (lim) {

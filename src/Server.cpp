@@ -196,7 +196,7 @@ namespace Zest {
             const std::string authPrefix = "Authorization: ";
             const size_t dotPos = cmd.find('.', authPrefix.size());
             should_close = true;
-            if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
+            if (!cmd.starts_with(authPrefix) || dotPos == std::string::npos) {
                 return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
 
@@ -276,6 +276,7 @@ namespace Zest {
     std::vector<std::unique_ptr<asio::io_context>> Server::makeWorkers() {
         std::vector<std::unique_ptr<asio::io_context>> workers;
         const unsigned int threads = std::max(1u, std::thread::hardware_concurrency());
+        workers.reserve(threads);
         for (unsigned int i = 0; i < threads; i++) {
             workers.push_back(std::make_unique<asio::io_context>(1));
         }
@@ -288,17 +289,17 @@ namespace Zest {
           acceptor_(*workers_[0], tcp::endpoint(tcp::v4(), port)),
           accept_retry_timer_(*workers_[0]),
           db_(db),
-          useSSL_(db.settings.useSSL),
-          maxConnections_(db.settings.MaxConnections),
-          limits_{ std::chrono::seconds(db.settings.AuthTimeout), std::chrono::seconds(db.settings.IdleTimeout) } {
+          useSSL_(db.getSettings().useSSL),
+          maxConnections_(db.getSettings().MaxConnections),
+          limits_{ std::chrono::seconds(db.getSettings().AuthTimeout), std::chrono::seconds(db.getSettings().IdleTimeout) } {
         for (auto& worker : this->workers_) {
             this->workGuards_.push_back(asio::make_work_guard(*worker));
         }
         ZestLog(LogLevel::Info, std::format("Server: listening on port {} with {} IO threads", port, this->workers_.size()));
         if (this->useSSL_) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 | asio::ssl::context::single_dh_use);
-            ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath.string());
-            ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath.string(), asio::ssl::context::pem);
+            ssl_context_.use_certificate_chain_file(this->db_.getSettings().SSLCertPath.string());
+            ssl_context_.use_private_key_file(this->db_.getSettings().SSLKeyPath.string(), asio::ssl::context::pem);
         }
         this->do_accept();
         for (auto& worker : this->workers_) {
@@ -312,7 +313,11 @@ namespace Zest {
     }
 
     Server::~Server() {
-        this->stop();
+        try {
+            this->stop();
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", e.what()));
+        }
     }
 
     void Server::stop() {
@@ -321,8 +326,11 @@ namespace Zest {
         }
         std::promise<void> closed;
         asio::post(this->acceptor_.get_executor(), [this, &closed] {
-            std::error_code ignored;
-            this->acceptor_.close(ignored);
+            std::error_code ec;
+            static_cast<void>(this->acceptor_.close(ec));
+            if (ec) {
+                ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", ec.message()));
+            }
             this->accept_retry_timer_.cancel();
             closed.set_value();
         });
@@ -385,7 +393,7 @@ namespace Zest {
             if (this->activeSessions_->load() >= this->maxConnections_) {
                 ZestLog(LogLevel::Warning, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
                 std::error_code ignored;
-                socket.close(ignored);
+                static_cast<void>(socket.close(ignored));
             } else {
                 auto executor = socket.get_executor();
                 std::shared_ptr<Session> session;

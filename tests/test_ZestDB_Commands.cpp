@@ -1179,11 +1179,11 @@ TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf
     db.execCmd("keys sw k");
     db.execCmd(R"(sb sw k "w" lim 1)");
 
-    std::thread http([&db] { db.srv->listen("127.0.0.1", 29586); });
-    db.srv->wait_until_ready();
+    std::thread http([&db] { db.httpServer().listen("127.0.0.1", 29586); });
+    db.httpServer().wait_until_ready();
     httplib::Client client("127.0.0.1", 29586);
     auto res = client.Get("/");
-    db.srv->stop();
+    db.httpServer().stop();
     http.join();
     REQUIRE(res);
     REQUIRE(res->status == 200);
@@ -1205,12 +1205,30 @@ TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;
-    std::thread http([&db] { db.srv->listen("127.0.0.1", 29544); });
-    db.srv->wait_until_ready();
+    std::thread http([&db] { db.httpServer().listen("127.0.0.1", 29544); });
+    db.httpServer().wait_until_ready();
     httplib::Client client("127.0.0.1", 29544);
     auto res = client.Get("/");
-    db.srv->stop();
+    db.httpServer().stop();
     http.join();
     REQUIRE(res);
     REQUIRE(res->status == 403);
+}
+
+TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby keeps the TTL of the keys", "[commands][ttl]") {
+    db->execCmd(R"(setex t:1 60 "a")");
+    db->execCmd(R"(setex t:2 60 "a")");
+    db->execCmd(R"(s t:3 "a")");
+
+    REQUIRE(db->execCmd(R"(sb sw t: "b")").affectedRows == 3);
+    REQUIRE(db->execCmd("g t:1").response == "b");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+    REQUIRE(db->execCmd("ttl t:3").response == "-1");
+
+    // With a limit, setby goes through another path: the `lim` smallest keys, one by one
+    REQUIRE(db->execCmd(R"(sb sw t: "c" lim 2)").affectedRows == 2);
+    REQUIRE(db->execCmd("g t:2").response == "c");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+    REQUIRE(std::stoi(db->execCmd("ttl t:2").response) > 0);
+    REQUIRE(db->execCmd("ttl t:3").response == "-1");
 }

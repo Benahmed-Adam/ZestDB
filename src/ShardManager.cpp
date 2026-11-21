@@ -44,6 +44,11 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->setnx(key, value);
     }
 
+    ResultType ShardManager::replace(const std::string& key, const std::string& value, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->replace(key, value, expiresAt);
+    }
+
     ResultType ShardManager::cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->cas(key, expected, value, expiresAt);
@@ -121,7 +126,8 @@ namespace Zest {
         if (valid.limit != UINT_MAX) {
             long long updated = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
-                updated += this->set(key, value).code == ResultType::Code::Success;
+                uint64_t expiresAt = 0;
+                updated += this->replace(key, value, expiresAt).code == ResultType::Code::Success;
             }
             return { ResultType::Code::Success, "", updated };
         }
@@ -240,6 +246,7 @@ namespace Zest {
 
     std::vector<std::shared_lock<std::shared_mutex>> ShardManager::pauseCompaction() {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
+        locks.reserve(this->shards.size());
         for (auto& shard : this->shards) {
             locks.emplace_back(shard->compactionMutex());
         }
@@ -256,9 +263,8 @@ namespace Zest {
 
         std::vector<WalEntry> allWalEntries;
 
-        for (size_t i = 0; i < this->shards.size(); ++i) {
-            WAL& wal = this->shards[i]->getWAL();
-            std::vector<WalEntry> cmds = wal.getCmds();
+        for (auto& shard : this->shards) {
+            std::vector<WalEntry> cmds = shard->getWAL().getCmds();
 
             allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }

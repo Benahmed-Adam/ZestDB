@@ -99,7 +99,9 @@ See [the scripting guide](https://github.com/Benahmed-Adam/ZestDB/blob/main/docs
 
 ## Tags
 
-- `latest`: the last commit of `main`.
-- `sha-<commit>`: a given commit (7 characters).
+- `latest`: the last release (branch `main`).
+- `sha-<commit>`: a given commit of `main` (7 characters).
+- `dev`: the development version (branch `dev`), for testing what comes next.
+- `dev-sha-<commit>`: a given commit of `dev`.
 
 Both are built once the tests pass on Linux and Windows.

@@ -63,7 +63,7 @@ These results are from one run on a single machine, with client and server side 
 | [Return codes](docs/return-codes.md) | Every response code |
 | [Operations](docs/operations.md) | Docker, archives, monitoring, logging |
 | [Architecture](docs/architecture.md) | How the storage engine works |
-| [Building and testing](docs/building.md) | Dependencies, Windows build, tests, CI |
+| [Building and testing](docs/building.md) | Dependencies, Windows build, tests, CI, branches |
 | [Benchmarks](docs/benchmarks.md) | Full results and how to run them |
 
 ## License

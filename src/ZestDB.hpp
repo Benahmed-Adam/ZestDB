@@ -130,15 +130,90 @@ namespace Zest {
         /// the shards. Does nothing the second time.
         void stop();
 
-        Settings settings;
-        asio::io_context ioCtx;               // runs the signal handler in main()
-        std::unique_ptr<httplib::Server> srv; // HTTP stats server
+        /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
+        const Settings& getSettings() const {
+            return this->settings;
+        }
+
+        /// The context main() runs the signal handler on.
+        asio::io_context& ioContext() {
+            return this->ioCtx;
+        }
+
+        /// The HTTP stats server, prepared by the constructor; main() makes it listen on `WebPort`.
+        httplib::Server& httpServer() {
+            return *this->srv;
+        }
 
         /// Serialises a result as `{"affectedRows":..,"code":..,"response":..}`. A response that is valid JSON (array or
         /// object) is embedded as is, anything else becomes a JSON string.
         static std::string responseToJson(const ResultType& resp);
 
     private:
+        /// A command line split into words, handed to the handler of its command.
+        struct Command {
+            std::string_view line; // the command without its surrounding blanks
+            std::vector<std::string_view> words;
+            std::string name;        // the first word, lowercased, with its alias resolved (`get` -> `g`)
+            bool rowsLogged = false; // setby / delby logged each row themselves, not the command
+        };
+
+        /// The role a command needs.
+        enum class Access {
+            Read,
+            Write, // also makes execCmd sync the WAL after it
+            Admin
+        };
+
+        /// How a command holds `writeMtx`: shared by most, exclusive to replace the settings, not at all for the
+        /// commands that take it themselves (flush, save, restore).
+        enum class Locking {
+            Shared,
+            Exclusive,
+            None
+        };
+
+        using Handler = ResultType (ZestDB::*)(Command&);
+
+        struct CommandSpec {
+            Handler handler;
+            Access access;
+            Locking locking;
+        };
+
+        /// Every command name (short forms, after alias resolution) and how execCmd runs it.
+        static const std::unordered_map<std::string_view, CommandSpec>& commandTable();
+        /// Trims `raw`, splits it into words and resolves the command name. False for a blank line.
+        static bool parseCommand(const std::string& raw, Command& out);
+
+        // One handler per command (Commands.cpp): parse the arguments, call the method, return its result
+        ResultType cmdGet(Command& c);
+        ResultType cmdSet(Command& c);
+        ResultType cmdSetex(Command& c);
+        ResultType cmdExpire(Command& c);
+        ResultType cmdPersist(Command& c);
+        ResultType cmdTtl(Command& c);
+        ResultType cmdSetnx(Command& c);
+        ResultType cmdCas(Command& c);
+        ResultType cmdIncr(Command& c);
+        ResultType cmdDel(Command& c);
+        ResultType cmdGetBy(Command& c);
+        ResultType cmdSetBy(Command& c);
+        ResultType cmdDelBy(Command& c);
+        ResultType cmdExists(Command& c);
+        ResultType cmdCount(Command& c);
+        ResultType cmdKeys(Command& c);
+        ResultType cmdHelp(Command& c);
+        ResultType cmdFlush(Command& c);
+        ResultType cmdReload(Command& c);
+        ResultType cmdSetConfig(Command& c);
+        ResultType cmdGetConfig(Command& c);
+        ResultType cmdRestore(Command& c);
+        ResultType cmdSave(Command& c);
+        ResultType cmdListSaves(Command& c);
+        ResultType cmdScript(Command& c);
+        ResultType cmdCall(Command& c);
+
         /// True when triggers must run: some are loaded and the WAL is not being replayed.
         bool scripted() const;
         /// Runs the `before set` triggers on `value` (which they may change), then checks the new value again.
@@ -150,6 +225,8 @@ namespace Zest {
         ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
         /// delBy with an explicit choice, like setBy.
         ResultType delBy(ValidationRule& valid, bool perRow);
+        /// One row of setBy when triggers are loaded: set() for an existing key, keeping its expiry date (also logged).
+        ResultType replace(const std::string& key, const std::string& value);
         /// incr that also returns the key's expiry date, needed to log the new value with it.
         ResultType incrBy(const std::string& key, int64_t delta, uint64_t& expiresAt);
         /// cas that also returns the key's expiry date, needed to log the new value with it.
@@ -186,6 +263,11 @@ namespace Zest {
         /// Commands are blocked only while the shards are flushed and the file sizes recorded; the files are then copied
         /// up to those sizes (compaction paused), and the zip is built from the copy.
         bool createArchive();
+
+        // Declared first so they are built before, and destroyed after, everything that uses them
+        Settings settings;
+        asio::io_context ioCtx;
+        std::unique_ptr<httplib::Server> srv;
 
         std::unordered_map<std::string, UserEntry> users;
         mutable std::shared_mutex usersMtx;

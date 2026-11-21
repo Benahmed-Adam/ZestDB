@@ -96,7 +96,8 @@ namespace Zest {
     std::string StorageManager::read(const IndexEntry& entry) {
         auto it = this->segments.find(entry.segmentId);
         if (it != this->segments.end()) {
-            return it->second->read(entry.offset, entry.size);
+            // An offset is always below SegSize, an unsigned long (32 bits on Windows)
+            return it->second->read(static_cast<unsigned long>(entry.offset), entry.size);
         }
 
         ZestLog(LogLevel::Error, std::format("StorageManager::read - segment not found: {}", entry.segmentId));

@@ -1216,3 +1216,23 @@ TEST_CASE_METHOD(ScriptFixture, "zest.caller is per thread", "[scripts][caller]"
         REQUIRE(f.get());
     }
 }
+
+TEST_CASE_METHOD(ScriptFixture, "setby keeps the TTL when it goes key by key for the triggers", "[scripts][triggers][ttl]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_trigger{ name = "upper", phase = "before", event = "set", mode = "sw", pattern = "t:",
+            fn = function(key, value) return value:upper() end }
+    )lua")
+                .code == ResultType::Code::Success);
+    db->execCmd(R"(setex t:1 60 "a")");
+    db->execCmd(R"(s t:2 "a")");
+
+    REQUIRE(db->execCmd(R"(sb sw t: "b")").affectedRows == 2);
+    REQUIRE(db->execCmd("g t:1").response == "B");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+    REQUIRE(db->execCmd("ttl t:2").response == "-1");
+
+    restart();
+
+    REQUIRE(db->execCmd("g t:1").response == "B");
+    REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
+}

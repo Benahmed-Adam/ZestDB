@@ -387,3 +387,32 @@ TEST_CASE_METHOD(ShardFixture, "Shard compactor reclaims mostly dead segments an
         REQUIRE(reopened.get(std::format("k{}", i)).response == std::format("new_{:05}", i));
     }
 }
+
+TEST_CASE_METHOD(ShardFixture, "Shard setBy keeps the expiry of each key", "[shard][ttl]") {
+    Shard shard(settings, 0);
+    const uint64_t expiresAt = nowMs() + 60'000;
+    shard.set("abc_ttl", "old", expiresAt);
+    shard.set("abc_none", "old");
+    ValidationRule vr;
+    vr.func = [](std::string_view k) { return k.starts_with("abc_"); };
+
+    REQUIRE(shard.setBy(vr, "new").affectedRows == 2);
+    REQUIRE(shard.get("abc_ttl").response == "new");
+    REQUIRE(std::stoi(shard.getTTL("abc_ttl").response) > 0);
+    REQUIRE(shard.getTTL("abc_none").response == "-1");
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard replace keeps the expiry and never creates a key", "[shard][ttl]") {
+    Shard shard(settings, 0);
+    const uint64_t original = nowMs() + 60'000;
+    shard.set("k", "old", original);
+
+    uint64_t expiresAt = 0;
+    REQUIRE(shard.replace("k", "new", expiresAt).code == ResultType::Code::Success);
+    REQUIRE(expiresAt == original);
+    REQUIRE(shard.get("k").response == "new");
+    REQUIRE(std::stoi(shard.getTTL("k").response) > 0);
+
+    REQUIRE(shard.replace("missing", "v", expiresAt).code == ResultType::Code::KeyNotFound);
+    REQUIRE(shard.get("missing").code == ResultType::Code::KeyNotFound);
+}

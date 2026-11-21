@@ -92,7 +92,7 @@ namespace Zest {
             promise.set_value();
         });
 
-        this->compactorThread = std::jthread([this](std::stop_token stopToken) {
+        this->compactorThread = std::jthread([this](const std::stop_token& stopToken) {
             std::unique_lock<std::mutex> lock(this->compactorThreadMtx);
 
             ZestLog(LogLevel::Info, "Starting the compactor...");
@@ -165,6 +165,7 @@ namespace Zest {
         }
 
         std::vector<uint32_t> usedSegmentIds;
+        usedSegmentIds.reserve(entries.size());
         for (const auto& entry : entries) {
             usedSegmentIds.push_back(entry.segmentId);
         }
@@ -248,6 +249,17 @@ namespace Zest {
             return { ResultType::Code::KeyExists };
         }
         return this->writeLocked(key, value, 0);
+    }
+
+    ResultType Shard::replace(const std::string& key, const std::string& value, uint64_t& expiresAt) {
+        std::unique_lock<std::shared_mutex> lock(this->readMtx);
+        IndexEntry existing = this->indexManager->search(key);
+        if (existing.segmentId == INVALID_SEGMENT_ID || existing.isTombstone) {
+            expiresAt = 0;
+            return { ResultType::Code::KeyNotFound };
+        }
+        expiresAt = existing.expiresAt;
+        return this->writeLocked(key, value, expiresAt);
     }
 
     ResultType Shard::writeLocked(const std::string& key, const std::string& value, uint64_t expiresAt) {
@@ -407,6 +419,7 @@ namespace Zest {
             }
 
             newEntry.key = entry.key;
+            newEntry.expiresAt = entry.expiresAt; // setby changes the value, not the expiry
 
             this->indexManager->insert(newEntry);
 
