@@ -1179,11 +1179,11 @@ TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf
     db.execCmd("keys sw k");
     db.execCmd(R"(sb sw k "w" lim 1)");
 
-    std::thread http([&db] { db.srv->listen("127.0.0.1", 29586); });
-    db.srv->wait_until_ready();
+    std::thread http([&db] { db.httpServer().listen("127.0.0.1", 29586); });
+    db.httpServer().wait_until_ready();
     httplib::Client client("127.0.0.1", 29586);
     auto res = client.Get("/");
-    db.srv->stop();
+    db.httpServer().stop();
     http.join();
     REQUIRE(res);
     REQUIRE(res->status == 200);
@@ -1205,11 +1205,11 @@ TEST_CASE("ZestDB stats server reports exists, count and keys", "[commands][perf
 TEST_CASE("ZestDB stats server applies NetworkValidation", "[commands]") {
     TempDbDir tmp("zestdb_test_http_filter", "NetworkValidation: '^10\\.'\n", 29543);
     ZestDB db;
-    std::thread http([&db] { db.srv->listen("127.0.0.1", 29544); });
-    db.srv->wait_until_ready();
+    std::thread http([&db] { db.httpServer().listen("127.0.0.1", 29544); });
+    db.httpServer().wait_until_ready();
     httplib::Client client("127.0.0.1", 29544);
     auto res = client.Get("/");
-    db.srv->stop();
+    db.httpServer().stop();
     http.join();
     REQUIRE(res);
     REQUIRE(res->status == 403);

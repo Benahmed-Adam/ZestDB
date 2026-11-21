@@ -289,17 +289,17 @@ namespace Zest {
           acceptor_(*workers_[0], tcp::endpoint(tcp::v4(), port)),
           accept_retry_timer_(*workers_[0]),
           db_(db),
-          useSSL_(db.settings.useSSL),
-          maxConnections_(db.settings.MaxConnections),
-          limits_{ std::chrono::seconds(db.settings.AuthTimeout), std::chrono::seconds(db.settings.IdleTimeout) } {
+          useSSL_(db.getSettings().useSSL),
+          maxConnections_(db.getSettings().MaxConnections),
+          limits_{ std::chrono::seconds(db.getSettings().AuthTimeout), std::chrono::seconds(db.getSettings().IdleTimeout) } {
         for (auto& worker : this->workers_) {
             this->workGuards_.push_back(asio::make_work_guard(*worker));
         }
         ZestLog(LogLevel::Info, std::format("Server: listening on port {} with {} IO threads", port, this->workers_.size()));
         if (this->useSSL_) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 | asio::ssl::context::single_dh_use);
-            ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath.string());
-            ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath.string(), asio::ssl::context::pem);
+            ssl_context_.use_certificate_chain_file(this->db_.getSettings().SSLCertPath.string());
+            ssl_context_.use_private_key_file(this->db_.getSettings().SSLKeyPath.string(), asio::ssl::context::pem);
         }
         this->do_accept();
         for (auto& worker : this->workers_) {

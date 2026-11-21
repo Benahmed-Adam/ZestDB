@@ -62,9 +62,9 @@ static int run(int argc, char** argv) {
     Zest::ZestDB db;
 
     // Keeps ioThread's run() alive while nothing else is queued; released on exit
-    auto work = asio::make_work_guard(db.ioCtx);
+    auto work = asio::make_work_guard(db.ioContext());
 
-    asio::signal_set signals(db.ioCtx, SIGINT, SIGTERM);
+    asio::signal_set signals(db.ioContext(), SIGINT, SIGTERM);
 
     signals.async_wait([&](const asio::error_code& error, int) {
         if (!error) {
@@ -82,9 +82,9 @@ static int run(int argc, char** argv) {
 
     std::thread cmdThread(cmd, &db, &work);
 
-    std::thread ioThread([&db]() { db.ioCtx.run(); });
+    std::thread ioThread([&db]() { db.ioContext().run(); });
 
-    db.srv->listen("0.0.0.0", db.settings.WebPort);
+    db.httpServer().listen("0.0.0.0", db.getSettings().WebPort);
 
     cmdThread.join();
     ioThread.join();

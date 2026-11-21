@@ -162,7 +162,11 @@ Into `main`, the branch must be up to date with `main` and only merge commits ar
 ├── .github/workflows/            # CI and Docker Hub pipelines
 ├── docs/                         # documentation
 ├── src/                          # C++ source
-│   ├── ZestDB.{hpp,cpp}          # main facade, commands, config, archiving
+│   ├── ZestDB.{hpp,cpp}          # main facade, data operations, WAL
+│   ├── Commands.cpp              # command parsing and the name → handler table
+│   ├── Config.cpp                # loading, reloading and changing the configuration
+│   ├── Archive.cpp               # archive creation, restore and listing
+│   ├── Auth.cpp                  # tokens, roles, lockout, address filter
 │   ├── ScriptEngine.{hpp,cpp}    # Lua scripts, functions and triggers
 │   ├── Server.{hpp,cpp}          # Asio TCP/SSL server and protocol
 │   ├── Settings.hpp              # settings, result codes, validation rules

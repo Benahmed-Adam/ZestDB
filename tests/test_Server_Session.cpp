@@ -59,7 +59,7 @@ public:
         fs::current_path(testDir);
         db = std::make_unique<ZestDB>();
         for (int i = 0; i < 4; i++) {
-            ioThreads.emplace_back([this] { db->ioCtx.run(); });
+            ioThreads.emplace_back([this] { db->ioContext().run(); });
         }
     }
 
