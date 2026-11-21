@@ -326,8 +326,11 @@ namespace Zest {
         }
         std::promise<void> closed;
         asio::post(this->acceptor_.get_executor(), [this, &closed] {
-            std::error_code ignored;
-            static_cast<void>(this->acceptor_.close(ignored));
+            std::error_code ec;
+            static_cast<void>(this->acceptor_.close(ec));
+            if (ec) {
+                ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", ec.message()));
+            }
             this->accept_retry_timer_.cancel();
             closed.set_value();
         });

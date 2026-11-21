@@ -19,5 +19,8 @@ Checks: >
   -modernize-use-default-member-init,
   -modernize-use-integer-sign-comparison,
   -modernize-raw-string-literal
+CheckOptions:
+  - key: bugprone-unused-return-value.AllowCastToVoid
+    value: true
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/src/[A-Za-z]+\.hpp$'

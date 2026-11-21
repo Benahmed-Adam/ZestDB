@@ -1457,15 +1457,14 @@ namespace Zest {
             std::string expected;
             std::string value;
             size_t valuePos = 0;
+            bool expectedOk = false;
             if (words.size() < 2) {
                 result.code = ResultType::Code::MissingKey;
             } else if (words.size() < 3) {
                 result.code = ResultType::Code::MissingArguments;
-            } else if (valuePos = static_cast<size_t>(words[2].data() - sv.data()); !readQuoted(sv, valuePos, expected)) {
-                result.code = ResultType::Code::InvalidValueFormat;
-            } else if (onlySpacesFrom(sv, valuePos)) {
+            } else if (valuePos = static_cast<size_t>(words[2].data() - sv.data()), expectedOk = readQuoted(sv, valuePos, expected); expectedOk && onlySpacesFrom(sv, valuePos)) {
                 result.code = ResultType::Code::MissingValue;
-            } else if (!readQuoted(sv, valuePos, value) || !onlySpacesFrom(sv, valuePos)) {
+            } else if (!expectedOk || !readQuoted(sv, valuePos, value) || !onlySpacesFrom(sv, valuePos)) {
                 result.code = ResultType::Code::InvalidValueFormat;
             } else {
                 result = this->cas(std::string(words[1]), expected, value);
