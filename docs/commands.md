@@ -107,7 +107,7 @@ Changes made with `scfg` apply at once and are written back to `config.yaml`.
 | `MaxKeySize` | int | Cannot exceed the internal limit (256). |
 | `MaxValueSize` | int | Must be less than `SegSize`. |
 | `CacheSize` | int | Per-shard cache capacity. |
-| `CompactingInterval` | int | Seconds between compactions. |
+| `CompactingInterval` | int | Maximum seconds between two compactions of a shard; a shard is compacted earlier once half of its data is dead. |
 | `FlushInterval` | int | Seconds between disk syncs. |
 | `NetworkValidationStr` | string | IP allow-list regex. |
 | `isDebug` | bool | Enable debug logging (`true/false` or `1/0`). |

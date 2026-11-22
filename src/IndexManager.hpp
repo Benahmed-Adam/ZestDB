@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -143,6 +144,11 @@ namespace Zest {
         /// fsyncs the INDEX file if records were appended since the last flush. @return false if the sync failed.
         bool flush();
 
+        /// Bytes of segment data the index points to. Expired keys count until the next compaction drops them.
+        uint64_t liveBytes() const {
+            return this->liveSize.load();
+        }
+
     private:
         /// What the index stores per key: an IndexEntry without the key and the tombstone flag.
         struct Location {
@@ -159,10 +165,14 @@ namespace Zest {
 
         std::unordered_map<std::string, Location> memoryTree;
 
-        bool canFlush; // records were appended since the last fsync
+        bool canFlush;                      // records were appended since the last fsync
+        std::atomic<uint64_t> liveSize = 0; // sum of the sizes in memoryTree, changed under `mtx`
 
         /// Replays the INDEX file into memory and truncates an unreadable tail (a record cut by a crash).
         void loadIndexIntoMemory();
+
+        /// Sets `liveSize` from memoryTree; the caller holds `mtx`.
+        void recomputeLiveSize();
 
         /// Appends a record to the INDEX file; the caller holds `mtx`.
         void append(const IndexEntry& entry);

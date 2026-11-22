@@ -171,3 +171,16 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager refuses a value larger t
     StorageManager sm(settings);
     REQUIRE(sm.append(std::string(settings.SegSize + 1, 'z')).segmentId == INVALID_SEGMENT_ID);
 }
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager totalBytes sums every segment", "[storagemanager][compaction]") {
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 10;
+    StorageManager sm(smallSettings);
+    REQUIRE(sm.totalBytes() == 0);
+    sm.append("12345678");
+    sm.append("abcd");
+    REQUIRE(sm.totalBytes() == 12);
+    sm.removeUnusedSegments({ 2 });
+    REQUIRE(sm.totalBytes() == 4);
+}

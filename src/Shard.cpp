@@ -20,6 +20,14 @@ namespace Zest {
 
     namespace fs = std::filesystem;
 
+    namespace {
+        constexpr auto COMPACTION_CHECK_PERIOD = std::chrono::seconds(1);
+        constexpr uint64_t COMPACTION_DEAD_PERCENT = 50; // matches compactSegments(), which moves segments less than half live
+
+        // Held by the shard that is compacting: the others wait for their turn, so the shards never all block at once
+        std::mutex compactionTurnMtx;
+    } // namespace
+
     Shard::Shard(Settings& baseSettings, int shardIdNum)
         : settings(baseSettings),
           shardId(shardIdNum) {
@@ -97,20 +105,40 @@ namespace Zest {
 
             ZestLog(LogLevel::Info, "Starting the compactor...");
 
+            auto lastCompaction = std::chrono::steady_clock::now();
+            uint64_t deadAfterLast = 0;
             while (!stopToken.stop_requested()) {
-                unsigned int interval;
-                {
-                    std::shared_lock<std::shared_mutex> settingsLock(this->readMtx);
-                    interval = this->settings.CompactingInterval;
-                }
-                this->threadCV.wait_for(lock, stopToken, std::chrono::seconds(interval), [stopToken] { return stopToken.stop_requested(); });
-
+                this->threadCV.wait_for(lock, stopToken, COMPACTION_CHECK_PERIOD, [stopToken] { return stopToken.stop_requested(); });
                 if (stopToken.stop_requested()) {
                     break;
                 }
 
+                unsigned int interval;
+                unsigned long segSize;
+                {
+                    std::shared_lock<std::shared_mutex> settingsLock(this->readMtx);
+                    interval = this->settings.CompactingInterval;
+                    segSize = this->settings.SegSize;
+                }
+                const uint64_t dead = this->deadBytes();
+                // At least a segment of new dead data since the last run: dead data compaction could not move (in the
+                // segment being written) must not start it again at every check
+                const bool fragmented = dead * 100 >= this->storageManager->totalBytes() * COMPACTION_DEAD_PERCENT && dead >= deadAfterLast + segSize;
+                // Expired keys only count as dead once a compaction drops them: the interval bounds how long they stay
+                const bool overdue = std::chrono::steady_clock::now() - lastCompaction >= std::chrono::seconds(interval);
+                if (!fragmented && !overdue) {
+                    continue;
+                }
+
+                std::unique_lock<std::mutex> turn(compactionTurnMtx, std::try_to_lock);
+                if (!turn.owns_lock()) {
+                    continue; // another shard is compacting: try again at the next check
+                }
                 this->compact();
-                ZestLog(LogLevel::Debug, "Compactor - compaction done, waiting...");
+                turn.unlock();
+                lastCompaction = std::chrono::steady_clock::now();
+                deadAfterLast = this->deadBytes();
+                ZestLog(LogLevel::Debug, std::format("Compactor - shard {} compacted, {} dead bytes left", this->shardId, deadAfterLast));
             }
             ZestLog(LogLevel::Info, "Stopping the compactor...");
         });
@@ -120,6 +148,12 @@ namespace Zest {
         if (cacheThread.joinable()) {
             cacheThread.join();
         }
+    }
+
+    uint64_t Shard::deadBytes() {
+        const uint64_t total = this->storageManager->totalBytes();
+        const uint64_t live = this->indexManager->liveBytes();
+        return total > live ? total - live : 0;
     }
 
     void Shard::compact() {

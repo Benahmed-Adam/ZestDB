@@ -37,6 +37,9 @@ namespace Zest {
         /// fsyncs every segment that was written to. @return false if one of them failed.
         bool flush();
 
+        /// Bytes written to all the segments, live or dead.
+        uint64_t totalBytes();
+
         /// Id of the segment that receives the writes.
         uint32_t currentSegmentId() const;
 

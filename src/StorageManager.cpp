@@ -225,6 +225,15 @@ namespace Zest {
         return ok;
     }
 
+    uint64_t StorageManager::totalBytes() {
+        std::lock_guard<std::mutex> lock(this->mtx);
+        uint64_t total = 0;
+        for (const auto& [id, seg] : this->segments) {
+            total += seg->getWritePosition();
+        }
+        return total;
+    }
+
     uint32_t StorageManager::currentSegmentId() const {
         return this->latestSegmentId.load();
     }

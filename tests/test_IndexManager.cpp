@@ -274,3 +274,46 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager rejects an absurd key length
     REQUIRE_NOTHROW(im = std::make_unique<IndexManager>(settings));
     REQUIRE(im->search("a").offset == 1);
 }
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager liveBytes follows inserts, overwrites, deletes and reloads", "[indexmanager][compaction]") {
+    {
+        IndexManager im(settings);
+        IndexEntry a = makeEntry("a");
+        a.size = 10;
+        IndexEntry b = makeEntry("b");
+        b.size = 20;
+        im.insert(a);
+        im.insert(b);
+        REQUIRE(im.liveBytes() == 30);
+
+        a.size = 4;
+        im.insert(a);
+        REQUIRE(im.liveBytes() == 24);
+
+        IndexEntry moved = b;
+        moved.size = 7;
+        im.update("b", moved);
+        REQUIRE(im.liveBytes() == 11);
+
+        IndexEntry tombstone = makeEntry("a");
+        tombstone.isTombstone = true;
+        im.update("a", tombstone);
+        REQUIRE(im.liveBytes() == 7);
+        im.update("unknown", tombstone);
+        REQUIRE(im.liveBytes() == 7);
+        REQUIRE(im.flush());
+    }
+    IndexManager reloaded(settings);
+    REQUIRE(reloaded.liveBytes() == 7);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager compaction stops counting expired keys", "[indexmanager][compaction]") {
+    IndexManager im(settings);
+    IndexEntry expired = makeEntry("expired");
+    expired.size = 50;
+    expired.expiresAt = nowMs() - 1;
+    im.insert(expired);
+    REQUIRE(im.liveBytes() == 50);
+    im.compact();
+    REQUIRE(im.liveBytes() == 0);
+}

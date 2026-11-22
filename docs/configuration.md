@@ -15,7 +15,7 @@ Configuration is provided through `config.yaml` in the working directory. The fi
 | `MaxKeySize` | 64 | Maximum key length. |
 | `MaxValueSize` | 10000 | Maximum value length. |
 | `CacheSize` | 1000 | LRU cache capacity per shard. |
-| `CompactingInterval` | 3600 | Seconds between compaction runs. |
+| `CompactingInterval` | 3600 | Maximum seconds between two compactions of a shard. A shard is compacted earlier, as soon as half of its stored data is dead (overwritten or deleted); the interval bounds how long expired keys stay on disk. |
 | `FlushInterval` | 120 | Seconds between disk syncs. |
 | `DBPort` | 7321 | TCP data server port. |
 | `WebPort` | 1237 | HTTP monitoring server port. |
