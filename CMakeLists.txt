@@ -68,7 +68,8 @@ FetchContent_Declare(zstd
     SOURCE_SUBDIR build/cmake
     SYSTEM)
 FetchContent_MakeAvailable(zstd)
-target_include_directories(libzstd_static SYSTEM INTERFACE ${zstd_SOURCE_DIR}/lib)
+# BUILD_INTERFACE: zstd exports its targets for install, which refuses a path into the source or build tree
+target_include_directories(libzstd_static SYSTEM INTERFACE $<BUILD_INTERFACE:${zstd_SOURCE_DIR}/lib>)
 
 FetchContent_Declare(libzippp
     URL https://github.com/ctabin/libzippp/archive/refs/tags/libzippp-v7.1-1.10.1.tar.gz
