@@ -50,6 +50,7 @@ ZestDB follows a layered design where each layer is independently testable:
 ## Log-structured storage
 
 - Values are appended to fixed-size, append-only data segments (`*.seg`).
+- A value is stored zstd-compressed (level 3, with a checksum) when that makes it smaller; short or incompressible values are stored as is, and values written by older versions stay readable. The LRU cache keeps decompressed values.
 - When a segment reaches the configured capacity (`SegSize`), a new segment is automatically created (segment rotation).
 - Deletes are implemented as tombstones rather than physical removal, keeping the append-only model.
 - Unused (fully obsolete) segments are physically removed during compaction.

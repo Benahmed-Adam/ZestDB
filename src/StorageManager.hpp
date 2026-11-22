@@ -20,11 +20,12 @@ namespace Zest {
         /// Opens every `<DbPath>/seg/<id>.seg` file, or creates segment 1 in an empty folder.
         StorageManager(Settings& set);
 
-        /// Writes `value` to the current segment, opening a new one when it is full.
-        /// @return the location (segment, offset, size) with an empty key, or `INVALID_SEGMENT_ID` if the write failed.
+        /// Writes `value` to the current segment, zstd-compressed when that makes it smaller, opening a new segment when it is full.
+        /// @return the location (segment, offset, stored size) with an empty key, or `INVALID_SEGMENT_ID` if the write failed.
         IndexEntry append(const std::string& value);
 
-        /// Reads the value at `entry`'s location, or returns an empty string if the segment does not exist or the read fails.
+        /// Reads and decompresses the value at `entry`'s location, or returns an empty string if the segment does not
+        /// exist or the read or the decompression fails.
         std::string read(const IndexEntry& entry);
 
         /// True if `entry` points inside the written part of an existing segment (used to drop index entries left by a crash).
@@ -42,6 +43,9 @@ namespace Zest {
     private:
         /// Loads the existing segments and finds the latest one.
         void boot();
+
+        /// Writes the already compressed bytes to the current segment, opening a new one when they do not fit.
+        IndexEntry appendStored(const std::string& value);
 
         /// Writes to `seg` and turns the offset it returns into a location.
         IndexEntry appendToSegment(DataSegment* seg, const std::string& value);

@@ -13,6 +13,7 @@ No library has to be installed: on the first build, CMake (`FetchContent`) downl
 | Asio (standalone) | 1.38.2 | TCP/SSL server |
 | libzip + zlib | 1.12.1 + 1.3.2 | archives |
 | libzippp | 7.1-1.10.1 | archives (C++ wrapper) |
+| zstd | 1.5.7 | value compression |
 | Lua | 5.4.8 | scripting (compiled as C++, so Lua errors unwind as C++ exceptions) |
 | sol2 | 3.5.0 | C++ binding for Lua |
 | Catch2 | 3.16.1 | test suite |
