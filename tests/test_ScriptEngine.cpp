@@ -491,6 +491,36 @@ TEST_CASE_METHOD(ScriptFixture, "writes made by a procedure survive a restart", 
     REQUIRE(db->execCmd("g p:3").response == "v3");
 }
 
+TEST_CASE_METHOD(ScriptFixture, "writes made by functions and triggers are journaled in the WAL", "[scripts][wal]") {
+    REQUIRE(load("lib", R"lua(
+        zest.register_trigger{ name = "audit", phase = "after", event = "set", mode = "sw", pattern = "acc:",
+            fn = function(key, value) zest.set("audit:" .. key, value) end }
+        zest.register_function("work", function()
+            zest.set("acc:1", "10")
+            zest.incr("counter", 3)
+            zest.setnx("nx", "first")
+            zest.cas("acc:1", "10", "20")
+            zest.expire("nx", 60)
+            zest.set("gone", "x")
+            zest.del("gone")
+        end)
+    )lua")
+                .code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("call work").code == ResultType::Code::Success);
+
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(testDir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    for (const char* record : { R"(s acc:1 "10")", R"(s audit:acc:1 "10")", R"(s counter "3")", R"(s nx "first")", R"(s acc:1 "20")", R"(s audit:acc:1 "20")", "expireat nx ", R"(s gone "x")", "d gone" }) {
+        INFO(record);
+        REQUIRE(wal.find(record) != std::string::npos);
+    }
+}
+
 TEST_CASE_METHOD(ScriptFixture, "a procedure that writes respects read-only mode", "[scripts][call]") {
     REQUIRE(load("lib", R"lua(zest.register_function("w", function() zest.set("k", "v") end))lua").code == ResultType::Code::Success);
     REQUIRE(db->execCmd("scfg readonly true").code == ResultType::Code::Success);
