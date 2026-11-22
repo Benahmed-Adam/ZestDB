@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <thread>
 #include <vector>
 
@@ -58,7 +59,7 @@ public:
         fs::current_path(testDir);
         db = std::make_unique<ZestDB>();
         for (int i = 0; i < 4; i++) {
-            ioThreads.emplace_back([this] { db->ioCtx.run(); });
+            ioThreads.emplace_back([this] { db->ioContext().run(); });
         }
     }
 
@@ -247,4 +248,55 @@ TEST_CASE_METHOD(SessionFixture, "Session passes its user and role to the script
     Client admin;
     REQUIRE(login(admin, "root", "r").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(admin.send("call who").find("\"response\":\"root:admin\"") != std::string::npos);
+}
+
+static size_t countOf(const std::string& text, const std::string& part) {
+    size_t n = 0;
+    for (size_t pos = text.find(part); pos != std::string::npos; pos = text.find(part, pos + part.size())) {
+        n++;
+    }
+    return n;
+}
+
+TEST_CASE_METHOD(SessionFixture, "Stopping the server answers the request in progress before closing", "[session][shutdown]") {
+    REQUIRE(db->loadScript("slow", "zest.register_function('slow', function(key) for i = 1, 4000000 do end zest.incr(key) return 'done' end)").code == ResultType::Code::Success);
+
+    Client c;
+    REQUIRE(login(c, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+
+    constexpr int calls = 40;
+    std::string payload;
+    for (int i = 0; i < calls; i++) {
+        const std::string cmd = R"(call slow "counter")";
+        payload += be32(static_cast<uint32_t>(cmd.size())) + cmd;
+    }
+    // The replies of a batch are separated by "\r\n\r\n": read up to the final "}\n", not the first "\n"
+    auto reply = std::async(std::launch::async, [&c, &payload] {
+        asio::error_code ec;
+        asio::write(c.sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload), ec);
+        asio::streambuf buf;
+        asio::read_until(c.sock, buf, "}\n", ec);
+        return std::string(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    db->stop();
+
+    const std::string answers = reply.get();
+    INFO(answers.substr(0, 300));
+    REQUIRE(countOf(answers, codeOf(ResultType::Code::Success)) == calls);
+    REQUIRE(c.send("g counter").empty());
+}
+
+TEST_CASE_METHOD(SessionFixture, "Stopping the server closes idle sessions without waiting", "[session][shutdown]") {
+    Client idle;
+    REQUIRE(login(idle, "bob", "bob").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    Client unauthenticated;
+
+    const auto start = std::chrono::steady_clock::now();
+    db->stop();
+    REQUIRE(std::chrono::steady_clock::now() - start < std::chrono::seconds(3));
+
+    REQUIRE(idle.send("g k").empty());
+    REQUIRE(unauthenticated.send("Authorization: bob." + sha256("bobbob")).empty());
 }

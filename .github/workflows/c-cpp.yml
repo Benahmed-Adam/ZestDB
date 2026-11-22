@@ -2,9 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -38,6 +42,98 @@ jobs:
       run: cmake --build build --config Release --parallel
     - name: run tests
       run: ctest --test-dir build -C Release --output-on-failure
+
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: install clang-format
+      run: pip install clang-format==21.1.8
+    - name: check formatting
+      run: clang-format --dry-run --Werror src/*.hpp src/*.cpp tests/*.cpp
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: cache downloaded dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/Release/_deps
+        key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: deps-${{ runner.os }}-
+    - name: install clang-tidy
+      run: pip install clang-tidy==21.1.6
+    - name: configure
+      run: cmake -S . -B build/Release -DCMAKE_BUILD_TYPE=Release -DZESTDB_BUILD_TESTS=OFF
+    - name: clang-tidy
+      run: ls src/*.cpp | xargs -P 4 -n 1 clang-tidy -p build/Release --quiet --extra-arg=-Wno-unknown-warning-option
+
+  sanitize:
+    name: sanitize-${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: asan
+            sanitizers: address,undefined
+          - name: tsan
+            sanitizers: thread
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: cache downloaded dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/${{ matrix.name }}/_deps
+        key: deps-${{ matrix.name }}-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: deps-${{ matrix.name }}-${{ runner.os }}-
+    - name: allow ThreadSanitizer's memory layout
+      run: sudo sysctl vm.mmap_rnd_bits=28
+    - name: configure
+      run: cmake -S . -B build/${{ matrix.name }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DZESTDB_SANITIZE=${{ matrix.sanitizers }}
+    - name: build
+      run: cmake --build build/${{ matrix.name }} --parallel
+    - name: run tests
+      working-directory: build/${{ matrix.name }}
+      env:
+        ASAN_OPTIONS: detect_leaks=1
+        UBSAN_OPTIONS: print_stacktrace=1
+        TSAN_OPTIONS: halt_on_error=1 second_deadlock_stack=1
+      run: ./zestdb_tests
+
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: cache downloaded dependencies
+      uses: actions/cache@v4
+      with:
+        path: build/coverage/_deps
+        key: deps-coverage-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: deps-coverage-${{ runner.os }}-
+    - name: install gcovr
+      run: pip install gcovr
+    - name: configure
+      run: cmake -S . -B build/coverage -DCMAKE_BUILD_TYPE=Debug -DZESTDB_COVERAGE=ON
+    - name: build
+      run: cmake --build build/coverage --parallel
+    - name: run tests
+      working-directory: build/coverage
+      run: ./zestdb_tests
+    - name: report
+      run: |
+        mkdir -p coverage
+        gcovr --root . --filter 'src/' --exclude 'src/lib/' --gcov-ignore-errors=no_working_dir_found --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --html-details coverage/index.html --txt coverage/summary.txt build/coverage
+        { echo '## Coverage of src/'; echo '```'; cat coverage/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage
+        path: coverage/
 
   docker:
     if: github.event_name == 'pull_request'

@@ -9,9 +9,20 @@ make run            # or ./bin/zestdb
 
 The process also starts the HTTP monitoring server and an interactive REPL. Type `q` / `quit` to exit gracefully.
 
+## Stopping
+
+`q` in the REPL, `Ctrl+C` (`SIGINT`) and `SIGTERM` all stop the server gracefully:
+
+1. The server stops accepting connections.
+2. Idle sessions are closed at once.
+3. A session processing a request finishes it, runs every command of the batch and sends the reply, then closes. Sessions still busy after 5 seconds are closed without their reply.
+4. Every shard is flushed to disk.
+
+A client that loses its connection without a reply cannot know whether its last request was applied. The writes of a request that ran are in the WAL either way, so retry it only if it is safe to apply twice.
+
 ## Docker
 
-An image is published on Docker Hub as `benahmedadam/zestdb` (`latest`, and `sha-<commit>` for each commit on `main`). To build it locally: `docker build -t zestdb .` The Docker Hub page is [`docker/README.md`](../docker/README.md): update it with the image.
+An image is published on Docker Hub as `benahmedadam/zestdb`: `latest` and `sha-<commit>` for each merge into `main`, `dev` and `dev-sha-<commit>` for each merge into `dev`. To build it locally: `docker build -t zestdb .` The Docker Hub page is [`docker/README.md`](../docker/README.md): update it with the image.
 ```bash
 docker run -it -p 7321:7321 -p 1237:1237 \
   -v zestdb-data:/data/db -v zestdb-archive:/data/archive \
@@ -21,7 +32,7 @@ docker run -it -p 7321:7321 -p 1237:1237 \
 - `-it` connects the interactive REPL; without it the server still runs, but nothing reads the commands typed in the terminal. Use `-dit` and `docker attach` to run it in the background and reach the REPL later (`Ctrl+P` `Ctrl+Q` detaches).
 - `/data/db` and `/data/archive` are volumes: name them as above, otherwise Docker creates anonymous volumes that a new `docker run` does not reuse.
 - The default configuration (`docker/config.yaml`) accepts every address and has **no user account**, so no client can connect over TCP until you mount your own `config.yaml` over `/data/config.yaml` with users. The REPL works without one.
-- `docker stop` sends `SIGTERM`, which flushes every shard before exiting.
+- `docker stop` sends `SIGTERM`, which stops the server gracefully (see [stopping](#stopping)). Docker kills the container after 10 seconds: keep that default or raise it with `docker stop -t <seconds>`.
 
 ## Archives
 

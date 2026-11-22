@@ -76,17 +76,42 @@ namespace Zest {
         });
     }
 
+    void Session::drain() {
+        this->draining_ = true;
+        // A request or the handshake is in progress: do_read_size() closes the session once it is answered
+        if (!this->waitingForRequest_) {
+            return;
+        }
+        if (this->write_queue_.empty()) {
+            this->close_stream();
+        } else {
+            this->closing_ = true;
+        }
+    }
+
     void Session::do_read_size() {
+        if (this->draining_) {
+            if (this->write_queue_.empty()) {
+                this->close_stream();
+            } else {
+                this->closing_ = true;
+            }
+            return;
+        }
         this->touch();
+        this->waitingForRequest_ = true;
         auto self(this->shared_from_this());
         std::visit(
             [this, self](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(4), [this, self](std::error_code ec, std::size_t length) {
+                    this->waitingForRequest_ = false;
                     if (!ec && length == 4) {
                         std::istream is(&this->buffer_);
                         uint32_t payload_size;
                         is.read(reinterpret_cast<char*>(&payload_size), 4);
                         payload_size = ntohl(payload_size);
+                        // Checked before reading the payload, so a client cannot make the server allocate gigabytes
+                        // (the limit is lower before authentication)
                         if (payload_size > (this->authenticated_ ? MAX_PAYLOAD_SIZE : MAX_UNAUTHENTICATED_PAYLOAD_SIZE)) {
                             ZestLog(LogLevel::Warning, std::format("Session: payload of {} bytes refused", payload_size));
                             this->queue_write(ZestDB::responseToJson({ ResultType::Code::PayloadTooLarge }) + "\n", true);
@@ -147,6 +172,8 @@ namespace Zest {
                         final_result += cmd_result;
                     }
 
+                    // Group commit: every command of the batch appended to the WAL, one sync makes them all durable.
+                    // A batch is never acknowledged before its writes are on disk.
                     if (!this->db_.syncWAL()) {
                         ZestLog(LogLevel::Error, "Session: the WAL could not be written, closing without acknowledging the batch");
                         this->close_stream();
@@ -169,7 +196,7 @@ namespace Zest {
             const std::string authPrefix = "Authorization: ";
             const size_t dotPos = cmd.find('.', authPrefix.size());
             should_close = true;
-            if (cmd.compare(0, authPrefix.size(), authPrefix) != 0 || dotPos == std::string::npos) {
+            if (!cmd.starts_with(authPrefix) || dotPos == std::string::npos) {
                 return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
 
@@ -190,6 +217,8 @@ namespace Zest {
             return ZestDB::responseToJson({ ResultType::Code::Success });
         }
 
+        // The role is looked up on every command rather than kept from the login, so a `reload` that removes the user or
+        // changes its role applies to the open session at once
         std::optional<Role> role = this->db_.roleOf(this->username_);
         if (!role) {
             should_close = true;
@@ -247,6 +276,7 @@ namespace Zest {
     std::vector<std::unique_ptr<asio::io_context>> Server::makeWorkers() {
         std::vector<std::unique_ptr<asio::io_context>> workers;
         const unsigned int threads = std::max(1u, std::thread::hardware_concurrency());
+        workers.reserve(threads);
         for (unsigned int i = 0; i < threads; i++) {
             workers.push_back(std::make_unique<asio::io_context>(1));
         }
@@ -259,26 +289,35 @@ namespace Zest {
           acceptor_(*workers_[0], tcp::endpoint(tcp::v4(), port)),
           accept_retry_timer_(*workers_[0]),
           db_(db),
-          useSSL_(db.settings.useSSL),
-          maxConnections_(db.settings.MaxConnections),
-          limits_{ std::chrono::seconds(db.settings.AuthTimeout), std::chrono::seconds(db.settings.IdleTimeout) } {
+          useSSL_(db.getSettings().useSSL),
+          maxConnections_(db.getSettings().MaxConnections),
+          limits_{ std::chrono::seconds(db.getSettings().AuthTimeout), std::chrono::seconds(db.getSettings().IdleTimeout) } {
         for (auto& worker : this->workers_) {
             this->workGuards_.push_back(asio::make_work_guard(*worker));
         }
         ZestLog(LogLevel::Info, std::format("Server: listening on port {} with {} IO threads", port, this->workers_.size()));
         if (this->useSSL_) {
             ssl_context_.set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::no_sslv3 | asio::ssl::context::no_tlsv1 | asio::ssl::context::no_tlsv1_1 | asio::ssl::context::single_dh_use);
-            ssl_context_.use_certificate_chain_file(this->db_.settings.SSLCertPath.string());
-            ssl_context_.use_private_key_file(this->db_.settings.SSLKeyPath.string(), asio::ssl::context::pem);
+            ssl_context_.use_certificate_chain_file(this->db_.getSettings().SSLCertPath.string());
+            ssl_context_.use_private_key_file(this->db_.getSettings().SSLKeyPath.string(), asio::ssl::context::pem);
         }
         this->do_accept();
         for (auto& worker : this->workers_) {
-            this->workerThreads_.emplace_back([&worker] { worker->run(); });
+            std::promise<void> finished;
+            this->workersDone_.push_back(finished.get_future());
+            this->workerThreads_.emplace_back([&worker, done = std::move(finished)]() mutable {
+                worker->run();
+                done.set_value();
+            });
         }
     }
 
     Server::~Server() {
-        this->stop();
+        try {
+            this->stop();
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", e.what()));
+        }
     }
 
     void Server::stop() {
@@ -287,14 +326,42 @@ namespace Zest {
         }
         std::promise<void> closed;
         asio::post(this->acceptor_.get_executor(), [this, &closed] {
-            std::error_code ignored;
-            this->acceptor_.close(ignored);
+            std::error_code ec;
+            static_cast<void>(this->acceptor_.close(ec));
+            if (ec) {
+                ZestLog(LogLevel::Error, std::format("Server: stop failed while destroying the server: {}", ec.message()));
+            }
             this->accept_retry_timer_.cancel();
             closed.set_value();
         });
         closed.get_future().wait();
+
+        // Ask every session to finish its current request and close. Resetting the work guards lets each worker's run()
+        // return once its sessions are closed, which is what the futures below wait for.
+        size_t open = 0;
+        {
+            std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+            for (auto& weak : this->sessions_) {
+                if (auto session = weak.lock()) {
+                    open++;
+                    asio::post(session->executor(), [session] { session->drain(); });
+                }
+            }
+            this->sessions_.clear();
+        }
         for (auto& guard : this->workGuards_) {
             guard.reset();
+        }
+        if (open > 0) {
+            ZestLog(LogLevel::Info, std::format("Server: waiting for {} sessions to send their last reply", open));
+        }
+        const auto deadline = std::chrono::steady_clock::now() + DRAIN_TIMEOUT;
+        bool drained = true;
+        for (auto& done : this->workersDone_) {
+            drained = done.wait_until(deadline) == std::future_status::ready && drained;
+        }
+        if (!drained) {
+            ZestLog(LogLevel::Warning, std::format("Server: sessions still busy after {}s, closing them", DRAIN_TIMEOUT.count()));
         }
         for (auto& worker : this->workers_) {
             worker->stop();
@@ -326,7 +393,7 @@ namespace Zest {
             if (this->activeSessions_->load() >= this->maxConnections_) {
                 ZestLog(LogLevel::Warning, std::format("Server: refusing a connection, {} sessions already open", this->maxConnections_));
                 std::error_code ignored;
-                socket.close(ignored);
+                static_cast<void>(socket.close(ignored));
             } else {
                 auto executor = socket.get_executor();
                 std::shared_ptr<Session> session;
@@ -334,6 +401,12 @@ namespace Zest {
                     session = std::make_shared<Session>(asio::ssl::stream<tcp::socket>(std::move(socket), this->ssl_context_), this->db_, this->limits_, this->activeSessions_);
                 } else {
                     session = std::make_shared<Session>(std::move(socket), this->db_, this->limits_, this->activeSessions_);
+                }
+                {
+                    // Pruned on each connection, so the list does not keep growing with closed sessions
+                    std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+                    std::erase_if(this->sessions_, [](const std::weak_ptr<Session>& weak) { return weak.expired(); });
+                    this->sessions_.push_back(session);
                 }
                 asio::dispatch(executor, [session] { session->start(); });
             }

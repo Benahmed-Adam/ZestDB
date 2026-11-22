@@ -64,7 +64,7 @@ While a file is being loaded, it may only call `register_function` and `register
 | `zest.cas(key, expected, value)` | `true` if the value was replaced |
 | `zest.count([mode, pattern])` | The number of live keys |
 | `zest.keys([mode, pattern [, lim]])` | A table of keys, sorted; with `lim` (a positive number), the `lim` smallest ones |
-| `zest.caller()` | The client that sent the command, as `{ user = "bob", role = "write" }`, or `nil` for a write the server makes on its own. `user` is absent outside an authenticated session (local console). It cannot be called while loading. |
+| `zest.caller()` | The client that sent the command, as `{ user = "bob", role = "write" }`, or `nil` for a write the server makes on its own. Commands typed in the server's REPL come from `{ user = "ZestLocalAdmin", role = "admin" }`. It cannot be called while loading. |
 | `zest.log(message [, level])` / `print(...)` | Writes to the server log. The `level` is `debug`, `info` (default), `warning` or `error`; `print` logs at info. |
 
 `mode` and `pattern` take the same modes as `getby`: `sw`, `ct`, `ew` or `re`.

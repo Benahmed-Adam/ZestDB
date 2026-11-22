@@ -387,3 +387,73 @@ TEST_CASE_METHOD(ShardFixture, "Shard compactor reclaims mostly dead segments an
         REQUIRE(reopened.get(std::format("k{}", i)).response == std::format("new_{:05}", i));
     }
 }
+
+TEST_CASE_METHOD(ShardFixture, "Shard setBy keeps the expiry of each key", "[shard][ttl]") {
+    Shard shard(settings, 0);
+    const uint64_t expiresAt = nowMs() + 60'000;
+    shard.set("abc_ttl", "old", expiresAt);
+    shard.set("abc_none", "old");
+    ValidationRule vr;
+    vr.func = [](std::string_view k) { return k.starts_with("abc_"); };
+
+    REQUIRE(shard.setBy(vr, "new").affectedRows == 2);
+    REQUIRE(shard.get("abc_ttl").response == "new");
+    REQUIRE(std::stoi(shard.getTTL("abc_ttl").response) > 0);
+    REQUIRE(shard.getTTL("abc_none").response == "-1");
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard replace keeps the expiry and never creates a key", "[shard][ttl]") {
+    Shard shard(settings, 0);
+    const uint64_t original = nowMs() + 60'000;
+    shard.set("k", "old", original);
+
+    uint64_t expiresAt = 0;
+    REQUIRE(shard.replace("k", "new", expiresAt).code == ResultType::Code::Success);
+    REQUIRE(expiresAt == original);
+    REQUIRE(shard.get("k").response == "new");
+    REQUIRE(std::stoi(shard.getTTL("k").response) > 0);
+
+    REQUIRE(shard.replace("missing", "v", expiresAt).code == ResultType::Code::KeyNotFound);
+    REQUIRE(shard.get("missing").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard deadBytes counts overwritten and deleted values", "[shard][compaction]") {
+    Shard shard(settings, 0);
+    shard.set("a", "0123456789");
+    shard.set("b", "0123456789");
+    REQUIRE(shard.deadBytes() == 0);
+    shard.set("a", "xyz");
+    REQUIRE(shard.deadBytes() == 10);
+    shard.del("b");
+    REQUIRE(shard.deadBytes() == 20);
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard compactor starts once half of the data is dead, without waiting for the interval", "[shard][compaction]") {
+    settings.SegSize = 64;
+    settings.CompactingInterval = 3600;
+    Shard shard(settings, 0);
+    for (int i = 0; i < 20; i++) {
+        shard.set(std::format("k{}", i), "0123456789");
+    }
+    for (int i = 0; i < 20; i++) {
+        shard.del(std::format("k{}", i));
+    }
+    const fs::path segDir = testDir / "shards" / "0" / "seg";
+    REQUIRE(waitFor([&] { return segmentFiles(segDir) == 0; }));
+    REQUIRE(shard.deadBytes() == 0);
+}
+
+TEST_CASE_METHOD(ShardFixture, "Shard compactor leaves a shard with little dead data alone", "[shard][compaction]") {
+    settings.SegSize = 64;
+    settings.CompactingInterval = 3600;
+    Shard shard(settings, 0);
+    for (int i = 0; i < 20; i++) {
+        shard.set(std::format("k{}", i), "0123456789");
+    }
+    shard.del("k0");
+    const fs::path segDir = testDir / "shards" / "0" / "seg";
+    const size_t before = segmentFiles(segDir);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    REQUIRE(segmentFiles(segDir) == before);
+    REQUIRE(shard.deadBytes() == 10);
+}

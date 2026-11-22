@@ -10,19 +10,24 @@
 
 namespace Zest {
 
+    /// Which keys a pattern command (getby, setby, delby, count, keys) or a trigger applies to.
     struct ValidationRule {
-        std::function<bool(std::string_view)> func;
-        unsigned int limit = UINT_MAX;
+        std::function<bool(std::string_view)> func; // the key matches when it returns true; empty means every key
+        unsigned int limit = UINT_MAX;              // `lim <n>`, UINT_MAX without one
+        // Set by ShardManager during a parallel command with a limit: the rows already taken by every shard
         std::atomic<unsigned int>* globalMatchCount = nullptr;
     };
 
+    /// Permission level of a user; each role can run the commands of the ones before it.
     enum class Role {
         Read,
         Write,
         Admin
     };
 
+    /// The result of every command, sent to the client as `{"affectedRows":..,"code":..,"response":..}`.
     struct ResultType {
+        /// Part of the protocol, never renumbered: every code is described in docs/return-codes.md, keep it in sync.
         enum class Code {
             Success = 0,
 
@@ -77,10 +82,13 @@ namespace Zest {
             ScriptLimitExceeded = 604
         };
         Code code;
-        std::string response = "";
-        long long affectedRows = 0;
+        std::string response = "";  // the data returned, or the error message of a script error; empty otherwise
+        long long affectedRows = 0; // entries read or modified
     };
 
+    /// The configuration read from config.yaml (see docs/configuration.md for each field).
+    /// Each shard keeps a copy in which DbPath, IndexPath and WalPath point to its own files.
+    /// The initial values are the defaults of a field missing from config.yaml (loadConfig reads them from here).
     struct Settings {
         std::filesystem::path DbPath;
         std::filesystem::path IndexPath;
@@ -89,31 +97,31 @@ namespace Zest {
         std::filesystem::path SSLKeyPath;
         std::filesystem::path ArchiveStoragePath;
 
-        unsigned long SegSize;
-        unsigned int MaxKeySize;
-        unsigned int MaxValueSize;
-        unsigned int CacheSize;
-        unsigned int CompactingInterval;
-        unsigned int FlushInterval;
-        uint16_t DBPort;
-        uint16_t WebPort;
+        unsigned long SegSize = 128000;
+        unsigned int MaxKeySize = 64;
+        unsigned int MaxValueSize = 10000;
+        unsigned int CacheSize = 1000;
+        unsigned int CompactingInterval = 3600;
+        unsigned int FlushInterval = 120;
+        uint16_t DBPort = 7321;
+        uint16_t WebPort = 1237;
 
-        std::regex NetworkValidation;
-        std::string NetworkValidationStr;
+        std::regex NetworkValidation; // compiled from NetworkValidationStr
+        std::string NetworkValidationStr = ".*";
 
-        unsigned int ArchiveCreationDelay;
-        unsigned int ArchiveRetention;
+        unsigned int ArchiveCreationDelay = 3600;
+        unsigned int ArchiveRetention = 10;
 
-        unsigned int MaxConnections;
-        unsigned int AuthTimeout;
-        unsigned int IdleTimeout;
+        unsigned int MaxConnections = 1024;
+        unsigned int AuthTimeout = 10;
+        unsigned int IdleTimeout = 300;
 
-        bool AutoArchiveSaving;
-        bool isDebug;
-        bool useSSL;
-        bool jsonOnly;
-        bool readOnly;
-        bool fsyncOnWrite;
+        bool AutoArchiveSaving = true;
+        bool isDebug = false;
+        bool useSSL = false;
+        bool jsonOnly = false;
+        bool readOnly = false;
+        bool fsyncOnWrite = true;
     };
 
 } // namespace Zest

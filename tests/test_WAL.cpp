@@ -113,7 +113,7 @@ TEST_CASE_METHOD(WALFixture, "WAL append reaches the file without fsyncOnWrite",
     WAL wal(settings, walPath);
     wal.append("s key value");
     REQUIRE(wal.sync());
-    REQUIRE(fs::file_size(walPath) > 0);
+    REQUIRE(fs::file_size(walPath) > 5);
 }
 
 TEST_CASE_METHOD(WALFixture, "WAL sequence numbers order entries across WAL files", "[wal]") {
@@ -170,4 +170,41 @@ TEST_CASE_METHOD(WALFixture, "WAL sequence continues after the entries found at 
     WAL wal(settings, walPath);
     REQUIRE(wal.append("after replay"));
     REQUIRE(wal.getCmds().back().seq >= (1u << 30));
+}
+
+static std::string readFile(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+/// Flips every bit of the byte at `pos`.
+static void flipByte(const fs::path& path, size_t pos) {
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    f.seekg(static_cast<std::streamoff>(pos));
+    const char c = static_cast<char>(f.get());
+    f.seekp(static_cast<std::streamoff>(pos));
+    f.put(static_cast<char>(~c));
+}
+
+TEST_CASE_METHOD(WALFixture, "WAL files start with a versioned header", "[wal][crc]") {
+    WAL wal(settings, walPath);
+    REQUIRE(readFile(walPath) == std::string("ZWAL\x01", 5));
+    REQUIRE(wal.append("a"));
+    wal.clear();
+    REQUIRE(readFile(walPath) == std::string("ZWAL\x01", 5));
+}
+
+TEST_CASE_METHOD(WALFixture, "WAL replay stops at a record that fails its checksum", "[wal][crc]") {
+    {
+        WAL wal(settings, walPath);
+        REQUIRE(wal.append("first"));
+        REQUIRE(wal.append("second"));
+        REQUIRE(wal.append("third"));
+        REQUIRE(wal.sync());
+    }
+    flipByte(walPath, readFile(walPath).find("second") + 2);
+    WAL wal(settings, walPath);
+    auto cmds = wal.getCmds();
+    REQUIRE(cmds.size() == 1);
+    REQUIRE(cmds[0].cmd == "first");
 }

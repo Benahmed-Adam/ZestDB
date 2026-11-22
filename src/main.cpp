@@ -9,6 +9,7 @@
 #include "Logger.hpp"
 #include "ZestDB.hpp"
 
+/// Demo load started by `zestdb pop`: writes one million keys (`key_<i>` = `val_<i>`) and logs how long it took.
 void populate(Zest::ZestDB* db) {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -22,6 +23,8 @@ void populate(Zest::ZestDB* db) {
     Zest::ZestLog(Zest::LogLevel::Info, std::format("1 Million keys in : {} seconds", std::to_string(diff.count())));
 }
 
+/// The interactive console: reads commands from stdin and runs them as the admin user `ZestLocalAdmin`.
+/// `q` / `quit` stops the database; end of input (Ctrl+D, a closed pipe) leaves the loop.
 void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_type>* workGuard) {
     std::string line;
     while (db->isRunning()) {
@@ -39,13 +42,13 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
         iss >> cmd;
 
         if (cmd == "q" || cmd == "quit") {
-            std::cout << "Goodbye!" << std::endl;
+            std::cout << "Goodbye!\n" << std::flush;
             workGuard->reset();
             db->stop();
             break;
         } else {
             try {
-                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line, Zest::Role::Admin, true, "ZestLocalAdmin")) << std::endl;
+                std::cout << Zest::ZestDB::responseToJson(db->execCmd(line, Zest::Role::Admin, true, "ZestLocalAdmin")) << '\n' << std::flush;
             } catch (const std::exception& e) {
                 Zest::ZestLog(Zest::LogLevel::Error, std::format("Command failed with an exception: {}", e.what()));
             }
@@ -53,12 +56,15 @@ void cmd(Zest::ZestDB* db, asio::executor_work_guard<asio::io_context::executor_
     }
 }
 
-int main(int argc, char** argv) {
+/// Starts the database, the console, the signal handler and the HTTP stats server.
+/// Threads: the console reads stdin, `ioThread` runs the signal handler, and the main thread serves HTTP until stop().
+static int run(int argc, char** argv) {
     Zest::ZestDB db;
 
-    auto work = asio::make_work_guard(db.ioCtx);
+    // Keeps ioThread's run() alive while nothing else is queued; released on exit
+    auto work = asio::make_work_guard(db.ioContext());
 
-    asio::signal_set signals(db.ioCtx, SIGINT, SIGTERM);
+    asio::signal_set signals(db.ioContext(), SIGINT, SIGTERM);
 
     signals.async_wait([&](const asio::error_code& error, int) {
         if (!error) {
@@ -76,9 +82,9 @@ int main(int argc, char** argv) {
 
     std::thread cmdThread(cmd, &db, &work);
 
-    std::thread ioThread([&db]() { db.ioCtx.run(); });
+    std::thread ioThread([&db]() { db.ioContext().run(); });
 
-    db.srv->listen("0.0.0.0", db.settings.WebPort);
+    db.httpServer().listen("0.0.0.0", db.getSettings().WebPort);
 
     cmdThread.join();
     ioThread.join();
@@ -87,4 +93,15 @@ int main(int argc, char** argv) {
     }
 
     return 0;
+}
+
+/// Runs the server; a startup failure (missing config.yaml, invalid setting, port in use...) is logged instead of
+/// ending in std::terminate.
+int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        Zest::ZestLog(Zest::LogLevel::Critical, std::format("ZestDB stopped: {}", e.what()));
+        return 1;
+    }
 }

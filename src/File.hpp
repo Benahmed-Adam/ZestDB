@@ -17,6 +17,10 @@
 
 namespace Zest {
 
+    /// Forces the data of the file at `path` from the OS cache to the disk.
+    /// std::fstream cannot do this itself, so the file is reopened with the system API:
+    /// `FlushFileBuffers` on Windows, `fsync` on macOS, `fdatasync` elsewhere (the data without the metadata, which is enough
+    /// to read it back). @return false if the file cannot be opened or the sync fails.
     inline bool sync_to_disk(const std::filesystem::path& path) {
 #ifdef _WIN32
         HANDLE handle = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -45,6 +49,8 @@ namespace Zest {
         return ok;
     }
 
+    /// Flushes the stream's buffer to the OS, then syncs the file to the disk.
+    /// @return false if the stream is closed, the flush failed or the sync failed.
     inline bool flush_and_fsync(std::fstream& fs, const std::filesystem::path& path) {
         if (!fs.is_open()) {
             ZestLog(LogLevel::Error, "flush_and_fsync - stream is not open");

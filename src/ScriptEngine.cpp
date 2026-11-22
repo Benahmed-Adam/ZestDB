@@ -21,16 +21,20 @@ namespace Zest {
 
     namespace {
 
-        constexpr uint64_t MAX_INSTRUCTIONS = 20'000'000;
-        constexpr int HOOK_STEP = 1000;
-        constexpr size_t MAX_MEMORY = size_t{ 64 } << 20;
-        constexpr int MAX_DEPTH = 16;
+        constexpr uint64_t MAX_INSTRUCTIONS = 20'000'000; // per command, nested scripts included
+        constexpr int HOOK_STEP = 1000;                   // the instruction hook runs every HOOK_STEP instructions
+        constexpr size_t MAX_MEMORY = size_t{ 64 } << 20; // per Lua state, so per server thread
+        constexpr int MAX_DEPTH = 16;                     // scripts and triggers nested in one another
+        // Starts every limit message. It is also how a limit is recognised after crossing Lua frames: a nested call
+        // fails, its message becomes a Lua error, and the outer call finds the mark in it.
         constexpr const char* LIMIT_MARK = "script limit reached";
 
         std::atomic<uint64_t> nextEngineId{ 1 };
 
+        // The client of the command running on this thread (see ScriptEngine::CallerScope)
         thread_local std::optional<ScriptEngine::Caller> currentCaller;
 
+        /// Name of a role as scripts see it in `zest.caller().role`.
         const char* roleName(Role role) {
             switch (role) {
             case Role::Read:
@@ -43,11 +47,15 @@ namespace Zest {
             return "unknown";
         }
 
+        /// Usage of one Lua state, checked against the limits.
         struct Limits {
-            uint64_t instructions = 0;
-            size_t memory = 0;
+            uint64_t instructions = 0; // since the start of the current command
+            size_t memory = 0;         // bytes allocated by the state
         };
 
+        /// Lua allocator (lua_Alloc) that refuses to grow the state past MAX_MEMORY: Lua then raises a memory error,
+        /// which stops the script instead of the server. `ud` is the state's Limits.
+        /// When `ptr` is null, `osize` is not a size but the type of object being created, hence `old = 0`.
         void* limitedAlloc(void* ud, void* ptr, size_t osize, size_t nsize) {
             auto* limits = static_cast<Limits*>(ud);
             const size_t old = ptr != nullptr ? osize : 0;
@@ -66,6 +74,8 @@ namespace Zest {
             return block;
         }
 
+        /// Count hook called every HOOK_STEP instructions: raises a Lua error once the command used MAX_INSTRUCTIONS,
+        /// which ends an infinite loop. The state's Limits pointer is stored in the state's extra space.
         void countHook(lua_State* L, lua_Debug*) {
             Limits* limits = *static_cast<Limits**>(lua_getextraspace(L));
             limits->instructions += static_cast<uint64_t>(HOOK_STEP);
@@ -74,6 +84,8 @@ namespace Zest {
             }
         }
 
+        /// Turns the failed result of a ZestDB call made by a script into a Lua error (sol2 converts the exception).
+        /// A limit keeps its message, so the outer call still reports ScriptLimitExceeded.
         [[noreturn]] void fail(const ResultType& result) {
             if (result.code == ResultType::Code::ScriptLimitExceeded) {
                 throw std::runtime_error(result.response.empty() ? std::string(LIMIT_MARK) : result.response);
@@ -81,8 +93,11 @@ namespace Zest {
             throw std::runtime_error(std::format("the command failed with code {}{}", static_cast<int>(result.code), result.response.empty() ? "" : ": " + result.response));
         }
 
+        /// The ResultType of a failed Lua call: ScriptLimitExceeded for a limit, `fallback` otherwise, with the Lua error
+        /// message as the response (without the stack trace sol2 appends, which only goes to the debug log).
         ResultType failure(sol::protected_function_result& result, ResultType::Code fallback, std::string_view what) {
             const bool outOfMemory = result.status() == sol::call_status::memory;
+            // Free what the failed script left behind, or the next command of this thread would start out of memory
             if (outOfMemory) {
                 lua_gc(result.lua_state(), LUA_GCCOLLECT);
             }
@@ -93,24 +108,30 @@ namespace Zest {
             return { outOfMemory || message.find(LIMIT_MARK) != std::string::npos ? ResultType::Code::ScriptLimitExceeded : fallback, message };
         }
 
+        /// True if a name of `added` is already in `taken`.
         bool conflicts(const std::vector<std::string>& taken, const std::vector<std::string>& added) {
             return std::any_of(added.begin(), added.end(), [&taken](const std::string& name) { return std::find(taken.begin(), taken.end(), name) != taken.end(); });
         }
 
     } // namespace
 
+    /// A Lua state, its limits, and the functions and triggers its scripts registered.
     struct ScriptEngine::LuaContext {
+        /// Load: the scripts' top-level code runs, only `zest.register_*` is allowed. Run: functions and triggers run,
+        /// with the data API.
         enum class Mode {
             Load,
             Run
         };
 
+        /// One level of script nesting for the lifetime of the scope; `ok` is false past MAX_DEPTH.
         struct Scope {
             LuaContext& ctx;
             bool ok;
 
             explicit Scope(LuaContext& c)
-                : ctx(c), ok(c.enter()) {
+                : ctx(c),
+                  ok(c.enter()) {
             }
 
             ~Scope() {
@@ -118,16 +139,17 @@ namespace Zest {
             }
         };
 
-        Limits limits;
+        Limits limits; // declared before `lua`, which allocates through it
         sol::state lua{ sol::default_at_panic, &limitedAlloc, &limits };
         Mode mode = Mode::Load;
-        std::string script;
-        Registry* registry = nullptr;
+        std::string script;           // the script whose top-level code is running, recorded with what it registers
+        Registry* registry = nullptr; // set while validating: register_* also record the definitions there
         std::unordered_map<std::string, sol::protected_function> functions;
         std::unordered_map<std::string, sol::protected_function> triggers;
-        sol::protected_function tostring;
+        sol::protected_function tostring; // the original tostring, which a script cannot replace for call()
         int depth = 0;
 
+        /// Opens one nesting level; the instruction count restarts with each top-level command. False past MAX_DEPTH.
         bool enter() {
             if (this->depth == 0) {
                 this->limits.instructions = 0;
@@ -135,6 +157,7 @@ namespace Zest {
             return ++this->depth <= MAX_DEPTH;
         }
 
+        /// Runs a script's top-level code (text only, never bytecode), named `<name>.lua` in error messages.
         sol::protected_function_result run(const std::string& name, const std::string& code) {
             this->script = name;
             this->limits.instructions = 0;
@@ -142,6 +165,7 @@ namespace Zest {
         }
     };
 
+    /// One thread's Lua state and the registry generation it was built from.
     struct ScriptEngine::ThreadState {
         uint64_t generation = 0;
         std::unique_ptr<LuaContext> ctx;
@@ -157,7 +181,9 @@ namespace Zest {
     }
 
     ScriptEngine::ScriptEngine(ZestDB& database, std::filesystem::path dir)
-        : db(database), id(nextEngineId.fetch_add(1)), scriptsDir(std::move(dir)) {
+        : db(database),
+          id(nextEngineId.fetch_add(1)),
+          scriptsDir(std::move(dir)) {
         std::error_code ec;
         fs::create_directories(this->scriptsDir, ec);
         if (ec) {
@@ -167,6 +193,7 @@ namespace Zest {
 
     ScriptEngine::~ScriptEngine() = default;
 
+    /// Names of the functions, except those of the script `except`.
     static std::vector<std::string> names(const std::vector<ScriptFunction>& functions, const std::string& except = "") {
         std::vector<std::string> out;
         for (const auto& f : functions) {
@@ -177,6 +204,7 @@ namespace Zest {
         return out;
     }
 
+    /// Names of the triggers, except those of the script `except`.
     static std::vector<std::string> names(const std::vector<Trigger>& triggers, const std::string& except = "") {
         std::vector<std::string> out;
         for (const auto& t : triggers) {
@@ -222,6 +250,7 @@ namespace Zest {
         }
 
         std::vector<std::string> loaded;
+        loaded.reserve(fresh.scripts.size());
         for (const auto& [name, code] : fresh.scripts) {
             loaded.push_back(name);
         }
@@ -263,6 +292,7 @@ namespace Zest {
             return validated;
         }
 
+        // The checks, the file write and the swap happen under one lock, so two concurrent loads cannot both take a name
         std::unique_lock<std::shared_mutex> lock(this->registryMtx);
         if (conflicts(names(this->registry.functions, name), names(added.functions)) || conflicts(names(this->registry.triggers, name), names(added.triggers))) {
             return { ResultType::Code::ScriptError, std::format("{} registers a function or trigger name another script already uses", name) };
@@ -320,6 +350,7 @@ namespace Zest {
     ResultType ScriptEngine::list() const {
         std::shared_lock<std::shared_mutex> lock(this->registryMtx);
         std::vector<std::string> scripts;
+        scripts.reserve(this->registry.scripts.size());
         for (const auto& [name, code] : this->registry.scripts) {
             scripts.push_back(name);
         }
@@ -433,9 +464,12 @@ namespace Zest {
     }
 
     ScriptEngine::ThreadState& ScriptEngine::stateForThisThread() {
+        // shortcut: the states of a destroyed engine stay in each thread that used it until the thread exits; fine with
+        // one engine per server
         thread_local std::unordered_map<uint64_t, ThreadState> states;
         ThreadState& state = states[this->id];
 
+        // Never rebuild under a running script: its state is on the stack. A nested call keeps the old version.
         if (state.ctx && (state.ctx->depth > 0 || state.generation == this->generation.load())) {
             return state;
         }
@@ -478,9 +512,12 @@ namespace Zest {
     void ScriptEngine::setupState(LuaContext& ctx) const {
         sol::state& lua = ctx.lua;
         lua_State* L = lua.lua_state();
+        // The hook is a plain function: it finds this state's limits through the extra space Lua reserves per state
         *static_cast<Limits**>(lua_getextraspace(L)) = &ctx.limits;
         lua_sethook(L, &countHook, LUA_MASKCOUNT, HOOK_STEP);
 
+        // Sandbox: no io, os, package, debug or coroutine library, no file loading, and `load` limited to text chunks,
+        // since precompiled bytecode can crash the VM
         lua.open_libraries(sol::lib::base, sol::lib::string, sol::lib::table, sol::lib::math, sol::lib::utf8);
         for (const char* removed : { "dofile", "loadfile", "collectgarbage" }) {
             lua[removed] = sol::lua_nil;
@@ -493,9 +530,10 @@ namespace Zest {
                 return rawload(chunk, chunkname, "t", env)
             end
         )lua",
-            sol::script_pass_on_error));
+                                          sol::script_pass_on_error));
         ctx.tostring = lua["tostring"];
 
+        // print() goes to the server log instead of stdout; each argument goes through tostring, like Lua's own print
         lua.set_function("print", [](sol::variadic_args args, sol::this_state ts) {
             std::string line;
             bool first = true;
@@ -512,6 +550,8 @@ namespace Zest {
             ZestLog(LogLevel::Info, "Lua: " + line);
         });
 
+        // The top-level code of a script runs once per thread and on every reload: it may register, never touch data.
+        // Once loaded, a script may no longer register, since that would only reach this thread's state.
         auto requireLoad = [&ctx](const char* what) {
             if (ctx.mode != LuaContext::Mode::Load) {
                 throw std::runtime_error(std::format("zest.{} can only be called while the script loads", what));
@@ -522,6 +562,7 @@ namespace Zest {
                 throw std::runtime_error(std::format("zest.{} cannot be called while the script loads", what));
             }
         };
+        // A key filter from an optional mode and pattern, as register_trigger, zest.count and zest.keys take them
         auto ruleFrom = [this](const sol::optional<std::string>& mode, const sol::optional<std::string>& pattern) {
             if (mode.has_value() != pattern.has_value()) {
                 throw std::runtime_error("mode and pattern go together");
@@ -538,7 +579,7 @@ namespace Zest {
 
         sol::table zest = lua.create_named_table("zest");
 
-        zest.set_function("log", [](const std::string& message, sol::optional<std::string> level) {
+        zest.set_function("log", [](const std::string& message, const sol::optional<std::string>& level) {
             static const std::unordered_map<std::string, LogLevel> levels = { { "debug", LogLevel::Debug }, { "info", LogLevel::Info }, { "warning", LogLevel::Warning }, { "error", LogLevel::Error } };
             auto it = levels.find(level.value_or("info"));
             if (it == levels.end()) {
@@ -699,7 +740,7 @@ namespace Zest {
             return r.code == ResultType::Code::Success;
         });
 
-        zest.set_function("count", [this, requireRun, ruleFrom](sol::optional<std::string> mode, sol::optional<std::string> pattern) {
+        zest.set_function("count", [this, requireRun, ruleFrom](const sol::optional<std::string>& mode, const sol::optional<std::string>& pattern) {
             requireRun("count");
             ResultType r = this->db.count(ruleFrom(mode, pattern));
             if (r.code != ResultType::Code::Success) {
@@ -708,7 +749,7 @@ namespace Zest {
             return static_cast<int64_t>(r.affectedRows);
         });
 
-        zest.set_function("keys", [this, requireRun, ruleFrom](sol::optional<std::string> mode, sol::optional<std::string> pattern, sol::optional<int64_t> lim) {
+        zest.set_function("keys", [this, requireRun, ruleFrom](const sol::optional<std::string>& mode, const sol::optional<std::string>& pattern, sol::optional<int64_t> lim) {
             requireRun("keys");
             ValidationRule rule = ruleFrom(mode, pattern);
             if (lim) {

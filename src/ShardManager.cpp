@@ -44,6 +44,11 @@ namespace Zest {
         return this->shards[static_cast<size_t>(shardId)]->setnx(key, value);
     }
 
+    ResultType ShardManager::replace(const std::string& key, const std::string& value, uint64_t& expiresAt) {
+        int shardId = this->getShardId(key);
+        return this->shards[static_cast<size_t>(shardId)]->replace(key, value, expiresAt);
+    }
+
     ResultType ShardManager::cas(const std::string& key, const std::string& expected, const std::string& value, uint64_t& expiresAt) {
         int shardId = this->getShardId(key);
         return this->shards[static_cast<size_t>(shardId)]->cas(key, expected, value, expiresAt);
@@ -65,6 +70,8 @@ namespace Zest {
     }
 
     ResultType ShardManager::getBy(ValidationRule& valid) {
+        // The shards share this counter to respect the limit together; it lives on this stack frame, which outlives
+        // every task since the futures are all waited for below
         std::atomic<unsigned int> globalCount(0);
         valid.globalMatchCount = &globalCount;
 
@@ -76,6 +83,7 @@ namespace Zest {
             futures.push_back(threadPool->enqueue([rawShard, &valid]() { return rawShard->getBy(valid); }));
         }
 
+        // Each shard returns a JSON array: concatenate their contents rather than parsing and re-serialising them
         std::string merged = "[";
         long long totalMatches = 0;
         for (auto& f : futures) {
@@ -113,10 +121,13 @@ namespace Zest {
     }
 
     ResultType ShardManager::setBy(ValidationRule& valid, const std::string& value) {
+        // With a limit, the parallel path would pick whichever keys each shard scans first, which differs from run to run.
+        // The WAL logs this command as is, so the replay must touch the same keys: take the `limit` smallest ones.
         if (valid.limit != UINT_MAX) {
             long long updated = 0;
             for (const auto& key : this->firstMatchingKeys(valid)) {
-                updated += this->set(key, value).code == ResultType::Code::Success;
+                uint64_t expiresAt = 0;
+                updated += this->replace(key, value, expiresAt).code == ResultType::Code::Success;
             }
             return { ResultType::Code::Success, "", updated };
         }
@@ -235,6 +246,7 @@ namespace Zest {
 
     std::vector<std::shared_lock<std::shared_mutex>> ShardManager::pauseCompaction() {
         std::vector<std::shared_lock<std::shared_mutex>> locks;
+        locks.reserve(this->shards.size());
         for (auto& shard : this->shards) {
             locks.emplace_back(shard->compactionMutex());
         }
@@ -251,13 +263,13 @@ namespace Zest {
 
         std::vector<WalEntry> allWalEntries;
 
-        for (size_t i = 0; i < this->shards.size(); ++i) {
-            WAL& wal = this->shards[i]->getWAL();
-            std::vector<WalEntry> cmds = wal.getCmds();
+        for (auto& shard : this->shards) {
+            std::vector<WalEntry> cmds = shard->getWAL().getCmds();
 
             allWalEntries.insert(allWalEntries.end(), std::make_move_iterator(cmds.begin()), std::make_move_iterator(cmds.end()));
         }
 
+        // The sequence numbers are global: sorting merges the shards back into the order the writes happened
         std::stable_sort(allWalEntries.begin(), allWalEntries.end(), [](const WalEntry& a, const WalEntry& b) { return a.seq < b.seq; });
         if (!allWalEntries.empty()) {
             WAL::advanceSequence(allWalEntries.back().seq + 1);

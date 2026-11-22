@@ -8,6 +8,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # compile_commands.json, read by clang-tidy
+
+# Debugging builds (GCC / Clang): ZESTDB_SANITIZE=address,undefined or thread, ZESTDB_COVERAGE=ON
+set(ZESTDB_SANITIZE "" CACHE STRING "Sanitizers to build with, e.g. address,undefined or thread")
+option(ZESTDB_COVERAGE "Instrument zestcore for code coverage (gcov)" OFF)
+if(ZESTDB_SANITIZE)
+    if(MSVC)
+        message(FATAL_ERROR "ZESTDB_SANITIZE needs GCC or Clang")
+    endif()
+    # Applied before the dependencies are added, so Lua, zlib and libzip are instrumented too (TSan needs that);
+    # -fno-sanitize-recover makes the first error fail the test instead of only printing it
+    add_compile_options(-fsanitize=${ZESTDB_SANITIZE} -fno-omit-frame-pointer -fno-sanitize-recover=all)
+    add_link_options(-fsanitize=${ZESTDB_SANITIZE})
+endif()
 
 include(FetchContent)
 set(BUILD_SHARED_LIBS OFF)
@@ -42,6 +56,20 @@ FetchContent_Declare(libzip
     URL https://github.com/nih-at/libzip/archive/refs/tags/v1.12.1.tar.gz
     SYSTEM)
 FetchContent_MakeAvailable(libzip)
+
+# zstd's CMake predates CMP0077: without it, its option() calls would ignore the values set here
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+foreach(opt ZSTD_BUILD_PROGRAMS ZSTD_BUILD_SHARED ZSTD_BUILD_TESTS ZSTD_BUILD_CONTRIB ZSTD_LEGACY_SUPPORT ZSTD_MULTITHREAD_SUPPORT)
+    set(${opt} OFF)
+endforeach()
+set(ZSTD_BUILD_STATIC ON)
+FetchContent_Declare(zstd
+    URL https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz
+    SOURCE_SUBDIR build/cmake
+    SYSTEM)
+FetchContent_MakeAvailable(zstd)
+# BUILD_INTERFACE: zstd exports its targets for install, which refuses a path into the source or build tree
+target_include_directories(libzstd_static SYSTEM INTERFACE $<BUILD_INTERFACE:${zstd_SOURCE_DIR}/lib>)
 
 FetchContent_Declare(libzippp
     URL https://github.com/ctabin/libzippp/archive/refs/tags/libzippp-v7.1-1.10.1.tar.gz
@@ -102,16 +130,30 @@ list(REMOVE_ITEM ZEST_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
 
 add_library(zestcore STATIC ${ZEST_SOURCES})
 target_include_directories(zestcore PUBLIC src)
-target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp Threads::Threads)
+if(ZESTDB_COVERAGE)
+    if(MSVC)
+        message(FATAL_ERROR "ZESTDB_COVERAGE needs GCC or Clang")
+    endif()
+    # Atomic counters: the tests run many threads, and plain counters lose updates (gcov then reports negative hits)
+    target_compile_options(zestcore PRIVATE --coverage -fprofile-update=atomic -O0)
+    target_link_options(zestcore PUBLIC --coverage)
+endif()
+target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp libzstd_static ZLIB::ZLIB Threads::Threads)
+# OFF only to list every warning in one build instead of stopping at the first
+option(ZESTDB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 if(MSVC)
-    target_compile_options(zestcore PUBLIC /W3 /permissive- /utf-8 /bigobj /Zc:__cplusplus)
-    # MSVC's std::regex backtracks (no libstdc++ __polynomial mode): cap the steps per match so a hostile pattern fails fast instead of spending ~1 s per key
+    target_compile_options(zestcore PUBLIC /W4 /wd4996 /wd4068 $<$<BOOL:${ZESTDB_WARNINGS_AS_ERRORS}>:/WX> /permissive- /Zc:preprocessor /utf-8 /bigobj /Zc:__cplusplus)
     target_compile_definitions(zestcore PUBLIC _REGEX_MAX_COMPLEXITY_COUNT=100000)
 else()
     target_compile_options(zestcore PUBLIC
-        -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Werror -Wnon-virtual-dtor -Wno-deprecated-declarations
+        -Wall -Wextra -Wpedantic -Wsign-conversion -Wshadow -Wunused -Wnon-virtual-dtor -Wno-deprecated-declarations
+        $<$<BOOL:${ZESTDB_WARNINGS_AS_ERRORS}>:-Werror>
         $<$<CONFIG:Release>:-O3>
         $<$<CONFIG:Debug>:-g3 -O0>)
+    if(ZESTDB_SANITIZE)
+        # The sanitizer instrumentation makes GCC report false positives inside std::regex
+        target_compile_options(zestcore PUBLIC -Wno-maybe-uninitialized)
+    endif()
     # GCC reports a false positive inside sol2's table access once inlined (stack_field.hpp)
     set_source_files_properties(src/ScriptEngine.cpp PROPERTIES COMPILE_OPTIONS -Wno-array-bounds)
 endif()
