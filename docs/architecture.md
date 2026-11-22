@@ -50,6 +50,7 @@ ZestDB follows a layered design where each layer is independently testable:
 ## Log-structured storage
 
 - Values are appended to fixed-size, append-only data segments (`*.seg`).
+- A value is stored zstd-compressed (level 3, with a checksum) when that makes it smaller; short or incompressible values are stored as is, and values written by older versions stay readable. The LRU cache keeps decompressed values.
 - When a segment reaches the configured capacity (`SegSize`), a new segment is automatically created (segment rotation).
 - Deletes are implemented as tombstones rather than physical removal, keeping the append-only model.
 - Unused (fully obsolete) segments are physically removed during compaction.
@@ -79,7 +80,7 @@ ZestDB follows a layered design where each layer is independently testable:
 ## Durability and background maintenance
 
 - A flush thread periodically syncs in-memory changes (index and segments) to disk at a configurable `FlushInterval`.
-- A compactor thread per shard runs at a configurable `CompactingInterval` to compact the index and delete unused data segments.
+- A compactor thread per shard checks every second how much of its segment data is dead (overwritten or deleted values). It compacts the index and the segments once half of the data is dead, or after `CompactingInterval` seconds at most, which also drops the expired keys. Only one shard compacts at a time, so the shards are never all blocked together.
 - A verification pass on boot detects and removes index entries that no longer point to valid on-disk data.
 
 ## Data storage model

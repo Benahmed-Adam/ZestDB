@@ -66,7 +66,16 @@ namespace Zest {
             this->index.open(this->indexPath, std::ios::in | std::ios::out | std::ios::binary);
         }
         this->index.seekp(0, std::ios::end);
+        this->recomputeLiveSize();
         ZestLog(LogLevel::Info, "IndexManager - Loaded entries into memory tree.");
+    }
+
+    void IndexManager::recomputeLiveSize() {
+        uint64_t total = 0;
+        for (const auto& [key, loc] : this->memoryTree) {
+            total += loc.size;
+        }
+        this->liveSize = total;
     }
 
     void IndexManager::append(const IndexEntry& entry) {
@@ -97,17 +106,25 @@ namespace Zest {
         IndexEntry record = entry;
         record.key = key;
         this->append(record);
+        this->liveSize -= it->second.size;
         if (entry.isTombstone) {
             this->memoryTree.erase(it);
         } else {
             it->second = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
+            this->liveSize += entry.size;
         }
     }
 
     void IndexManager::insert(const IndexEntry& entry) {
         std::unique_lock<std::mutex> lock(this->mtx);
         this->append(entry);
-        this->memoryTree[entry.key] = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
+        const Location loc = { entry.offset, entry.segmentId, entry.size, entry.expiresAt };
+        auto [it, inserted] = this->memoryTree.try_emplace(entry.key, loc);
+        if (!inserted) {
+            this->liveSize -= it->second.size;
+            it->second = loc;
+        }
+        this->liveSize += entry.size;
     }
 
     std::vector<IndexEntry> IndexManager::getAll(unsigned int limit, const std::function<bool()>& stopEarly) {
@@ -206,6 +223,7 @@ namespace Zest {
 
         this->canFlush = false;
         std::erase_if(this->memoryTree, [now = nowMs()](const auto& item) { return toEntry(item.first, item.second).isExpired(now); });
+        this->recomputeLiveSize();
         ZestLog(LogLevel::Debug, "Index compaction completed successfully.");
         return entries;
     }

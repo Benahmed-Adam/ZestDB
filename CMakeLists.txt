@@ -57,6 +57,20 @@ FetchContent_Declare(libzip
     SYSTEM)
 FetchContent_MakeAvailable(libzip)
 
+# zstd's CMake predates CMP0077: without it, its option() calls would ignore the values set here
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+foreach(opt ZSTD_BUILD_PROGRAMS ZSTD_BUILD_SHARED ZSTD_BUILD_TESTS ZSTD_BUILD_CONTRIB ZSTD_LEGACY_SUPPORT ZSTD_MULTITHREAD_SUPPORT)
+    set(${opt} OFF)
+endforeach()
+set(ZSTD_BUILD_STATIC ON)
+FetchContent_Declare(zstd
+    URL https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.tar.gz
+    SOURCE_SUBDIR build/cmake
+    SYSTEM)
+FetchContent_MakeAvailable(zstd)
+# BUILD_INTERFACE: zstd exports its targets for install, which refuses a path into the source or build tree
+target_include_directories(libzstd_static SYSTEM INTERFACE $<BUILD_INTERFACE:${zstd_SOURCE_DIR}/lib>)
+
 FetchContent_Declare(libzippp
     URL https://github.com/ctabin/libzippp/archive/refs/tags/libzippp-v7.1-1.10.1.tar.gz
     SOURCE_SUBDIR none)
@@ -124,7 +138,7 @@ if(ZESTDB_COVERAGE)
     target_compile_options(zestcore PRIVATE --coverage -fprofile-update=atomic -O0)
     target_link_options(zestcore PUBLIC --coverage)
 endif()
-target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp Threads::Threads)
+target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp libzstd_static Threads::Threads)
 # OFF only to list every warning in one build instead of stopping at the first
 option(ZESTDB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 if(MSVC)

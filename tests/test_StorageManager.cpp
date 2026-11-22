@@ -116,3 +116,71 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager ignores .seg files that 
     REQUIRE_NOTHROW(sm = std::make_unique<StorageManager>(settings));
     REQUIRE(sm->read({ "", 0, 1, 5, false }) == "value");
 }
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager compresses values that shrink and reads them back", "[storagemanager][compression]") {
+    StorageManager sm(settings);
+    const std::string value(200, 'z');
+    auto entry = sm.append(value);
+    REQUIRE(entry.segmentId != INVALID_SEGMENT_ID);
+    REQUIRE(entry.size < value.size());
+    REQUIRE(sm.read(entry) == value);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager stores short and incompressible values as is", "[storagemanager][compression]") {
+    StorageManager sm(settings);
+    const std::string shortValue = "abc";
+    const std::string noisy = "q8#Lz!0vK@m2Xw$9";
+    auto e1 = sm.append(shortValue);
+    auto e2 = sm.append(noisy);
+    REQUIRE(e1.size == shortValue.size());
+    REQUIRE(e2.size == noisy.size());
+    REQUIRE(sm.read(e1) == shortValue);
+    REQUIRE(sm.read(e2) == noisy);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager keeps a value that starts like a zstd frame", "[storagemanager][compression]") {
+    StorageManager sm(settings);
+    const std::string value = std::string("\x28\xB5\x2F\xFD", 4) + "raw";
+    auto entry = sm.append(value);
+    REQUIRE(sm.read(entry) == value);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager reads values written uncompressed by older versions", "[storagemanager][compression]") {
+    const std::string legacy(100, 'x');
+    std::ofstream(testDir / "seg" / "1.seg", std::ios::binary) << legacy;
+    StorageManager sm(settings);
+    REQUIRE(sm.read({ "", 0, 1, static_cast<uint32_t>(legacy.size()), false }) == legacy);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager returns an empty string for a corrupted frame", "[storagemanager][compression]") {
+    IndexEntry entry;
+    {
+        StorageManager sm(settings);
+        entry = sm.append(std::string(200, 'z'));
+        sm.flush();
+    }
+    std::fstream seg(testDir / "seg" / "1.seg", std::ios::in | std::ios::out | std::ios::binary);
+    seg.seekp(static_cast<std::streamoff>(entry.size) - 2);
+    seg.put('\xFF').put('\xFF');
+    seg.close();
+    StorageManager sm(settings);
+    REQUIRE(sm.read(entry).empty());
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager refuses a value larger than a segment even if it compresses", "[storagemanager][compression]") {
+    StorageManager sm(settings);
+    REQUIRE(sm.append(std::string(settings.SegSize + 1, 'z')).segmentId == INVALID_SEGMENT_ID);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager totalBytes sums every segment", "[storagemanager][compaction]") {
+    Settings smallSettings;
+    smallSettings.DbPath = testDir;
+    smallSettings.SegSize = 10;
+    StorageManager sm(smallSettings);
+    REQUIRE(sm.totalBytes() == 0);
+    sm.append("12345678");
+    sm.append("abcd");
+    REQUIRE(sm.totalBytes() == 12);
+    sm.removeUnusedSegments({ 2 });
+    REQUIRE(sm.totalBytes() == 4);
+}

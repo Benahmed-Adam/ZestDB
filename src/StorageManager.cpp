@@ -2,12 +2,87 @@
 
 #include <charconv>
 #include <format>
+#include <memory>
 #include <mutex>
+#include <optional>
+#include <string_view>
 #include <unordered_set>
+#include <zstd.h>
 
 #include "Logger.hpp"
 
 namespace Zest {
+
+    namespace {
+        constexpr int COMPRESSION_LEVEL = 3;
+        constexpr size_t MIN_COMPRESSED_SIZE = 16;                       // a zstd frame alone takes about that: shorter values never shrink
+        constexpr unsigned long long MAX_DECOMPRESSED_SIZE = 1ULL << 30; // a corrupted frame header must not trigger a huge allocation
+        constexpr std::string_view ZSTD_MAGIC("\x28\xB5\x2F\xFD", 4);
+
+        bool isZstdFrame(std::string_view stored) {
+            return stored.starts_with(ZSTD_MAGIC);
+        }
+
+        /// The bytes to store for `value`: a zstd frame when it is smaller, otherwise the value as is. A value that
+        /// already starts like a zstd frame is always compressed, so that every stored frame is one written here.
+        std::optional<std::string> compressValue(const std::string& value) {
+            const bool mustCompress = isZstdFrame(value);
+            if (value.size() > MAX_DECOMPRESSED_SIZE) {
+                // decompressValue() would refuse the frame: keep the value readable by storing it as is
+                return mustCompress ? std::nullopt : std::optional<std::string>(value);
+            }
+            if (value.size() < MIN_COMPRESSED_SIZE && !mustCompress) {
+                return value;
+            }
+            thread_local const std::unique_ptr<ZSTD_CCtx, decltype(&ZSTD_freeCCtx)> ctx = [] {
+                std::unique_ptr<ZSTD_CCtx, decltype(&ZSTD_freeCCtx)> created(ZSTD_createCCtx(), &ZSTD_freeCCtx);
+                if (created) {
+                    ZSTD_CCtx_setParameter(created.get(), ZSTD_c_compressionLevel, COMPRESSION_LEVEL);
+                    ZSTD_CCtx_setParameter(created.get(), ZSTD_c_checksumFlag, 1); // a corrupted value fails to decompress instead of reading back wrong
+                }
+                return created;
+            }();
+            if (!ctx) {
+                ZestLog(LogLevel::Error, "StorageManager - cannot create the zstd compression context");
+                return mustCompress ? std::nullopt : std::optional<std::string>(value);
+            }
+            std::string out(ZSTD_compressBound(value.size()), '\0');
+            const size_t size = ZSTD_compress2(ctx.get(), out.data(), out.size(), value.data(), value.size());
+            if (ZSTD_isError(size)) {
+                ZestLog(LogLevel::Error, std::format("StorageManager - compression failed: {}", ZSTD_getErrorName(size)));
+                return mustCompress ? std::nullopt : std::optional<std::string>(value);
+            }
+            if (size >= value.size() && !mustCompress) {
+                return value;
+            }
+            out.resize(size);
+            return out;
+        }
+
+        /// The value behind `stored`, or an empty string if it is a frame that cannot be decompressed.
+        std::string decompressValue(std::string stored) {
+            if (!isZstdFrame(stored)) {
+                return stored;
+            }
+            const unsigned long long size = ZSTD_getFrameContentSize(stored.data(), stored.size());
+            if (size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN || size == 0 || size > MAX_DECOMPRESSED_SIZE) {
+                ZestLog(LogLevel::Error, "StorageManager - invalid zstd frame header");
+                return "";
+            }
+            thread_local const std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> ctx(ZSTD_createDCtx(), &ZSTD_freeDCtx);
+            if (!ctx) {
+                ZestLog(LogLevel::Error, "StorageManager - cannot create the zstd decompression context");
+                return "";
+            }
+            std::string out(static_cast<size_t>(size), '\0');
+            const size_t got = ZSTD_decompressDCtx(ctx.get(), out.data(), out.size(), stored.data(), stored.size());
+            if (ZSTD_isError(got) || got != out.size()) {
+                ZestLog(LogLevel::Error, std::format("StorageManager - decompression failed: {}", ZSTD_isError(got) ? ZSTD_getErrorName(got) : "size mismatch"));
+                return "";
+            }
+            return out;
+        }
+    } // namespace
 
     StorageManager::StorageManager(Settings& set)
         : settings(set) {
@@ -56,6 +131,18 @@ namespace Zest {
     }
 
     IndexEntry StorageManager::append(const std::string& value) {
+        // A value too large for a segment stays refused even when its compressed form would fit
+        if (value.size() > this->settings.SegSize) {
+            return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
+        }
+        const std::optional<std::string> stored = compressValue(value);
+        if (!stored) {
+            return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
+        }
+        return this->appendStored(*stored);
+    }
+
+    IndexEntry StorageManager::appendStored(const std::string& value) {
         std::lock_guard<std::mutex> lock(this->mtx);
 
         uint32_t currentId = this->latestSegmentId.load();
@@ -97,7 +184,7 @@ namespace Zest {
         auto it = this->segments.find(entry.segmentId);
         if (it != this->segments.end()) {
             // An offset is always below SegSize, an unsigned long (32 bits on Windows)
-            return it->second->read(static_cast<unsigned long>(entry.offset), entry.size);
+            return decompressValue(it->second->read(static_cast<unsigned long>(entry.offset), entry.size));
         }
 
         ZestLog(LogLevel::Error, std::format("StorageManager::read - segment not found: {}", entry.segmentId));
@@ -136,6 +223,15 @@ namespace Zest {
             ok = seg->flush() && ok;
         }
         return ok;
+    }
+
+    uint64_t StorageManager::totalBytes() {
+        std::lock_guard<std::mutex> lock(this->mtx);
+        uint64_t total = 0;
+        for (const auto& [id, seg] : this->segments) {
+            total += seg->getWritePosition();
+        }
+        return total;
     }
 
     uint32_t StorageManager::currentSegmentId() const {

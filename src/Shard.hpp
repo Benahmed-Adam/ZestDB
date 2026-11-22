@@ -73,6 +73,8 @@ namespace Zest {
         /// Compacts the index, then rewrites the values of mostly empty segments and deletes the segments nothing points to.
         /// Takes `compactionMtx` and `readMtx` exclusively: the shard is blocked meanwhile.
         void compact();
+        /// Bytes written to the segments that no live key points to any more (overwritten, deleted or expired values).
+        uint64_t deadBytes();
         /// Stops the compactor thread and flushes the data. Safe to call twice.
         void stop();
 
