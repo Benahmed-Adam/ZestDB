@@ -20,8 +20,10 @@ namespace Zest {
     ///
     /// Each write appends the command that reproduces its effect (`s k "v"`, `setexat ...`, `d k`) before it is
     /// acknowledged; on startup the records of every shard are merged by sequence number and replayed. Once the
-    /// index and segments are flushed, the WAL is cleared. Record format: `uint32 length`, the command,
-    /// `uint64 sequence`, `'\n'`.
+    /// index and segments are flushed, the WAL is cleared.
+    ///
+    /// The file starts with `ZWAL` and a version byte. Record format: `uint32 length`, `uint32 crc`, the command,
+    /// `uint64 sequence`; the CRC-32 covers the length, the command and the sequence.
     class WAL {
     public:
         /// Opens (or creates) the WAL file in append mode.
@@ -38,7 +40,7 @@ namespace Zest {
         /// one sync (group commit). @return false if the write failed.
         bool sync();
 
-        /// Reads every complete record of the file; a record cut by a crash ends the read.
+        /// Reads every record of the file up to the first one that is cut by a crash or fails its checksum.
         std::vector<WalEntry> getCmds();
 
         /// Makes the next sequence numbers start at `next` or above, so new records come after the replayed ones.
@@ -51,6 +53,9 @@ namespace Zest {
         std::mutex mtx;
         bool canClear;      // something was appended since the last clear
         bool dirty = false; // records were appended since the last sync
+
+        /// Writes the file header to the empty file and syncs it. @return false if the write failed.
+        bool writeHeader();
     };
 
 } // namespace Zest

@@ -317,3 +317,65 @@ TEST_CASE_METHOD(IndexManagerFixture, "IndexManager compaction stops counting ex
     im.compact();
     REQUIRE(im.liveBytes() == 0);
 }
+
+static std::string readFile(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+/// Flips every bit of the byte at `pos`.
+static void flipByte(const fs::path& path, size_t pos) {
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    f.seekg(static_cast<std::streamoff>(pos));
+    const char c = static_cast<char>(f.get());
+    f.seekp(static_cast<std::streamoff>(pos));
+    f.put(static_cast<char>(~c));
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager files start with a versioned header", "[indexmanager][crc]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("k"));
+        REQUIRE(im.flush());
+    }
+    REQUIRE(readFile(settings.IndexPath).starts_with(std::string("ZIDX\x01", 5)));
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager skips a corrupted record and keeps the ones after it", "[indexmanager][crc]") {
+    {
+        IndexManager im(settings);
+        im.compact();
+        im.insert(makeEntry("first_key", 1, 1));
+        im.insert(makeEntry("middle_key", 1, 2));
+        im.insert(makeEntry("last_key", 1, 3));
+        REQUIRE(im.flush());
+    }
+    flipByte(settings.IndexPath, readFile(settings.IndexPath).find("middle_key") + 3);
+    IndexManager im(settings);
+    REQUIRE(im.search("first_key").offset == 1);
+    REQUIRE(im.search("middle_key").segmentId == INVALID_SEGMENT_ID);
+    REQUIRE(im.search("last_key").offset == 3);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager still reads its records when the file header is damaged", "[indexmanager][crc]") {
+    {
+        IndexManager im(settings);
+        im.insert(makeEntry("k", 1, 9));
+        REQUIRE(im.flush());
+    }
+    flipByte(settings.IndexPath, 0);
+    IndexManager im(settings);
+    REQUIRE(im.search("k").offset == 9);
+}
+
+TEST_CASE_METHOD(IndexManagerFixture, "IndexManager keeps the value checksum of each entry", "[indexmanager][crc]") {
+    {
+        IndexManager im(settings);
+        IndexEntry e = makeEntry("k");
+        e.valueCrc = 0xDEADBEEF;
+        im.insert(e);
+        REQUIRE(im.flush());
+    }
+    IndexManager im(settings);
+    REQUIRE(im.search("k").valueCrc == 0xDEADBEEF);
+}

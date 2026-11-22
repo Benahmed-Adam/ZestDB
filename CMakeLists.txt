@@ -138,7 +138,7 @@ if(ZESTDB_COVERAGE)
     target_compile_options(zestcore PRIVATE --coverage -fprofile-update=atomic -O0)
     target_link_options(zestcore PUBLIC --coverage)
 endif()
-target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp libzstd_static Threads::Threads)
+target_link_libraries(zestcore PUBLIC asio sol2 OpenSSL::SSL OpenSSL::Crypto libzippp libzstd_static ZLIB::ZLIB Threads::Threads)
 # OFF only to list every warning in one build instead of stopping at the first
 option(ZESTDB_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 if(MSVC)

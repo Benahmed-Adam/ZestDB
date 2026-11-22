@@ -50,7 +50,7 @@ ZestDB follows a layered design where each layer is independently testable:
 ## Log-structured storage
 
 - Values are appended to fixed-size, append-only data segments (`*.seg`).
-- A value is stored zstd-compressed (level 3, with a checksum) when that makes it smaller; short or incompressible values are stored as is, and values written by older versions stay readable. The LRU cache keeps decompressed values.
+- A value is stored zstd-compressed (level 3, with a checksum) when that makes it smaller; short or incompressible values are stored as is. The LRU cache keeps decompressed values.
 - When a segment reaches the configured capacity (`SegSize`), a new segment is automatically created (segment rotation).
 - Deletes are implemented as tombstones rather than physical removal, keeping the append-only model.
 - Unused (fully obsolete) segments are physically removed during compaction.
@@ -61,6 +61,7 @@ ZestDB follows a layered design where each layer is independently testable:
 - Every live entry (segment, offset, size) is kept in an in-memory `unordered_map`: lookups and pattern scans never read the index file.
 - The index file is an append-only log: a set appends the new entry, a delete appends a tombstone, and loading replays the log in order (the last record for a key wins). Writes are sequential and buffered, with no seek.
 - Periodic compaction rewrites the index file, dropping tombstones, expired keys and unreachable entries.
+- The index file starts with a versioned header (`ZIDX`), and every record carries a CRC-32 of its content, plus the CRC-32 of the value bytes it points to. A record that fails its checksum is skipped up to the next valid one (its key is lost, the others are kept), and a value that fails its checksum is reported as a read error instead of being returned wrong.
 
 ## LRU cache
 
@@ -76,6 +77,7 @@ ZestDB follows a layered design where each layer is independently testable:
 - Optional `fsyncOnWrite` to force a synchronous fsync after every write.
 - On startup, WAL entries are collected, sorted by sequence number, and replayed to rebuild the in-memory state, after which the WAL is cleared.
 - The WAL is flushed and cleared together with the index and segments during a flush cycle.
+- The WAL file starts with a versioned header (`ZWAL`), and every record carries a CRC-32. The replay of a shard's WAL stops at the first record that is cut short or fails its checksum, since the records after it may depend on it.
 
 ## Durability and background maintenance
 

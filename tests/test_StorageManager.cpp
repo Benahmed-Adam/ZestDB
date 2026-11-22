@@ -105,16 +105,17 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager append multiple values r
 }
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager ignores .seg files that are not numbered", "[storagemanager]") {
+    IndexEntry entry;
     {
         StorageManager sm(settings);
-        sm.append("value");
+        entry = sm.append("value");
     }
     for (const char* name : { "backup.seg", "12abc.seg" }) {
         std::ofstream(testDir / "seg" / name) << "junk";
     }
     std::unique_ptr<StorageManager> sm;
     REQUIRE_NOTHROW(sm = std::make_unique<StorageManager>(settings));
-    REQUIRE(sm->read({ "", 0, 1, 5, false }) == "value");
+    REQUIRE(sm->read(entry) == "value");
 }
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager compresses values that shrink and reads them back", "[storagemanager][compression]") {
@@ -143,13 +144,6 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager keeps a value that start
     const std::string value = std::string("\x28\xB5\x2F\xFD", 4) + "raw";
     auto entry = sm.append(value);
     REQUIRE(sm.read(entry) == value);
-}
-
-TEST_CASE_METHOD(StorageManagerFixture, "StorageManager reads values written uncompressed by older versions", "[storagemanager][compression]") {
-    const std::string legacy(100, 'x');
-    std::ofstream(testDir / "seg" / "1.seg", std::ios::binary) << legacy;
-    StorageManager sm(settings);
-    REQUIRE(sm.read({ "", 0, 1, static_cast<uint32_t>(legacy.size()), false }) == legacy);
 }
 
 TEST_CASE_METHOD(StorageManagerFixture, "StorageManager returns an empty string for a corrupted frame", "[storagemanager][compression]") {
@@ -183,4 +177,21 @@ TEST_CASE_METHOD(StorageManagerFixture, "StorageManager totalBytes sums every se
     REQUIRE(sm.totalBytes() == 12);
     sm.removeUnusedSegments({ 2 });
     REQUIRE(sm.totalBytes() == 4);
+}
+
+TEST_CASE_METHOD(StorageManagerFixture, "StorageManager refuses a value that fails its checksum", "[storagemanager][crc]") {
+    IndexEntry entry;
+    {
+        StorageManager sm(settings);
+        entry = sm.append("plain value");
+        REQUIRE(sm.read(entry) == "plain value");
+        sm.flush();
+    }
+    {
+        std::fstream seg(testDir / "seg" / "1.seg", std::ios::in | std::ios::out | std::ios::binary);
+        seg.seekp(3);
+        seg.put('#');
+    }
+    StorageManager sm(settings);
+    REQUIRE(sm.read(entry).empty());
 }

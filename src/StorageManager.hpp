@@ -21,11 +21,12 @@ namespace Zest {
         StorageManager(Settings& set);
 
         /// Writes `value` to the current segment, zstd-compressed when that makes it smaller, opening a new segment when it is full.
-        /// @return the location (segment, offset, stored size) with an empty key, or `INVALID_SEGMENT_ID` if the write failed.
+        /// @return the location (segment, offset, stored size, CRC-32 of the stored bytes) with an empty key, or
+        /// `INVALID_SEGMENT_ID` if the write failed.
         IndexEntry append(const std::string& value);
 
-        /// Reads and decompresses the value at `entry`'s location, or returns an empty string if the segment does not
-        /// exist or the read or the decompression fails.
+        /// Reads, checks and decompresses the value at `entry`'s location, or returns an empty string if the segment does
+        /// not exist, the read fails, the bytes do not match `entry.valueCrc` or the decompression fails.
         std::string read(const IndexEntry& entry);
 
         /// True if `entry` points inside the written part of an existing segment (used to drop index entries left by a crash).

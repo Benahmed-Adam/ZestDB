@@ -26,7 +26,7 @@ namespace Zest {
         return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
     }
 
-    /// Where a key's value is stored, and when it expires. It is also the record format of the INDEX file.
+    /// Where a key's value is stored, and when it expires. IndexManager.cpp turns it into an INDEX record and back.
     struct IndexEntry {
         std::string key;
         uint64_t offset;
@@ -34,73 +34,11 @@ namespace Zest {
         uint32_t size;
         bool isTombstone;       // a delete record: the key no longer exists
         uint64_t expiresAt = 0; // absolute date in ms, 0 for no expiry
+        uint32_t valueCrc = 0;  // CRC-32 of the bytes stored in the segment
 
         /// True if the entry has an expiry date that is already past.
         bool isExpired(uint64_t now = nowMs()) const {
             return expiresAt != 0 && expiresAt <= now;
-        }
-
-        /// Writes the record: a packed header (`klen`, `offset`, `segmentId`, `size`, `isTombstone`, `expiresAt`), then the key bytes.
-        void serialize(std::ostream& os) const {
-            uint32_t klen = static_cast<uint32_t>(key.size());
-
-            // Packed so the on-disk layout has no padding and does not depend on the compiler
-#pragma pack(push, 1)
-
-            struct Header {
-                uint32_t klen;
-                uint64_t offset;
-                uint32_t segmentId;
-                uint32_t size;
-                bool isTombstone;
-                uint64_t expiresAt;
-            };
-
-#pragma pack(pop)
-
-            Header header{ klen, offset, segmentId, size, isTombstone, expiresAt };
-
-            os.write(reinterpret_cast<const char*>(&header), sizeof(header));
-
-            if (klen > 0) {
-                os.write(key.data(), klen);
-            }
-        }
-
-        /// Reads one record written by serialize().
-        /// @return false at the end of the stream, or on a truncated or corrupt record (a key longer than `MAX_KEY_SIZE`).
-        bool deserialize(std::istream& is) {
-#pragma pack(push, 1)
-
-            struct Header {
-                uint32_t klen;
-                uint64_t offset;
-                uint32_t segmentId;
-                uint32_t size;
-                bool isTombstone;
-                uint64_t expiresAt;
-            };
-
-#pragma pack(pop)
-
-            Header header;
-            if (!is.read(reinterpret_cast<char*>(&header), sizeof(header)) || header.klen > MAX_KEY_SIZE) {
-                return false;
-            }
-
-            offset = header.offset;
-            segmentId = header.segmentId;
-            size = header.size;
-            isTombstone = header.isTombstone;
-            expiresAt = header.expiresAt;
-
-            key.resize(header.klen);
-            if (header.klen > 0) {
-                if (!is.read(&key[0], header.klen))
-                    return false;
-            }
-
-            return true;
         }
     };
 
@@ -108,6 +46,7 @@ namespace Zest {
     ///
     /// The INDEX file is an append-only log: a write appends the new location, a delete appends a tombstone, and loading
     /// replays the log in order, so the last record of a key wins. compact() rewrites it without the dead records.
+    /// The file starts with `ZIDX` and a version byte, and each record carries a CRC-32 of its content.
     /// Lookups and scans only read memory. Expired keys stay in memory until the next compaction, but every read skips them.
     class IndexManager {
     public:
@@ -156,6 +95,7 @@ namespace Zest {
             uint32_t segmentId;
             uint32_t size;
             uint64_t expiresAt;
+            uint32_t valueCrc;
         };
 
         std::filesystem::path indexPath;
@@ -168,7 +108,8 @@ namespace Zest {
         bool canFlush;                      // records were appended since the last fsync
         std::atomic<uint64_t> liveSize = 0; // sum of the sizes in memoryTree, changed under `mtx`
 
-        /// Replays the INDEX file into memory and truncates an unreadable tail (a record cut by a crash).
+        /// Replays the INDEX file into memory. A record whose checksum fails is skipped up to the next valid one,
+        /// and an unreadable tail (a record cut by a crash) is truncated.
         void loadIndexIntoMemory();
 
         /// Sets `liveSize` from memoryTree; the caller holds `mtx`.
@@ -178,6 +119,7 @@ namespace Zest {
         void append(const IndexEntry& entry);
 
         static IndexEntry toEntry(const std::string& key, const Location& loc);
+        static Location toLocation(const IndexEntry& entry);
     };
 
 } // namespace Zest

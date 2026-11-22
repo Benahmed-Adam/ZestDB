@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <zstd.h>
 
+#include "Checksum.hpp"
 #include "Logger.hpp"
 
 namespace Zest {
@@ -139,7 +140,11 @@ namespace Zest {
         if (!stored) {
             return { "", INVALID_OFFSET, INVALID_SEGMENT_ID, 0, false };
         }
-        return this->appendStored(*stored);
+        IndexEntry entry = this->appendStored(*stored);
+        if (entry.segmentId != INVALID_SEGMENT_ID) {
+            entry.valueCrc = crc32Of(*stored);
+        }
+        return entry;
     }
 
     IndexEntry StorageManager::appendStored(const std::string& value) {
@@ -183,8 +188,12 @@ namespace Zest {
     std::string StorageManager::read(const IndexEntry& entry) {
         auto it = this->segments.find(entry.segmentId);
         if (it != this->segments.end()) {
-            // An offset is always below SegSize, an unsigned long (32 bits on Windows)
-            return decompressValue(it->second->read(static_cast<unsigned long>(entry.offset), entry.size));
+            std::string stored = it->second->read(static_cast<unsigned long>(entry.offset), entry.size);
+            if (!stored.empty() && crc32Of(stored) != entry.valueCrc) {
+                ZestLog(LogLevel::Error, std::format("StorageManager::read - value at offset {} of segment {} fails its checksum", entry.offset, entry.segmentId));
+                return "";
+            }
+            return decompressValue(std::move(stored));
         }
 
         ZestLog(LogLevel::Error, std::format("StorageManager::read - segment not found: {}", entry.segmentId));
