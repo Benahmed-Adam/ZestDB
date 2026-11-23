@@ -3,7 +3,7 @@ SegSize: 67108864 # Max data segment size
 MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
 CacheSize: 2000 # Max number of values in the cache for each shard
-CompactingInterval: 300 # The ammount of time in seconds between each compaction of the INDEX and the data segments
+CompactingInterval: 300 # Maximum time in seconds between two compactions of a shard (earlier once half of its data is dead)
 FlushInterval: 10 # The ammount of time in seconds between each sync on the disk
 
 DBPort: 7321

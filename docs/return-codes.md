@@ -82,7 +82,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | Code | Name | Meaning |
 | ---: | --- | --- |
 | 500 | `InternalError` | The command raised an unexpected exception. |
-| 501 | `ReadFailed` | The value could not be read from its data segment. |
+| 501 | `ReadFailed` | The value could not be read from its data segment, failed its checksum (corrupted on disk) or could not be decompressed. |
 | 502 | `WriteFailed` | The value could not be written to a data segment, or a script file could not be written or removed. |
 | 503 | `WalWriteFailed` | The write was applied but could not be logged in the WAL. |
 | 504 | `ArchiveFailed` | `save` could not create the archive (or an archive or a restore is already in progress). |
