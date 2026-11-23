@@ -102,3 +102,21 @@ TEST_CASE("exists/count/keys stats tracked and included in the total", "[perf]")
     REQUIRE(j["total"]["nbCacheMisses"] == 1);
     REQUIRE(j["total"]["avgLatencyMs"] == 4.0);
 }
+
+TEST_CASE("Each request lands in the latency bucket of its duration", "[perf][metrics]") {
+    PerfMonitoring pm;
+    pm.addGetStats(false, 0.05); // 50 us: first bucket (<= 0.1 ms)
+    pm.addGetStats(false, 0.08); // 80 us: first bucket too
+    pm.addGetStats(false, 3.0);  // 3 ms: the 5 ms bucket
+    pm.addGetStats(false, 5000); // above every bound: the last bucket
+    const Stats& get = *pm.operations()[0].second;
+    REQUIRE(std::string(pm.operations()[0].first) == "get");
+    REQUIRE(get.latencyBuckets[0] == 2);
+    REQUIRE(get.latencyBuckets[5] == 1);
+    REQUIRE(get.latencyBuckets[LATENCY_BUCKETS_SECONDS.size()] == 1);
+    uint64_t total = 0;
+    for (const auto& b : get.latencyBuckets) {
+        total += b;
+    }
+    REQUIRE(total == get.nbRequests);
+}

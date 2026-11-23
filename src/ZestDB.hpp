@@ -145,6 +145,9 @@ namespace Zest {
             return *this->srv;
         }
 
+        /// Every statistic in the Prometheus text format, served at `/metrics` by the HTTP server.
+        std::string prometheusMetrics();
+
         /// Serialises a result as `{"affectedRows":..,"code":..,"response":..}`. A response that is valid JSON (array or
         /// object) is embedded as is, anything else becomes a JSON string.
         static std::string responseToJson(const ResultType& resp);

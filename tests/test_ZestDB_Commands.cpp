@@ -5,6 +5,10 @@
 #include <fstream>
 #include <future>
 #include <libzippp/libzippp.h>
+#include <map>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <thread>
 
 #include "WAL.hpp"
@@ -1231,4 +1235,67 @@ TEST_CASE_METHOD(ZestDBCmdFixture, "execCmd setby keeps the TTL of the keys", "[
     REQUIRE(std::stoi(db->execCmd("ttl t:1").response) > 0);
     REQUIRE(std::stoi(db->execCmd("ttl t:2").response) > 0);
     REQUIRE(db->execCmd("ttl t:3").response == "-1");
+}
+
+TEST_CASE("ZestDB exposes its statistics as Prometheus metrics", "[commands][metrics]") {
+    TempDbDir tmp("zestdb_test_metrics", "", 29591);
+    ZestDB db;
+    for (int i = 0; i < 5; i++) {
+        db.execCmd(std::format(R"(s k{} "value {}")", i, i));
+    }
+    db.execCmd("g k0");
+    db.execCmd("g k0");
+    db.execCmd("g missing");
+
+    std::thread http([&db] { db.httpServer().listen("127.0.0.1", 29592); });
+    db.httpServer().wait_until_ready();
+    httplib::Client client("127.0.0.1", 29592);
+    auto res = client.Get("/metrics");
+    db.httpServer().stop();
+    http.join();
+    REQUIRE(res);
+    REQUIRE(res->status == 200);
+    REQUIRE(res->get_header_value("Content-Type").starts_with("text/plain; version=0.0.4"));
+
+    // name -> op (or "" without an op label) -> sum over the shards
+    std::map<std::string, std::map<std::string, double>> sums;
+    std::set<std::string> typed;
+    const std::regex sampleLine(R"(^([a-z_]+)(\{([^{}]*)\})? (\S+)$)");
+    const std::regex opLabel(R"re(op="([a-z]+)")re");
+    std::istringstream body(res->body);
+    for (std::string line; std::getline(body, line);) {
+        if (line.starts_with("# TYPE ")) {
+            typed.insert(line.substr(7, line.find(' ', 7) - 7));
+            continue;
+        }
+        if (line.starts_with("#")) {
+            continue;
+        }
+        std::smatch m;
+        INFO(line);
+        REQUIRE(std::regex_match(line, m, sampleLine));
+        std::smatch op;
+        const std::string labels = m[3].str();
+        const std::string opName = std::regex_search(labels, op, opLabel) ? op[1].str() : "";
+        if (labels.find("le=") == std::string::npos) {
+            sums[m[1].str()][opName] += std::stod(m[4].str());
+        }
+    }
+
+    for (const char* name : { "zestdb_requests_total", "zestdb_cache_misses_total", "zestdb_request_latency_avg_seconds", "zestdb_cache_miss_ratio", "zestdb_request_duration_seconds", "zestdb_keys", "zestdb_live_bytes", "zestdb_stored_bytes",
+                              "zestdb_cache_entries", "zestdb_cache_capacity", "zestdb_compactions_total", "zestdb_connections" }) {
+        INFO(name);
+        REQUIRE(typed.contains(name));
+    }
+    REQUIRE(sums["zestdb_requests_total"]["set"] == 5);
+    REQUIRE(sums["zestdb_requests_total"]["get"] == 3);
+    REQUIRE(sums["zestdb_request_duration_seconds_count"]["get"] == 3);
+    REQUIRE(sums["zestdb_request_duration_seconds_sum"]["get"] > 0);
+    REQUIRE(sums["zestdb_cache_misses_total"]["get"] >= 1);
+    REQUIRE(sums["zestdb_keys"][""] == 5);
+    REQUIRE(sums["zestdb_live_bytes"][""] > 0);
+    REQUIRE(sums["zestdb_stored_bytes"][""] >= sums["zestdb_live_bytes"][""]);
+    REQUIRE(sums["zestdb_cache_entries"][""] >= 1);
+    REQUIRE(sums["zestdb_cache_capacity"][""] == static_cast<double>(db.getSettings().CacheSize) * 32);
+    REQUIRE(sums["zestdb_connections"][""] == 0);
 }

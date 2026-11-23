@@ -1,14 +1,16 @@
 #include "PerfMonitoring.hpp"
 
+#include <algorithm>
+
 namespace Zest {
 
     double Stats::avgLatency() const {
-        unsigned int reqs = this->nbRequests.load();
+        const uint64_t reqs = this->nbRequests.load();
         return reqs > 0 ? this->totalLatency.load() / static_cast<double>(reqs) : 0.0;
     }
 
     double Stats::avgCacheMissPercent() const {
-        unsigned int reqs = this->nbRequests.load();
+        const uint64_t reqs = this->nbRequests.load();
         return reqs > 0 ? (static_cast<double>(this->nbCacheMisses.load()) / static_cast<double>(reqs)) * 100.0 : 0.0;
     }
 
@@ -24,15 +26,10 @@ namespace Zest {
     json PerfMonitoring::getPerformances() const {
         json result = json::object();
 
-        const std::pair<const char*, const Stats*> all[] = {
-            { "get", &this->gStats },    { "set", &this->sStats },    { "del", &this->dStats },   { "getby", &this->gbStats }, { "setby", &this->sbStats },
-            { "delby", &this->dbStats }, { "exists", &this->eStats }, { "count", &this->cStats }, { "keys", &this->kStats },
-        };
-
-        unsigned int totalRequests = 0;
-        unsigned int totalCacheMisses = 0;
+        uint64_t totalRequests = 0;
+        uint64_t totalCacheMisses = 0;
         double totalLatency = 0.0;
-        for (const auto& [name, stats] : all) {
+        for (const auto& [name, stats] : this->all) {
             result[name] = statsToJson(*stats);
             totalRequests += stats->nbRequests;
             totalCacheMisses += stats->nbCacheMisses;
@@ -41,8 +38,8 @@ namespace Zest {
 
         result["total"] = { { "nbRequests", totalRequests },
                             { "nbCacheMisses", totalCacheMisses },
-                            { "avgCacheMissPercent", totalRequests > 0 ? (static_cast<double>(totalCacheMisses) / totalRequests) * 100.0 : 0.0 },
-                            { "avgLatencyMs", totalRequests > 0 ? totalLatency / totalRequests : 0.0 } };
+                            { "avgCacheMissPercent", totalRequests > 0 ? (static_cast<double>(totalCacheMisses) / static_cast<double>(totalRequests)) * 100.0 : 0.0 },
+                            { "avgLatencyMs", totalRequests > 0 ? totalLatency / static_cast<double>(totalRequests) : 0.0 } };
 
         return result;
     }
@@ -50,6 +47,9 @@ namespace Zest {
     void PerfMonitoring::record(Stats& stats, bool isCacheMiss, double latency) {
         stats.nbRequests++;
         stats.totalLatency += latency;
+        const double seconds = latency / 1000.0;
+        const auto bucket = static_cast<size_t>(std::lower_bound(LATENCY_BUCKETS_SECONDS.begin(), LATENCY_BUCKETS_SECONDS.end(), seconds) - LATENCY_BUCKETS_SECONDS.begin());
+        stats.latencyBuckets[bucket]++;
 
         if (isCacheMiss) {
             stats.nbCacheMisses++;

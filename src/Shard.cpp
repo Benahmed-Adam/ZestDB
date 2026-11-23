@@ -156,10 +156,31 @@ namespace Zest {
         return total > live ? total - live : 0;
     }
 
+    size_t Shard::keyCount() {
+        return this->indexManager->size();
+    }
+
+    uint64_t Shard::liveBytes() {
+        return this->indexManager->liveBytes();
+    }
+
+    uint64_t Shard::storedBytes() {
+        return this->storageManager->totalBytes();
+    }
+
+    size_t Shard::cacheEntries() {
+        return this->cache->size();
+    }
+
+    unsigned int Shard::cacheCapacity() {
+        return this->cache->getCapacity();
+    }
+
     void Shard::compact() {
         std::unique_lock<std::shared_mutex> compactionLock(this->compactionMtx);
         std::unique_lock<std::shared_mutex> shardLock(this->readMtx);
         this->compactSegments(this->indexManager->compact());
+        this->compactionCount++;
     }
 
     void Shard::compactSegments(std::vector<IndexEntry> entries) {

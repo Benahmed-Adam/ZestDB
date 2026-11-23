@@ -56,6 +56,44 @@ docker run -it -p 7321:7321 -p 1237:1237 \
   - `count` and `keys` are counted once per shard, `exists` on the key's shard only.
 - The counters are per-shard, lock-free atomics, and can be used to observe hot spots or cache efficiency.
 
+## Prometheus metrics
+
+The same HTTP server serves every statistic at `/metrics`, in the Prometheus text format (same TLS and allow-list as `/`). Grafana reads them through Prometheus, added as a data source.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `zestdb_requests_total` | counter | `shard`, `op` | Requests handled (`nbRequests` of `/`). |
+| `zestdb_cache_misses_total` | counter | `shard`, `op` | Requests whose value was read from disk (`nbCacheMisses`). |
+| `zestdb_request_duration_seconds` | histogram | `shard`, `op`, `le` | Request latency, with buckets from 0.1 ms to 1 s. |
+| `zestdb_request_latency_avg_seconds` | gauge | `shard`, `op` | Mean latency since startup (`avgLatencyMs`, in seconds). |
+| `zestdb_cache_miss_ratio` | gauge | `shard`, `op` | Share of cache misses since startup (`avgCacheMissPercent`, from 0 to 1). |
+| `zestdb_keys` | gauge | `shard` | Keys stored; expired keys count until the next compaction. |
+| `zestdb_live_bytes` | gauge | `shard` | Bytes of segment data the live keys point to. |
+| `zestdb_stored_bytes` | gauge | `shard` | Bytes written to the segments, live or dead. |
+| `zestdb_cache_entries` | gauge | `shard` | Keys in the LRU cache. |
+| `zestdb_cache_capacity` | gauge | `shard` | Capacity of the LRU cache (`CacheSize`). |
+| `zestdb_compactions_total` | counter | `shard` | Compactions run since startup. |
+| `zestdb_connections` | gauge | | Open TCP client connections. |
+
+`op` is one of `get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`. The `total` of `/` has no series of its own: sum over the labels instead. The counters restart from zero with the server, which `rate()` handles.
+
+Scrape configuration:
+```yaml
+scrape_configs:
+  - job_name: zestdb
+    static_configs:
+      - targets: ["zestdb-host:1237"]
+    # scheme: https   # with useSSL
+```
+
+Some queries:
+```promql
+sum by (op) (rate(zestdb_requests_total[1m]))                                            # operations per second
+histogram_quantile(0.99, sum by (le, op) (rate(zestdb_request_duration_seconds_bucket[5m])))  # p99 latency
+sum(rate(zestdb_cache_misses_total[5m])) / sum(rate(zestdb_requests_total[5m]))          # cache miss ratio
+1 - sum(zestdb_live_bytes) / sum(zestdb_stored_bytes)                                    # share of dead data
+```
+
 ## Logging
 
 - Multi-level colored logging (`INFO`, `DEBUG`, `WARNING`, `ERROR`, `CRITICAL`) with timestamps. Control characters in messages are escaped.

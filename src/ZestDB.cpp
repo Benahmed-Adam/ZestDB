@@ -174,6 +174,15 @@ namespace Zest {
                 ZestLog(LogLevel::Critical, e.what());
             }
         });
+
+        this->srv->Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {
+            try {
+                res.set_content(this->prometheusMetrics(), "text/plain; version=0.0.4; charset=utf-8");
+            } catch (const std::exception& e) {
+                res.status = 500;
+                ZestLog(LogLevel::Critical, e.what());
+            }
+        });
     }
 
     ZestDB::~ZestDB() {

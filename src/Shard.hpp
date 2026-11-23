@@ -75,6 +75,21 @@ namespace Zest {
         void compact();
         /// Bytes written to the segments that no live key points to any more (overwritten, deleted or expired values).
         uint64_t deadBytes();
+        /// Number of keys, expired ones included until the next compaction (see IndexManager::size()).
+        size_t keyCount();
+        /// Bytes of segment data the live keys point to.
+        uint64_t liveBytes();
+        /// Bytes written to the segments, live or dead.
+        uint64_t storedBytes();
+        /// Number of keys in the LRU cache, and its capacity.
+        size_t cacheEntries();
+        unsigned int cacheCapacity();
+
+        /// Number of compactions run since startup.
+        uint64_t compactions() const {
+            return this->compactionCount.load();
+        }
+
         /// Stops the compactor thread and flushes the data. Safe to call twice.
         void stop();
 
@@ -129,6 +144,7 @@ namespace Zest {
         std::shared_mutex compactionMtx; // exclusive during compaction, shared while an archive copies the files
 
         std::atomic<bool> isStopped = false;
+        std::atomic<uint64_t> compactionCount = 0;
         std::mutex compactorThreadMtx;
         std::condition_variable_any threadCV;
         std::jthread compactorThread;

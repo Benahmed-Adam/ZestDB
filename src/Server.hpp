@@ -104,6 +104,11 @@ namespace Zest {
         /// rest and joins the IO threads. Does nothing the second time.
         void stop();
 
+        /// Number of open client sessions, authenticated or not.
+        size_t connections() const {
+            return this->activeSessions_->load();
+        }
+
     private:
         /// Accepts the next connection on the next IO thread, refusing it above MaxConnections; retries after an error.
         void do_accept();

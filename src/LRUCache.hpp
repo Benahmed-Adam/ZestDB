@@ -37,6 +37,11 @@ namespace Zest {
         /// Changes the capacity, evicting the least recently used keys if it shrinks.
         void resize(unsigned int cap);
 
+        /// Number of cached keys.
+        size_t size();
+        /// Maximum number of cached keys.
+        unsigned int getCapacity();
+
     private:
         unsigned int capacity;
 

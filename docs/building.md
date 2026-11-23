@@ -168,6 +168,7 @@ The branch must be up to date with its target, and only merge commits are allowe
 │   ├── Config.cpp                # loading, reloading and changing the configuration
 │   ├── Archive.cpp               # archive creation, restore and listing
 │   ├── Auth.cpp                  # tokens, roles, lockout, address filter
+│   ├── Metrics.cpp               # Prometheus metrics served at /metrics
 │   ├── ScriptEngine.{hpp,cpp}    # Lua scripts, functions and triggers
 │   ├── Server.{hpp,cpp}          # Asio TCP/SSL server and protocol
 │   ├── Settings.hpp              # settings, result codes, validation rules

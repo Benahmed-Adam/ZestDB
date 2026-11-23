@@ -60,6 +60,16 @@ namespace Zest {
         it->second = { { entry, value }, this->lru_list.begin() };
     }
 
+    size_t LRUCache::size() {
+        std::lock_guard<std::mutex> lock(this->mtx);
+        return this->map.size();
+    }
+
+    unsigned int LRUCache::getCapacity() {
+        std::lock_guard<std::mutex> lock(this->mtx);
+        return this->capacity;
+    }
+
     void LRUCache::resize(unsigned int cap) {
         std::lock_guard<std::mutex> lock(this->mtx);
 

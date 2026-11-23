@@ -12,7 +12,7 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - **Durable storage**: 32 shards, each with append-only segments, an in-memory index, an LRU cache and a write-ahead log. Values are zstd-compressed when that makes them smaller, every record and value carries a CRC-32 checksum, and a shard is compacted in the background once half of its data is dead.
 - **Lua scripting**: functions called in one round trip and triggers that validate, transform or react to writes, in a sandbox with instruction and memory limits.
 - **Network server**: asynchronous TCP with batched commands, optional TLS, per-user roles (`read`, `write`, `admin`) and an IP allow-list.
-- **Operations**: hot-reloadable configuration, zip archives with restore, and live per-shard statistics over HTTP.
+- **Operations**: hot-reloadable configuration, zip archives with restore, and live per-shard statistics over HTTP, as JSON and as Prometheus metrics.
 
 ## Quick start
 
