@@ -260,34 +260,34 @@ namespace Zest {
                         this->close_stream();
                         return;
                     }
-                    Discard& d = this->discard_;
+                    Discard& state = this->discard_;
                     const auto* bytes = static_cast<const unsigned char*>(this->buffer_.data().data());
                     for (uint32_t i = 0; i < chunk;) {
-                        if (d.skip > 0) {
-                            const uint32_t n = std::min(d.skip, chunk - i);
-                            d.skip -= n;
+                        if (state.skip > 0) {
+                            const uint32_t n = std::min(state.skip, chunk - i);
+                            state.skip -= n;
                             i += n;
                             continue;
                         }
-                        d.length = (d.length << 8) | bytes[i++];
-                        if (++d.header < 4) {
+                        state.length = (state.length << 8) | bytes[i++];
+                        if (++state.header < 4) {
                             continue;
                         }
                         // The command's length is complete: the bytes after it in the request are what is left of this chunk
                         // and the chunks still to read
-                        const uint32_t after = (chunk - i) + (d.left - chunk);
-                        d.header = 0;
-                        if (d.length > after || d.malformed) {
-                            d.malformed = true;
-                            d.skip = after;
+                        const uint32_t after = (chunk - i) + (state.left - chunk);
+                        state.header = 0;
+                        if (state.length > after || state.malformed) {
+                            state.malformed = true;
+                            state.skip = after;
                         } else {
-                            d.commands++;
-                            d.skip = d.length;
+                            state.commands++;
+                            state.skip = state.length;
                         }
-                        d.length = 0;
+                        state.length = 0;
                     }
                     this->buffer_.consume(chunk);
-                    d.left -= chunk;
+                    state.left -= chunk;
                     this->discard_next_chunk();
                 });
             },

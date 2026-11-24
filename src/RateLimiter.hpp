@@ -10,13 +10,13 @@
 
 namespace Zest {
 
-    /// Token bucket: holds at most `burst` tokens and gains `rate` tokens per second. Time is passed in, so tests do not wait.
+    /// Token bucket: holds at most `capacity` tokens and gains `ratePerSecond` tokens per second. Time is passed in, so tests do not wait.
     class TokenBucket {
     public:
         using Clock = std::chrono::steady_clock;
 
         /// Starts full.
-        TokenBucket(double rate, double burst, Clock::time_point now);
+        TokenBucket(double ratePerSecond, double capacity, Clock::time_point now);
 
         /// Takes up to `wanted` whole tokens and returns how many it took (0 when the bucket is empty).
         uint64_t take(uint64_t wanted, Clock::time_point now);

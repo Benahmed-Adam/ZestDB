@@ -5,10 +5,10 @@
 
 namespace Zest {
 
-    TokenBucket::TokenBucket(double rate, double burst, Clock::time_point now)
-        : rate(rate),
-          burst(burst),
-          tokens(burst),
+    TokenBucket::TokenBucket(double ratePerSecond, double capacity, Clock::time_point now)
+        : rate(ratePerSecond),
+          burst(capacity),
+          tokens(capacity),
           last(now) {
     }
 

@@ -1319,10 +1319,12 @@ TEST_CASE("ZestDB resolves each user's limits against the top-level ones", "[com
         // A user's own rateLimit comes with a burst of the same value, not the top-level burst
         REQUIRE(db.limiterOf("fast")->allowCommands(5000) == 1000);
         REQUIRE(db.limiterOf("wide")->allowCommands(100) == 20);
-        REQUIRE(db.limiterOf("plain")->allowBytes(1024));
-        REQUIRE_FALSE(db.limiterOf("plain")->allowBytes(1));
-        REQUIRE(db.limiterOf("wide")->allowBytes(2 * 1024 * 1024));
-        REQUIRE_FALSE(db.limiterOf("wide")->allowBytes(1));
+        // One instant for both calls, so nothing refills in between
+        const auto now = TokenBucket::Clock::now();
+        REQUIRE(db.limiterOf("plain")->allowBytes(1024, now));
+        REQUIRE_FALSE(db.limiterOf("plain")->allowBytes(1, now));
+        REQUIRE(db.limiterOf("wide")->allowBytes(2 * 1024 * 1024, now));
+        REQUIRE_FALSE(db.limiterOf("wide")->allowBytes(1, now));
     }
 }
 

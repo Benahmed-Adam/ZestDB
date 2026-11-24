@@ -341,8 +341,8 @@ TEST_CASE_METHOD(SessionFixture, "Session runs the first commands of a batch tha
     REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::Success)) == 5);
     REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 3);
     REQUIRE(reply.find(codeOf(ResultType::Code::RateLimited)) > reply.rfind(codeOf(ResultType::Code::Success)));
-    REQUIRE(db->execCmd("exists k4").response == "1");
-    REQUIRE(db->execCmd("exists k5").response == "0");
+    REQUIRE(db->execCmd("exists k4").response == "true");
+    REQUIRE(db->execCmd("exists k5").response == "false");
 
     REQUIRE(c.send("g k0").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -374,7 +374,7 @@ TEST_CASE_METHOD(SessionFixture, "Session drops the requests that exceed the ban
     }
     const std::string reply = c.sendBatch(cmds);
     REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 200);
-    REQUIRE(db->execCmd("exists n0").response == "0");
+    REQUIRE(db->execCmd("exists n0").response == "false");
 
     // The session is still in step with the protocol after the dropped request
     REQUIRE(c.send("g big").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
