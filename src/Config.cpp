@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -32,6 +33,61 @@ namespace Zest {
     template <typename T>
     static T getOr(fkyaml::node& node, const std::string& key, T def) {
         return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : std::move(def);
+    }
+
+    /// A byte count: a positive integer, or a string with a `KB`, `MB` or `GB` suffix (powers of 1024), such as `10MB`.
+    static uint64_t parseSize(const fkyaml::node& value, const std::string& where) {
+        if (value.is_integer()) {
+            const auto bytes = value.get_value<int64_t>();
+            if (bytes <= 0) {
+                throw std::runtime_error(std::format("{}: bandwidthLimit must be positive", where));
+            }
+            return static_cast<uint64_t>(bytes);
+        }
+        const std::string text = value.is_string() ? value.get_value<std::string>() : "";
+        uint64_t number = 0;
+        const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), number);
+        std::string unit(end, text.data() + text.size());
+        std::erase(unit, ' ');
+        std::ranges::transform(unit, unit.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        const std::pair<const char*, uint64_t> units[] = { { "", 1 }, { "B", 1 }, { "KB", 1ULL << 10 }, { "MB", 1ULL << 20 }, { "GB", 1ULL << 30 } };
+        const auto* found = std::ranges::find_if(units, [&unit](const auto& u) { return unit == u.first; });
+        if (ec != std::errc() || end == text.data() || number == 0 || found == std::end(units) || number > UINT64_MAX / found->second) {
+            throw std::runtime_error(std::format("{}: invalid bandwidthLimit '{}' (use a byte count or a KB, MB or GB suffix)", where, text));
+        }
+        return number * found->second;
+    }
+
+    /// The rateLimit, burst and bandwidthLimit set in `node` (the top level, or one user), each absent when not set.
+    static UserLimits parseLimits(const fkyaml::node& node, const std::string& where) {
+        const auto number = [&](const char* key) -> std::optional<double> {
+            if (!node.contains(key) || node[key].is_null()) {
+                return std::nullopt;
+            }
+            const fkyaml::node& value = node[key];
+            double n = 0;
+            if (value.is_integer()) {
+                n = static_cast<double>(value.get_value<int64_t>());
+            } else if (value.is_float_number()) {
+                n = value.get_value<double>();
+            } else {
+                throw std::runtime_error(std::format("{}: {} must be a number", where, key));
+            }
+            if (!(n > 0)) {
+                throw std::runtime_error(std::format("{}: {} must be positive", where, key));
+            }
+            return n;
+        };
+        UserLimits limits;
+        limits.rateLimit = number("rateLimit");
+        limits.burst = number("burst");
+        if (limits.burst && *limits.burst < 1) {
+            throw std::runtime_error(std::format("{}: burst must be at least 1", where));
+        }
+        if (node.contains("bandwidthLimit") && !node["bandwidthLimit"].is_null()) {
+            limits.bandwidthLimit = parseSize(node["bandwidthLimit"], where);
+        }
+        return limits;
     }
 
     /// `read`, `write` or `admin` as a Role, nullopt for anything else.
@@ -125,6 +181,8 @@ namespace Zest {
                 }
             }
 
+            result.defaultLimits = parseLimits(node, "config");
+
             if (node.contains("users") && node["users"].is_sequence()) {
                 for (const auto& user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
@@ -134,7 +192,14 @@ namespace Zest {
                         throw std::runtime_error(std::format("user {}: unknown role '{}' (use read, write or admin)", username, roleName));
                     }
                     std::string tokenHash = user_node.contains("tokenHash") ? user_node["tokenHash"].get_value<std::string>() : sha256(sha256(username + user_node["password"].get_value<std::string>()));
-                    parsedUsers[username] = { std::move(tokenHash), *role };
+                    // Each limit the user does not set falls back to the top-level one, then to unlimited. The top-level
+                    // burst goes with the top-level rateLimit: a user who sets a rateLimit without a burst gets a burst
+                    // equal to that rateLimit.
+                    const UserLimits own = parseLimits(user_node, "user " + username);
+                    const UserLimits& top = result.defaultLimits;
+                    const std::optional<double> burst = own.burst ? own.burst : (own.rateLimit ? std::nullopt : top.burst);
+                    const UserLimits limits{ own.rateLimit ? own.rateLimit : top.rateLimit, burst, own.bandwidthLimit ? own.bandwidthLimit : top.bandwidthLimit };
+                    parsedUsers[username] = { std::move(tokenHash), *role, limits };
                 }
             }
         } catch (const std::exception& e) {
@@ -191,6 +256,7 @@ namespace Zest {
             {
                 std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
                 this->users = std::move(newUsers);
+                this->rebuildLimiters();
             }
             setLoggerDebugMode(this->settings.isDebug);
             this->shardManager->reloadSettings(this->settings);

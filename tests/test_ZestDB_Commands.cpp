@@ -1299,3 +1299,56 @@ TEST_CASE("ZestDB exposes its statistics as Prometheus metrics", "[commands][met
     REQUIRE(sums["zestdb_cache_capacity"][""] == static_cast<double>(db.getSettings().CacheSize) * 32);
     REQUIRE(sums["zestdb_connections"][""] == 0);
 }
+
+TEST_CASE("ZestDB resolves each user's limits against the top-level ones", "[commands][ratelimit]") {
+    const std::string users = "users:\n"
+                              "  - user: plain\n    password: p\n"
+                              "  - user: fast\n    password: f\n    rateLimit: 1000\n"
+                              "  - user: wide\n    password: w\n    bandwidthLimit: 2 MB\n";
+    SECTION("without any limit, everyone is unlimited") {
+        TempDbDir tmp("zestdb_test_limits_none", users, 29593);
+        ZestDB db;
+        REQUIRE(db.limiterOf("plain") == nullptr);
+        REQUIRE(db.limiterOf("fast") != nullptr);
+        REQUIRE(db.limiterOf("unknown") == nullptr);
+    }
+    SECTION("the top-level limits apply to the users that do not set their own") {
+        TempDbDir tmp("zestdb_test_limits_global", "rateLimit: 10\nburst: 20\nbandwidthLimit: 1KB\n" + users, 29593);
+        ZestDB db;
+        REQUIRE(db.limiterOf("plain")->allowCommands(100) == 20);
+        // A user's own rateLimit comes with a burst of the same value, not the top-level burst
+        REQUIRE(db.limiterOf("fast")->allowCommands(5000) == 1000);
+        REQUIRE(db.limiterOf("wide")->allowCommands(100) == 20);
+        REQUIRE(db.limiterOf("plain")->allowBytes(1024));
+        REQUIRE_FALSE(db.limiterOf("plain")->allowBytes(1));
+        REQUIRE(db.limiterOf("wide")->allowBytes(2 * 1024 * 1024));
+        REQUIRE_FALSE(db.limiterOf("wide")->allowBytes(1));
+    }
+}
+
+TEST_CASE("ZestDB refuses an invalid limit in config.yaml", "[commands][ratelimit]") {
+    for (const char* bad : { "rateLimit: 0\n", "rateLimit: fast\n", "burst: 0.5\n", "bandwidthLimit: 10XB\n", "bandwidthLimit: MB\n", "bandwidthLimit: -5\n" }) {
+        INFO(bad);
+        TempDbDir tmp("zestdb_test_limits_invalid", bad, 29595);
+        REQUIRE_THROWS(ZestDB());
+    }
+}
+
+TEST_CASE("ZestDB reload updates the limits without resetting the buckets", "[commands][ratelimit]") {
+    const std::string base = "users:\n  - user: root\n    role: admin\n    password: r\n  - user: u\n    password: p\n    rateLimit: 10\n";
+    TempDbDir tmp("zestdb_test_limits_reload", base, 29597);
+    ZestDB db;
+    auto limiter = db.limiterOf("u");
+    REQUIRE(limiter->allowCommands(8) == 8);
+
+    tmp.writeConfig(std::format("DbPath: {}\nMaxKeySize: 255\nDBPort: 29597\nWebPort: 29598\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n{}", (tmp.dir / "db").string(), (tmp.dir / "archive").string(),
+                                "users:\n  - user: root\n    role: admin\n    password: r\n  - user: u\n    password: p\n    rateLimit: 100\n"));
+    REQUIRE(db.execCmd("r", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.limiterOf("u") == limiter);
+    REQUIRE(limiter->allowCommands(100) == 2);
+
+    tmp.writeConfig(
+        std::format("DbPath: {}\nMaxKeySize: 255\nDBPort: 29597\nWebPort: 29598\nArchiveStoragePath: {}\nAutoArchiveSaving: false\n{}", (tmp.dir / "db").string(), (tmp.dir / "archive").string(), base.substr(0, base.find("    rateLimit"))));
+    REQUIRE(db.execCmd("r", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.limiterOf("u") == nullptr);
+}

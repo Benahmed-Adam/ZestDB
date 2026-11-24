@@ -15,6 +15,22 @@ namespace Zest {
             std::format_to(std::back_inserter(out), "# HELP {} {}\n# TYPE {} {}\n", name, help, name, type);
         }
 
+        /// `value` escaped for a label value: backslash, double quote and line feed.
+        std::string labelValue(std::string_view value) {
+            std::string out;
+            for (char c : value) {
+                if (c == '\\' || c == '"') {
+                    out += '\\';
+                    out += c;
+                } else if (c == '\n') {
+                    out += "\\n";
+                } else {
+                    out += c;
+                }
+            }
+            return out;
+        }
+
         template <typename T>
         void sample(std::string& out, std::string_view name, std::string_view labels, T value) {
             std::format_to(std::back_inserter(out), "{}{{{}}} {}\n", name, labels, value);
@@ -67,6 +83,14 @@ namespace Zest {
         perShard("zestdb_cache_entries", "gauge", "Keys in the LRU cache.", [](Shard& s) { return s.cacheEntries(); });
         perShard("zestdb_cache_capacity", "gauge", "Maximum number of keys in the LRU cache (CacheSize).", [](Shard& s) { return s.cacheCapacity(); });
         perShard("zestdb_compactions_total", "counter", "Compactions run since startup.", [](const Shard& s) { return s.compactions(); });
+
+        family(out, "zestdb_rate_limited_total", "counter", "Commands refused by the rate or bandwidth limit of their user (users with a limit only).");
+        {
+            std::shared_lock<std::shared_mutex> usersLock(this->usersMtx);
+            for (const auto& [user, limiter] : this->limiters) {
+                sample(out, "zestdb_rate_limited_total", std::format(R"(user="{}")", labelValue(user)), limiter->refusedCommands());
+            }
+        }
 
         family(out, "zestdb_connections", "gauge", "Open client connections on the TCP server, authenticated or not.");
         std::format_to(std::back_inserter(out), "zestdb_connections {}\n", this->socket ? this->socket->connections() : 0);

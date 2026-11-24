@@ -67,6 +67,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 301 | `PermissionDenied` | The user's role does not allow this command. |
 | 302 | `SessionRevoked` | The user was removed from the configuration; the connection is closed. |
 | 303 | `ReadOnly` | `readOnly` is enabled and the command writes. |
+| 304 | `RateLimited` | The user's `rateLimit` or `bandwidthLimit` is exceeded: the command was not run. Retry later (see [rate limits](configuration.md#rate-limits)). |
 
 ## 4xx - Configuration
 

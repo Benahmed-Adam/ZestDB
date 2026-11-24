@@ -48,6 +48,12 @@ public:
         cfg << "  - user: root\n";
         cfg << "    role: admin\n";
         cfg << "    password: r\n";
+        cfg << "  - user: limited\n";
+        cfg << "    password: l\n";
+        cfg << "    rateLimit: 5\n";
+        cfg << "  - user: narrow\n";
+        cfg << "    password: n\n";
+        cfg << "    bandwidthLimit: 1KB\n";
     }
 
     SessionFixture() {
@@ -97,6 +103,29 @@ public:
         asio::streambuf buf;
         asio::read_until(sock, buf, '\n', ec);
         return std::string(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
+    }
+
+    /// Sends `cmds` as one batch and reads the reply until it holds one response per command.
+    std::string sendBatch(const std::vector<std::string>& cmds) {
+        std::string payload;
+        for (const auto& cmd : cmds) {
+            payload += be32(static_cast<uint32_t>(cmd.size())) + cmd;
+        }
+        asio::write(sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload));
+        std::string reply;
+        while (countOf(reply, "\"code\":") < cmds.size() || !reply.ends_with('\n')) {
+            char buf[65536];
+            reply.append(buf, sock.read_some(asio::buffer(buf)));
+        }
+        return reply;
+    }
+
+    static size_t countOf(const std::string& text, const std::string& what) {
+        size_t n = 0;
+        for (size_t pos = text.find(what); pos != std::string::npos; pos = text.find(what, pos + what.size())) {
+            n++;
+        }
+        return n;
     }
 
     std::string send(const std::string& cmd) {
@@ -299,4 +328,72 @@ TEST_CASE_METHOD(SessionFixture, "Stopping the server closes idle sessions witho
 
     REQUIRE(idle.send("g k").empty());
     REQUIRE(unauthenticated.send("Authorization: bob." + sha256("bobbob")).empty());
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session runs the first commands of a batch that exceeds the rate limit and refuses the rest", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: limited." + sha256("limitedl")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    std::vector<std::string> cmds;
+    for (int i = 0; i < 8; i++) {
+        cmds.push_back(std::format(R"(s k{} "v")", i));
+    }
+    const std::string reply = c.sendBatch(cmds);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::Success)) == 5);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 3);
+    REQUIRE(reply.find(codeOf(ResultType::Code::RateLimited)) > reply.rfind(codeOf(ResultType::Code::Success)));
+    REQUIRE(db->execCmd("exists k4").response == "1");
+    REQUIRE(db->execCmd("exists k5").response == "0");
+
+    REQUIRE(c.send("g k0").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    REQUIRE(c.send("g k0").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(db->limiterOf("limited")->refusedCommands() == 4);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session shares a user's rate limit between its connections", "[session][ratelimit]") {
+    Client a;
+    Client b;
+    for (Client* c : { &a, &b }) {
+        REQUIRE(c->send("Authorization: limited." + sha256("limitedl")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    }
+    const std::string first = a.sendBatch({ "g x", "g x", "g x" });
+    const std::string second = b.sendBatch({ "g x", "g x", "g x" });
+    REQUIRE(Client::countOf(first + second, codeOf(ResultType::Code::RateLimited)) == 1);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session drops the requests that exceed the bandwidth limit", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: narrow." + sha256("narrown")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    // Larger than the 1 KB/s limit, but the bucket is full: it passes and leaves a debt
+    REQUIRE(c.send(std::format(R"(s big "{}")", std::string(3000, 'x'))).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+
+    // While the debt lasts, every command of a request is refused, here over several 64 KB chunks
+    std::vector<std::string> cmds;
+    for (int i = 0; i < 200; i++) {
+        cmds.push_back(std::format(R"(s n{} "{}")", i, std::string(1000, 'y')));
+    }
+    const std::string reply = c.sendBatch(cmds);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 200);
+    REQUIRE(db->execCmd("exists n0").response == "0");
+
+    // The session is still in step with the protocol after the dropped request
+    REQUIRE(c.send("g big").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+    REQUIRE(db->limiterOf("narrow")->refusedCommands() == 201);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session answers MalformedBatch for a dropped request whose lengths do not add up", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: narrow." + sha256("narrown")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(std::format(R"(s big "{}")", std::string(3000, 'x'))).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    const std::string payload = be32(3) + "g a" + be32(50) + "short";
+    const std::string reply = c.sendRaw(be32(static_cast<uint32_t>(payload.size())) + payload);
+    REQUIRE(reply.find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session does not limit a user without limits", "[session][ratelimit]") {
+    REQUIRE(db->limiterOf("bob") == nullptr);
+    Client c;
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    const std::string reply = c.sendBatch(std::vector<std::string>(500, "g x"));
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 0);
 }

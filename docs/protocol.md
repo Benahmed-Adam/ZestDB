@@ -8,6 +8,7 @@ Clients talk to the TCP server (`DBPort`, default `7321`) using a length-prefixe
 - Optional TLS/SSL (`useSSL`), for both the TCP server and the HTTP stats server.
 - Configurable IP allow-listing using a regular expression (`NetworkValidation`), applied to both servers.
 - Connection limits: `MaxConnections` simultaneous sessions, `AuthTimeout` to finish the TLS handshake and authenticate, `IdleTimeout` for authenticated sessions.
+- Optional per-user rate limits (commands per second, request bytes per second); a refused command is answered with code `304` (see [rate limits](configuration.md#rate-limits)).
 
 ## Frame format
 

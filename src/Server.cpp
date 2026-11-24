@@ -6,9 +6,20 @@
 #include <istream>
 
 #include "Logger.hpp"
+#include "RateLimiter.hpp"
 #include "ZestDB.hpp"
 
 namespace Zest {
+
+    namespace {
+        /// The reply to a command refused by a rate limit, built once: refusing costs no more than copying it.
+        const std::string& rateLimitedReply() {
+            static const std::string reply = ZestDB::responseToJson({ ResultType::Code::RateLimited });
+            return reply;
+        }
+
+        constexpr uint32_t DISCARD_CHUNK = 64 * 1024;
+    } // namespace
 
     Session::Session(ZestStream stream, ZestDB& db, Limits limits, std::shared_ptr<std::atomic<size_t>> activeSessions)
         : stream_(std::move(stream)),
@@ -117,6 +128,13 @@ namespace Zest {
                             this->queue_write(ZestDB::responseToJson({ ResultType::Code::PayloadTooLarge }) + "\n", true);
                             return;
                         }
+                        // Looked up for each request, so a `reload` that changes the user's limits applies at once.
+                        // The bandwidth is checked before the payload is read, let alone allocated.
+                        this->limiter_ = this->authenticated_ ? this->db_.limiterOf(this->username_) : nullptr;
+                        if (this->limiter_ && !this->limiter_->allowBytes(4ULL + payload_size)) {
+                            this->discard_request(payload_size);
+                            return;
+                        }
                         this->do_read_command(payload_size);
                     } else {
                         if (ec != asio::error::operation_aborted) {
@@ -147,6 +165,26 @@ namespace Zest {
                     bool should_close = false;
                     uint32_t offset = 0;
 
+                    // The tokens of the whole batch are taken at once: the first `allowed` commands run, the others are
+                    // refused without being parsed. A batch sent before authentication is not limited, but it is capped
+                    // at MAX_UNAUTHENTICATED_PAYLOAD_SIZE.
+                    uint64_t allowed = UINT64_MAX;
+                    if (this->limiter_) {
+                        uint64_t commands = 0;
+                        for (uint32_t pos = 0; payload_size - pos >= 4; commands++) {
+                            uint32_t size;
+                            std::memcpy(&size, &payload[pos], 4);
+                            size = ntohl(size);
+                            if (size > payload_size - pos - 4) {
+                                break;
+                            }
+                            pos += 4 + size;
+                        }
+                        allowed = this->limiter_->allowCommands(commands);
+                        this->limiter_->addRefused(commands - allowed);
+                    }
+                    uint64_t index = 0;
+
                     while (offset < payload_size && !should_close) {
                         if (offset + 4 > payload_size) {
                             final_result += (final_result.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::MalformedBatch });
@@ -163,7 +201,7 @@ namespace Zest {
                             break;
                         }
 
-                        std::string cmd_result = this->handle_command(payload.substr(offset, cmd_size), should_close);
+                        std::string cmd_result = index++ < allowed ? this->handle_command(payload.substr(offset, cmd_size), should_close) : rateLimitedReply();
                         offset += cmd_size;
 
                         if (!final_result.empty()) {
@@ -186,6 +224,71 @@ namespace Zest {
                     if (!should_close) {
                         this->do_read_size();
                     }
+                });
+            },
+            stream_);
+    }
+
+    void Session::discard_request(uint32_t size) {
+        this->discard_ = { .left = size };
+        this->discard_next_chunk();
+    }
+
+    void Session::discard_next_chunk() {
+        Discard& d = this->discard_;
+        if (d.left == 0) {
+            const bool malformed = d.malformed || d.header != 0 || d.skip != 0;
+            this->limiter_->addRefused(d.commands);
+            std::string reply;
+            for (uint64_t i = 0; i < d.commands; i++) {
+                reply += (reply.empty() ? "" : "\r\n\r\n") + rateLimitedReply();
+            }
+            if (malformed) {
+                reply += (reply.empty() ? "" : "\r\n\r\n") + ZestDB::responseToJson({ ResultType::Code::MalformedBatch });
+            }
+            this->queue_write(reply + '\n');
+            this->do_read_size();
+            return;
+        }
+
+        const uint32_t chunk = std::min(d.left, DISCARD_CHUNK);
+        auto self(this->shared_from_this());
+        std::visit(
+            [this, self, chunk](auto& stream) {
+                asio::async_read(stream, this->buffer_, asio::transfer_exactly(chunk), [this, self, chunk](std::error_code ec, std::size_t length) {
+                    if (ec || length != chunk) {
+                        this->close_stream();
+                        return;
+                    }
+                    Discard& d = this->discard_;
+                    const auto* bytes = static_cast<const unsigned char*>(this->buffer_.data().data());
+                    for (uint32_t i = 0; i < chunk;) {
+                        if (d.skip > 0) {
+                            const uint32_t n = std::min(d.skip, chunk - i);
+                            d.skip -= n;
+                            i += n;
+                            continue;
+                        }
+                        d.length = (d.length << 8) | bytes[i++];
+                        if (++d.header < 4) {
+                            continue;
+                        }
+                        // The command's length is complete: the bytes after it in the request are what is left of this chunk
+                        // and the chunks still to read
+                        const uint32_t after = (chunk - i) + (d.left - chunk);
+                        d.header = 0;
+                        if (d.length > after || d.malformed) {
+                            d.malformed = true;
+                            d.skip = after;
+                        } else {
+                            d.commands++;
+                            d.skip = d.length;
+                        }
+                        d.length = 0;
+                    }
+                    this->buffer_.consume(chunk);
+                    d.left -= chunk;
+                    this->discard_next_chunk();
                 });
             },
             stream_);

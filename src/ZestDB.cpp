@@ -216,6 +216,10 @@ namespace Zest {
 
     void ZestDB::boot() {
         this->settings = this->loadConfig(this->users);
+        {
+            std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+            this->rebuildLimiters();
+        }
         setLoggerDebugMode(this->settings.isDebug);
 
         if (!this->settings.useSSL && !this->users.empty()) {

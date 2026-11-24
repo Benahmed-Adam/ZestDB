@@ -73,6 +73,7 @@ The same HTTP server serves every statistic at `/metrics`, in the Prometheus tex
 | `zestdb_cache_entries` | gauge | `shard` | Keys in the LRU cache. |
 | `zestdb_cache_capacity` | gauge | `shard` | Capacity of the LRU cache (`CacheSize`). |
 | `zestdb_compactions_total` | counter | `shard` | Compactions run since startup. |
+| `zestdb_rate_limited_total` | counter | `user` | Commands refused by the user's rate or bandwidth limit (users with a limit only). |
 | `zestdb_connections` | gauge | | Open TCP client connections. |
 
 `op` is one of `get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`. The `total` of `/` has no series of its own: sum over the labels instead. The counters restart from zero with the server, which `rate()` handles.

@@ -34,9 +34,12 @@ Configuration is provided through `config.yaml` in the working directory. The fi
 | `MaxConnections` | 1024 | Maximum number of simultaneous client connections. |
 | `AuthTimeout` | 10 | Seconds a client has to finish the TLS handshake and authenticate. |
 | `IdleTimeout` | 300 | Seconds of inactivity before an authenticated connection is closed. |
+| `rateLimit` | unlimited | Commands per second allowed to each user that sets no limit of its own (see [rate limits](#rate-limits)). |
+| `burst` | `rateLimit` | Commands each such user may send at once. |
+| `bandwidthLimit` | unlimited | Request bytes per second allowed to each such user. |
 | `users` | empty | List of `{user, role, tokenHash}` entries (see below). |
 
-The server refuses to start when `MaxValueSize` is not smaller than `SegSize`, when an interval, a timeout or `MaxConnections` is `0`, when `DBPort` equals `WebPort`, when `useSSL` is set without `SSLCertPath` and `SSLKeyPath`, or when a role is unknown. A `MaxKeySize` above 256 is lowered to 256.
+The server refuses to start when `MaxValueSize` is not smaller than `SegSize`, when an interval, a timeout or `MaxConnections` is `0`, when `DBPort` equals `WebPort`, when `useSSL` is set without `SSLCertPath` and `SSLKeyPath`, when a role is unknown, or when a rate limit is not positive (`burst` must be at least 1). A `MaxKeySize` above 256 is lowered to 256.
 
 The provided `config.yaml` contains a development account (`bob`/`bob`, admin) and only accepts local connections: replace the account before widening `NetworkValidation`.
 
@@ -57,3 +60,32 @@ Roles are checked on every command, so a `reload` that removes a user or changes
 printf %s "$(printf %s "<user><password>" | sha256sum | cut -d' ' -f1)" | sha256sum | cut -d' ' -f1
 ```
 A plaintext `password` field is still accepted but deprecated.
+
+## Rate limits
+
+`rateLimit`, `burst` and `bandwidthLimit` can be set at the top of the file, for every user, and in a user's entry, for that user only:
+
+```yaml
+rateLimit: 500          # commands per second
+burst: 1000             # commands at once (default: rateLimit)
+bandwidthLimit: 5MB     # request bytes per second: a number, or a KB, MB or GB suffix (powers of 1024)
+
+users:
+  - user: bob
+    role: write
+    tokenHash: ...
+    rateLimit: 1000     # bob's own limits
+    burst: 2000
+    bandwidthLimit: 10MB
+  - user: alice         # no limit of her own: the top-level ones apply
+    role: read
+    tokenHash: ...
+```
+
+- Each limit a user does not set falls back to the top-level one, then to unlimited: without any of these fields, nobody is limited. A user who sets a `rateLimit` without a `burst` gets a burst equal to that `rateLimit`.
+- The limits are per user, not shared by all users, and a user's connections share them: opening more connections does not raise them.
+- Every command counts, so a batch of 10,000 commands counts 10,000; `call` counts as one command, whatever the script does.
+- A user may send up to `burst` commands at once, then `rateLimit` per second (a token bucket). In a batch that exceeds it, the first commands run and the others are refused with code `304` (`RateLimited`), without being parsed.
+- The bandwidth is checked before a request is read, from its length. A request larger than the limit still passes when the user has not used it recently, and the next requests wait until the average is back under the limit. A refused request is read and dropped without being stored, and each of its commands is answered `304`.
+- `reload` applies new limits to open sessions without resetting what users have already used. The REPL is never limited, nor is the request that carries the `Authorization` line (it is capped at 1 MiB).
+- `zestdb_rate_limited_total{user}` counts the refused commands of each limited user (see [Prometheus metrics](operations.md#prometheus-metrics)).

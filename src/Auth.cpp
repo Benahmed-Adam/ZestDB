@@ -75,6 +75,29 @@ namespace Zest {
         return it->second.role;
     }
 
+    std::shared_ptr<UserLimiter> ZestDB::limiterOf(const std::string& username) const {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        auto it = this->limiters.find(username);
+        return it == this->limiters.end() ? nullptr : it->second;
+    }
+
+    void ZestDB::rebuildLimiters() {
+        std::unordered_map<std::string, std::shared_ptr<UserLimiter>> rebuilt;
+        for (const auto& [name, user] : this->users) {
+            if (user.limits.unlimited()) {
+                continue;
+            }
+            auto it = this->limiters.find(name);
+            if (it != this->limiters.end()) {
+                it->second->reconfigure(user.limits);
+                rebuilt.emplace(name, it->second);
+            } else {
+                rebuilt.emplace(name, std::make_shared<UserLimiter>(user.limits));
+            }
+        }
+        this->limiters = std::move(rebuilt);
+    }
+
     static constexpr unsigned int MAX_AUTH_FAILURES = 5;
     static constexpr std::chrono::seconds AUTH_LOCKOUT{ 60 };
 

@@ -11,6 +11,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "RateLimiter.hpp"
 #include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
@@ -32,6 +33,7 @@ namespace Zest {
     struct UserEntry {
         std::string tokenHash; // sha256 of the token the client sends
         Role role;
+        UserLimits limits; // already resolved against the top-level limits
     };
 
     /// The database: parses commands, checks permissions and values, runs the triggers, writes the WAL and coordinates the shards.
@@ -119,6 +121,8 @@ namespace Zest {
         std::optional<Role> authenticate(const std::string& username, const std::string& token) const;
         /// The current role of `username`, nullopt if the user was removed (checked on every command, so a reload applies at once).
         std::optional<Role> roleOf(const std::string& username) const;
+        /// The rate limiter of `username`, shared by all of its sessions; null when the user has no limit.
+        std::shared_ptr<UserLimiter> limiterOf(const std::string& username) const;
         /// False while `username` is locked out after too many failed authentications.
         bool authAllowed(const std::string& username);
         /// Counts a failed authentication (5 in a row lock the user out for 60 s), or forgets the failures after a success.
@@ -190,6 +194,7 @@ namespace Zest {
         static bool parseCommand(const std::string& raw, Command& out);
 
         // One handler per command (Commands.cpp): parse the arguments, call the method, return its result
+
         ResultType cmdGet(Command& c);
         ResultType cmdSet(Command& c);
         ResultType cmdSetex(Command& c);
@@ -274,6 +279,10 @@ namespace Zest {
 
         std::unordered_map<std::string, UserEntry> users;
         mutable std::shared_mutex usersMtx;
+        std::unordered_map<std::string, std::shared_ptr<UserLimiter>> limiters; // users with a limit; guarded by usersMtx
+
+        /// Makes `limiters` match `users`, keeping the buckets of the users still limited; the caller holds usersMtx exclusively.
+        void rebuildLimiters();
 
         std::mutex authFailuresMtx;
         std::unordered_map<std::string, std::pair<unsigned int, std::chrono::steady_clock::time_point>> authFailures; // user -> failures, locked until

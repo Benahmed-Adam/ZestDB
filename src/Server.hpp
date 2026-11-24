@@ -19,6 +19,7 @@ namespace Zest {
     using asio::ip::tcp;
 
     class ZestDB;
+    class UserLimiter;
 
     /// A client connection, plain or TLS; the session code is written once for both through std::visit.
     using ZestStream = std::variant<tcp::socket, asio::ssl::stream<tcp::socket>>;
@@ -55,6 +56,11 @@ namespace Zest {
         void do_read_size();
         /// Reads a request of `size` bytes, runs each of its commands, syncs the WAL once, then sends all the replies.
         void do_read_command(uint32_t size);
+        /// Reads and drops a request of `size` bytes that the bandwidth limit refused, a chunk at a time without
+        /// allocating it, then answers `RateLimited` to each of its commands.
+        void discard_request(uint32_t size);
+        /// Reads the next chunk of the request being discarded and counts the commands it holds.
+        void discard_next_chunk();
         /// Runs one command. Before authentication, only `Authorization: <user>.<token>` is accepted. `should_close` is
         /// set when the connection must be closed after the reply (failed authentication, revoked user).
         std::string handle_command(const std::string& cmd, bool& should_close);
@@ -86,6 +92,17 @@ namespace Zest {
         std::string remote_ip_;
         std::string username_;
         bool authenticated_ = false;
+        std::shared_ptr<UserLimiter> limiter_; // the user's limits, looked up for each request (null: unlimited)
+
+        /// Where the parsing of a discarded request stands.
+        struct Discard {
+            uint32_t left = 0;      // bytes of the request not read yet
+            uint32_t skip = 0;      // bytes left of the current command
+            uint32_t header = 0;    // bytes of the current command's length read so far
+            uint32_t length = 0;    // that length, decoded from its big-endian bytes read so far
+            uint64_t commands = 0;  // commands found
+            bool malformed = false; // a command length goes past the end of the request
+        } discard_;
 
         std::deque<std::string> write_queue_;
         bool closing_ = false;           // close once the queue is written
