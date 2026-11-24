@@ -83,16 +83,23 @@ namespace Zest {
         this->saveThread = std::jthread([this](const std::stop_token& stopToken) {
             std::unique_lock<std::mutex> lock(this->saveThreadMtx);
 
-            unsigned int archiveCreationDelay = this->settings.ArchiveCreationDelay;
+            // Copied under writeMtx: a `reload` may replace the settings while this thread starts
+            unsigned int archiveCreationDelay;
+            fs::path archiveDir;
+            {
+                std::shared_lock<std::shared_mutex> settingsLock(this->writeMtx);
+                archiveCreationDelay = this->settings.ArchiveCreationDelay;
+                archiveDir = this->settings.ArchiveStoragePath;
+            }
             unsigned int delay = 0;
             std::optional<fs::file_time_type> most_recent_time;
 
-            if (!fs::exists(this->settings.ArchiveStoragePath) || !fs::is_directory(this->settings.ArchiveStoragePath)) {
+            if (!fs::exists(archiveDir) || !fs::is_directory(archiveDir)) {
                 ZestLog(LogLevel::Warning, "Archive storage path does not exist or is not a directory.");
-                fs::create_directories(this->settings.ArchiveStoragePath);
+                fs::create_directories(archiveDir);
             }
 
-            for (const auto& entry : fs::directory_iterator(this->settings.ArchiveStoragePath)) {
+            for (const auto& entry : fs::directory_iterator(archiveDir)) {
                 if (entry.is_regular_file() && entry.path().extension() == ".zip") {
                     try {
                         auto current_time = fs::last_write_time(entry.path());
