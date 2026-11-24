@@ -48,6 +48,10 @@ docker run -it -p 7321:7321 -p 1237:1237 \
   - The archive's WAL is not replayed (archives are taken right after a flush, so it is empty).
   - Only the data is restored: the scripts currently loaded are kept.
 
+## Database summary
+
+`info` (or `stats`, read role) returns the number of keys, the size of the database on disk, the cache hit ratio and the most recent archive as JSON (see [commands](commands.md)).
+
 ## HTTP monitoring
 
 - A separate HTTP server (`WebPort`, default `1237`) exposes live per-shard performance statistics under `/`, as JSON: `{"stats": {"shard0": {...}, "shard1": {...}, ...}}`. It uses TLS when `useSSL` is set and the `NetworkValidation` allow-list.

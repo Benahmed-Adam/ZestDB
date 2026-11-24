@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <format>
 #include <iterator>
 #include <mutex>
@@ -6,6 +7,7 @@
 #include <string_view>
 
 #include "ZestDB.hpp"
+#include "lib/json.hpp"
 
 namespace Zest {
 
@@ -36,6 +38,61 @@ namespace Zest {
             std::format_to(std::back_inserter(out), "{}{{{}}} {}\n", name, labels, value);
         }
     } // namespace
+
+    ResultType ZestDB::info() const {
+        namespace fs = std::filesystem;
+        nlohmann::json out;
+
+        uint64_t keys = 0;
+        uint64_t reads = 0;
+        uint64_t misses = 0;
+        for (const auto& shard : this->shardManager->getShards()) {
+            keys += shard->keyCount();
+            // Only the reads of values can miss the cache: exists, count and keys read the index alone
+            for (const auto& [op, stats] : shard->getPerfMonitoring().operations()) {
+                if (std::string_view(op) == "get" || std::string_view(op) == "getby") {
+                    reads += stats->nbRequests.load();
+                    misses += stats->nbCacheMisses.load();
+                }
+            }
+        }
+        out["keys"] = keys;
+        out["cacheHitRatio"] = reads > 0 ? nlohmann::json(1.0 - static_cast<double>(misses) / static_cast<double>(reads)) : nlohmann::json(nullptr);
+
+        // Every file of DbPath: segments, indexes, WALs and scripts
+        uint64_t diskBytes = 0;
+        std::error_code ec;
+        for (auto it = fs::recursive_directory_iterator(this->settings.DbPath, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            std::error_code sizeEc;
+            if (it->is_regular_file(sizeEc)) {
+                const auto size = it->file_size(sizeEc);
+                diskBytes += sizeEc ? 0 : size;
+            }
+        }
+        out["diskBytes"] = diskBytes;
+
+        // Archive names start with their creation date in UTC, so the greatest one is the most recent
+        std::string last;
+        for (auto it = fs::directory_iterator(this->settings.ArchiveStoragePath, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+            const std::string name = it->path().filename().string();
+            constexpr std::string_view prefix = "zestdb_archive_";
+            if (name.starts_with(prefix) && name.ends_with(".zip") && name.size() >= prefix.size() + 19 && name > last) {
+                last = name;
+            }
+        }
+        if (last.empty()) {
+            out["lastArchive"] = nullptr;
+        } else {
+            // zestdb_archive_2026-11-15_10-00-00.123456789.zip -> 2026-11-15T10:00:00Z
+            std::string date = last.substr(15, 19);
+            date[10] = 'T';
+            date[13] = ':';
+            date[16] = ':';
+            out["lastArchive"] = { { "name", last }, { "date", date + "Z" } };
+        }
+
+        return { ResultType::Code::Success, out.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), 1 };
+    }
 
     std::string ZestDB::prometheusMetrics() {
         std::shared_lock<std::shared_mutex> lock(this->writeMtx);

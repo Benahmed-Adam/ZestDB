@@ -220,7 +220,7 @@ namespace Zest {
         out.line = sv;
 
         static const std::unordered_map<std::string_view, std::string_view> aliases = {
-            { "get", "g" }, { "set", "s" }, { "del", "d" }, { "getby", "gb" }, { "setby", "sb" }, { "delby", "db" }, { "flush", "f" }, { "reload", "r" }, { "help", "h" },
+            { "get", "g" }, { "set", "s" }, { "del", "d" }, { "getby", "gb" }, { "setby", "sb" }, { "delby", "db" }, { "flush", "f" }, { "reload", "r" }, { "help", "h" }, { "stats", "info" },
         };
         out.name = toLowerStr(out.words[0]);
         if (auto it = aliases.find(out.name); it != aliases.end()) {
@@ -251,6 +251,7 @@ namespace Zest {
             { "count", { &ZestDB::cmdCount, Access::Read, Locking::Shared } },
             { "keys", { &ZestDB::cmdKeys, Access::Read, Locking::Shared } },
             { "h", { &ZestDB::cmdHelp, Access::Read, Locking::Shared } },
+            { "info", { &ZestDB::cmdInfo, Access::Read, Locking::Shared } },
             { "f", { &ZestDB::cmdFlush, Access::Admin, Locking::None } },
             { "r", { &ZestDB::cmdReload, Access::Admin, Locking::Exclusive } },
             { "scfg", { &ZestDB::cmdSetConfig, Access::Admin, Locking::Exclusive } },
@@ -623,6 +624,10 @@ namespace Zest {
         return result;
     }
 
+    ResultType ZestDB::cmdInfo(Command& c) {
+        return this->info();
+    }
+
     ResultType ZestDB::cmdFlush([[maybe_unused]] Command& c) {
         ResultType result = { ResultType::Code::InternalError };
         this->flush();
@@ -909,6 +914,7 @@ namespace Zest {
         oss << "save                                   - Create a zip archive of the database" << "\n";
         oss << "restore <archive.zip>                  - Replace the database with an archive of ArchiveStoragePath" << "\n";
         oss << "lsaves                                 - List the archives of ArchiveStoragePath, oldest first" << "\n";
+        oss << "info (or stats)                        - Number of keys, size on disk, cache hit ratio, last archive" << "\n";
         oss << "script load <name> \"<lua code>\"        - Save a Lua script and register its functions and triggers" << "\n";
         oss << "script del <name>                      - Remove a script with its functions and triggers" << "\n";
         oss << "script reload <name>                   - Reload DbPath/scripts/<name>.lua after editing it on disk" << "\n";

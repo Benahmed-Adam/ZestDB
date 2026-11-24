@@ -1354,3 +1354,33 @@ TEST_CASE("ZestDB reload updates the limits without resetting the buckets", "[co
     REQUIRE(db.execCmd("r", Role::Admin).code == ResultType::Code::Success);
     REQUIRE(db.limiterOf("u") == nullptr);
 }
+
+TEST_CASE("ZestDB info reports the keys, the size on disk, the cache hit ratio and the last archive", "[commands][info]") {
+    TempDbDir tmp("zestdb_test_info", "", 29599);
+    ZestDB db;
+
+    auto info = nlohmann::json::parse(db.execCmd("info", Role::Read).response);
+    REQUIRE(info["keys"] == 0);
+    REQUIRE(info["cacheHitRatio"].is_null());
+    REQUIRE(info["lastArchive"].is_null());
+
+    for (int i = 0; i < 10; i++) {
+        db.execCmd(std::format(R"(s k{} "value {}")", i, i));
+    }
+    db.execCmd("g k0");
+    db.execCmd("g k0");
+    db.execCmd("exists k1");
+    db.execCmd("f", Role::Admin);
+    REQUIRE(db.execCmd("save", Role::Admin).code == ResultType::Code::Success);
+
+    auto res = db.execCmd("stats", Role::Read);
+    REQUIRE(res.code == ResultType::Code::Success);
+    info = nlohmann::json::parse(res.response);
+    REQUIRE(info["keys"] == 10);
+    REQUIRE(info["diskBytes"].get<uint64_t>() > 0);
+    // exists never reads the cache: only the two gets count
+    const double ratio = info["cacheHitRatio"].get<double>();
+    REQUIRE((ratio == 0.0 || ratio == 0.5 || ratio == 1.0));
+    REQUIRE(info["lastArchive"]["name"].get<std::string>().starts_with("zestdb_archive_"));
+    REQUIRE(std::regex_match(info["lastArchive"]["date"].get<std::string>(), std::regex(R"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)")));
+}

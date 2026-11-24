@@ -84,6 +84,9 @@ namespace Zest {
         ResultType restore(const std::string& zipname);
         /// The archives of ArchiveStoragePath as a sorted JSON array.
         ResultType listSaves() const;
+        /// `info` / `stats`: the number of keys, the size of DbPath on disk, the cache hit ratio of the reads and the most
+        /// recent archive, as a JSON object. The caller holds `writeMtx`.
+        ResultType info() const;
 
         /// `"true"` or `"false"`, from the index only.
         ResultType exists(const std::string& key);
@@ -212,6 +215,7 @@ namespace Zest {
         ResultType cmdCount(Command& c);
         ResultType cmdKeys(Command& c);
         ResultType cmdHelp(Command& c);
+        ResultType cmdInfo(Command& c);
         ResultType cmdFlush(Command& c);
         ResultType cmdReload(Command& c);
         ResultType cmdSetConfig(Command& c);
