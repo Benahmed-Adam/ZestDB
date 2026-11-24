@@ -617,7 +617,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdHelp([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdHelp(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result.code = ResultType::Code::Success;
         result.response = this->help();
@@ -629,14 +630,16 @@ namespace Zest {
         return this->info();
     }
 
-    ResultType ZestDB::cmdFlush([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdFlush(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         this->flush();
         result.code = ResultType::Code::Success;
         return result;
     }
 
-    ResultType ZestDB::cmdReload([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdReload(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result = this->reloadConfig();
         return result;
@@ -791,7 +794,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdGetConfig([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdGetConfig(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result.code = ResultType::Code::Success;
         result.response = this->getConfig();
@@ -809,7 +813,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdSave([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdSave(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         if (this->createArchive()) {
             result.code = ResultType::Code::Success;
@@ -820,7 +825,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdListSaves([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdListSaves(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result = this->listSaves();
         return result;
