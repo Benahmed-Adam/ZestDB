@@ -625,6 +625,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::cmdInfo(Command& c) {
+        (void)c;
         return this->info();
     }
 
