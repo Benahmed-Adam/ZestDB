@@ -104,6 +104,29 @@ namespace Zest {
         return std::nullopt;
     }
 
+    /// The name of a role in config.yaml.
+    static const char* roleName(Role role) {
+        switch (role) {
+        case Role::Read:
+            return "read";
+        case Role::Admin:
+            return "admin";
+        default:
+            return "write";
+        }
+    }
+
+    /// A name usable in `Authorization: <user>.<token>`: 1 to 64 printable characters, without `.` (it ends the name
+    /// in that line), spaces, quotes or backslashes.
+    static bool validUserName(const std::string& name) {
+        return !name.empty() && name.size() <= 64 && std::ranges::all_of(name, [](char c) { return c > ' ' && c < 127 && c != '.' && c != '"' && c != '\\'; });
+    }
+
+    /// The number of admins in `users`.
+    static size_t adminCount(const std::unordered_map<std::string, UserEntry>& users) {
+        return static_cast<size_t>(std::ranges::count_if(users, [](const auto& entry) { return entry.second.role == Role::Admin; }));
+    }
+
     Settings ZestDB::loadConfig(std::unordered_map<std::string, UserEntry>& usersOut) {
         Settings result;
         std::unordered_map<std::string, UserEntry> parsedUsers;
@@ -253,10 +276,23 @@ namespace Zest {
             }
 
             this->settings = std::move(s);
+            std::vector<std::string> revoked;
             {
                 std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+                // The sessions of a user that is gone, or whose password changed, are closed below
+                for (const auto& [name, user] : this->users) {
+                    auto it = newUsers.find(name);
+                    if (it == newUsers.end() || it->second.tokenHash != user.tokenHash) {
+                        revoked.push_back(name);
+                    }
+                }
                 this->users = std::move(newUsers);
                 this->rebuildLimiters();
+            }
+            if (this->socket) {
+                for (const std::string& name : revoked) {
+                    this->socket->revokeUser(name);
+                }
             }
             setLoggerDebugMode(this->settings.isDebug);
             this->shardManager->reloadSettings(this->settings);
@@ -270,6 +306,167 @@ namespace Zest {
                                                  e.what()));
         }
         return { ResultType::Code::ReloadFailed };
+    }
+
+    ResultType ZestDB::changeUsers(const std::string& name, bool revoke, const std::function<ResultType(std::unordered_map<std::string, UserEntry>&)>& change) {
+        {
+            std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+            std::unordered_map<std::string, UserEntry> updated = this->users;
+            ResultType result = change(updated);
+            if (result.code != ResultType::Code::Success) {
+                return result;
+            }
+            if (!this->writeUsers(updated)) {
+                return { ResultType::Code::WriteFailed };
+            }
+            this->users = std::move(updated);
+            this->rebuildLimiters();
+        }
+        if (revoke) {
+            {
+                std::lock_guard<std::mutex> lock(this->authFailuresMtx);
+                this->authFailures.erase(name);
+            }
+            if (this->socket) {
+                this->socket->revokeUser(name);
+            }
+        }
+        return { ResultType::Code::Success, "", 1 };
+    }
+
+    ResultType ZestDB::addUser(const std::string& name, const std::string& password, const std::string& role) {
+        if (!validUserName(name)) {
+            return { ResultType::Code::InvalidUserName };
+        }
+        const std::optional<Role> parsed = role.empty() ? std::optional<Role>(Role::Write) : parseRole(role);
+        if (!parsed) {
+            return { ResultType::Code::InvalidRole };
+        }
+        return this->changeUsers(name, false, [&](auto& list) -> ResultType {
+            if (list.contains(name)) {
+                return { ResultType::Code::UserExists };
+            }
+            // A new user has no limit of its own: the top-level ones apply, as for a user of config.yaml
+            list[name] = { sha256(sha256(name + password)), *parsed, this->settings.defaultLimits };
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::setUserPassword(const std::string& name, const std::string& password) {
+        return this->changeUsers(name, true, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            it->second.tokenHash = sha256(sha256(name + password));
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::setUserRole(const std::string& name, const std::string& role) {
+        const std::optional<Role> parsed = parseRole(role);
+        if (!parsed) {
+            return { ResultType::Code::InvalidRole };
+        }
+        return this->changeUsers(name, false, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            if (it->second.role == Role::Admin && *parsed != Role::Admin && adminCount(list) == 1) {
+                return { ResultType::Code::LastAdmin };
+            }
+            it->second.role = *parsed;
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::deleteUser(const std::string& name) {
+        return this->changeUsers(name, true, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            if (it->second.role == Role::Admin && adminCount(list) == 1) {
+                return { ResultType::Code::LastAdmin };
+            }
+            list.erase(it);
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::listUsers() const {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        std::vector<std::pair<std::string, Role>> sorted;
+        sorted.reserve(this->users.size());
+        for (const auto& [name, user] : this->users) {
+            sorted.emplace_back(name, user.role);
+        }
+        std::ranges::sort(sorted);
+        json out = json::array();
+        for (const auto& [name, role] : sorted) {
+            out.push_back({ { "user", name }, { "role", roleName(role) } });
+        }
+        return { ResultType::Code::Success, out.dump(-1, ' ', false, json::error_handler_t::replace), static_cast<long long>(sorted.size()) };
+    }
+
+    bool ZestDB::writeUsers(const std::unordered_map<std::string, UserEntry>& updated) {
+        const fs::path configPath = fs::current_path() / "config.yaml";
+        const fs::path tmpPath = fs::current_path() / "config.yaml.tmp";
+        try {
+            std::stringstream buffer;
+            buffer << std::ifstream(configPath).rdbuf();
+            auto node = fkyaml::node::deserialize(buffer.str());
+
+            // The entries of the users still there keep their place and their other fields (limits); a `password`
+            // field gives way to the tokenHash
+            fkyaml::node list = fkyaml::node::sequence();
+            std::unordered_set<std::string> written;
+            if (node.contains("users") && node["users"].is_sequence()) {
+                for (const auto& entry : node["users"]) {
+                    const std::string name = entry["user"].get_value<std::string>();
+                    auto it = updated.find(name);
+                    if (it == updated.end() || !written.insert(name).second) {
+                        continue;
+                    }
+                    fkyaml::node kept = entry;
+                    kept.as_map().erase(fkyaml::node("password"));
+                    kept["role"] = std::string(roleName(it->second.role));
+                    kept["tokenHash"] = it->second.tokenHash;
+                    list.as_seq().push_back(std::move(kept));
+                }
+            }
+            std::vector<std::string> added;
+            for (const auto& [name, user] : updated) {
+                if (!written.contains(name)) {
+                    added.push_back(name);
+                }
+            }
+            std::ranges::sort(added);
+            for (const std::string& name : added) {
+                fkyaml::node entry = fkyaml::node::mapping();
+                entry["user"] = name;
+                entry["role"] = std::string(roleName(updated.at(name).role));
+                entry["tokenHash"] = updated.at(name).tokenHash;
+                list.as_seq().push_back(std::move(entry));
+            }
+            node["users"] = std::move(list);
+
+            {
+                std::ofstream out(tmpPath, std::ios::trunc);
+                out << node;
+                if (!out.good()) {
+                    throw std::runtime_error("cannot write " + tmpPath.string());
+                }
+            }
+            fs::rename(tmpPath, configPath);
+            return true;
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Cannot save the users to config.yaml: {}", e.what()));
+            std::error_code ec;
+            fs::remove(tmpPath, ec);
+            return false;
+        }
     }
 
     void ZestDB::setConfig() {

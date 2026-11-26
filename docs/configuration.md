@@ -61,6 +61,25 @@ printf %s "$(printf %s "<user><password>" | sha256sum | cut -d' ' -f1)" | sha256
 ```
 A plaintext `password` field is still accepted but deprecated.
 
+## Managing users at runtime
+
+The `user` commands (admin role) change the users without a restart, and write them to `config.yaml`:
+
+```
+user add carol "s3cret" read      # role: read, write (default) or admin
+user passwd carol "n3w-s3cret"
+user role carol write
+user del carol
+user ls                           # [{"role":"write","user":"carol"}, ...]
+```
+
+- The password is sent in clear, as a quoted value, and only its hash is kept: enable `useSSL` outside a trusted network. These commands are not written to the WAL.
+- A name has 1 to 64 printable characters, without `.` (it ends the name in the `Authorization` line), spaces, quotes or backslashes.
+- `user del` and `user passwd` close the user's open connections: an idle one at once; a busy one finishes its current command, answers `302` (`SessionRevoked`) to the rest of its batch, then closes. `user role` closes nothing: the new role applies from the next command. A `reload` that removes a user or changes its `tokenHash` closes its connections the same way.
+- The last admin cannot be deleted or lose the role (code `309`): the REPL stays admin, but remote administration would be lost.
+- `config.yaml` is rewritten through a temporary file and a rename. Each entry keeps its other fields (its rate limits), a `password` field is replaced by the `tokenHash`, and new users are added at the end. Comments in the file are not kept.
+- A new user has no limit of its own: the top-level rate limits apply.
+
 ## Rate limits
 
 `rateLimit`, `burst` and `bandwidthLimit` can be set at the top of the file, for every user, and in a user's entry, for that user only:

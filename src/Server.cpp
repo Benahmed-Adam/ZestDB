@@ -100,6 +100,12 @@ namespace Zest {
         }
     }
 
+    void Session::revokeIfUser(const std::string& username) {
+        if (this->authenticated_ && this->username_ == username) {
+            this->drain();
+        }
+    }
+
     void Session::do_read_size() {
         if (this->draining_) {
             if (this->write_queue_.empty()) {
@@ -308,10 +314,12 @@ namespace Zest {
                 ZestLog(LogLevel::Warning, std::format("Session: user {} is locked out after too many failed authentications ({})", username, this->remote_ip_));
                 return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
-            if (!this->db_.authenticate(username, cmd.substr(dotPos + 1))) {
+            const std::string token = cmd.substr(dotPos + 1);
+            if (!this->db_.authenticate(username, token)) {
                 this->db_.recordAuthResult(username, false);
                 return ZestDB::responseToJson({ ResultType::Code::AuthFailed });
             }
+            this->tokenHash_ = sha256(token);
 
             this->db_.recordAuthResult(username, true);
             this->authenticated_ = true;
@@ -322,7 +330,7 @@ namespace Zest {
 
         // The role is looked up on every command rather than kept from the login, so a `reload` that removes the user or
         // changes its role applies to the open session at once
-        std::optional<Role> role = this->db_.roleOf(this->username_);
+        std::optional<Role> role = this->db_.roleOf(this->username_, this->tokenHash_);
         if (!role) {
             should_close = true;
             return ZestDB::responseToJson({ ResultType::Code::SessionRevoked });
@@ -374,6 +382,16 @@ namespace Zest {
                 s.lowest_layer().close(ec);
             },
             this->stream_);
+    }
+
+    void Server::revokeUser(const std::string& username) {
+        std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+        for (auto& weak : this->sessions_) {
+            if (auto session = weak.lock()) {
+                // The session checks its user on its own thread, where its members may be read
+                asio::post(session->executor(), [session, username] { session->revokeIfUser(username); });
+            }
+        }
     }
 
     std::vector<std::unique_ptr<asio::io_context>> Server::makeWorkers() {

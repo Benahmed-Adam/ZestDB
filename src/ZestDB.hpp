@@ -84,6 +84,17 @@ namespace Zest {
         ResultType restore(const std::string& zipname);
         /// The archives of ArchiveStoragePath as a sorted JSON array.
         ResultType listSaves() const;
+        /// `user add`: creates `name` with `password` and `roleName` (`write` when empty), in memory and in config.yaml.
+        ResultType addUser(const std::string& name, const std::string& password, const std::string& roleName);
+        /// `user passwd`: sets a new password and closes the user's open sessions.
+        ResultType setUserPassword(const std::string& name, const std::string& password);
+        /// `user role`: changes the role; open sessions get it from their next command.
+        ResultType setUserRole(const std::string& name, const std::string& roleName);
+        /// `user del`: removes the user and closes its open sessions.
+        ResultType deleteUser(const std::string& name);
+        /// `user ls`: the users and their roles as a JSON array, sorted by name.
+        ResultType listUsers() const;
+
         /// `info` / `stats`: the number of keys, the size of DbPath on disk, the cache hit ratio of the reads and the most
         /// recent archive, as a JSON object. The caller holds `writeMtx`.
         ResultType info() const;
@@ -124,6 +135,8 @@ namespace Zest {
         std::optional<Role> authenticate(const std::string& username, const std::string& token) const;
         /// The current role of `username`, nullopt if the user was removed (checked on every command, so a reload applies at once).
         std::optional<Role> roleOf(const std::string& username) const;
+        /// Like roleOf(), but nullopt as well once the user's password changed: `tokenHash` is the one the session logged in with.
+        std::optional<Role> roleOf(const std::string& username, const std::string& tokenHash) const;
         /// The rate limiter of `username`, shared by all of its sessions; null when the user has no limit.
         std::shared_ptr<UserLimiter> limiterOf(const std::string& username) const;
         /// False while `username` is locked out after too many failed authentications.
@@ -216,6 +229,7 @@ namespace Zest {
         ResultType cmdKeys(Command& c);
         ResultType cmdHelp(Command& c);
         ResultType cmdInfo(Command& c);
+        ResultType cmdUser(Command& c);
         ResultType cmdFlush(Command& c);
         ResultType cmdReload(Command& c);
         ResultType cmdSetConfig(Command& c);
@@ -287,6 +301,13 @@ namespace Zest {
 
         /// Makes `limiters` match `users`, keeping the buckets of the users still limited; the caller holds usersMtx exclusively.
         void rebuildLimiters();
+
+        /// Applies `change` to a copy of the users, writes it to config.yaml, then makes it the active list. When `revoke`
+        /// is set, the open sessions of `name` are closed afterwards. Nothing changes if `change` or the write fails.
+        ResultType changeUsers(const std::string& name, bool revoke, const std::function<ResultType(std::unordered_map<std::string, UserEntry>&)>& change);
+        /// Rewrites the `users` list of config.yaml from `updated`, keeping the other fields of each entry (its limits),
+        /// through a temporary file and a rename. @return false if the file could not be written.
+        bool writeUsers(const std::unordered_map<std::string, UserEntry>& updated);
 
         std::mutex authFailuresMtx;
         std::unordered_map<std::string, std::pair<unsigned int, std::chrono::steady_clock::time_point>> authFailures; // user -> failures, locked until

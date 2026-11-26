@@ -45,6 +45,9 @@ namespace Zest {
         /// Server shutdown: an idle session closes now; a session processing a request finishes it, sends the reply,
         /// then closes instead of reading the next one. Must run on the session's executor.
         void drain();
+        /// Closes the session like drain() if it is authenticated as `username` (deleted user, or new password).
+        /// Must run on the session's executor.
+        void revokeIfUser(const std::string& username);
 
         /// The executor (IO thread) the session runs on.
         asio::any_io_executor executor() {
@@ -91,6 +94,7 @@ namespace Zest {
 
         std::string remote_ip_;
         std::string username_;
+        std::string tokenHash_; // of the token the session logged in with: a new password makes it stale
         bool authenticated_ = false;
         std::shared_ptr<UserLimiter> limiter_; // the user's limits, looked up for each request (null: unlimited)
 
@@ -120,6 +124,9 @@ namespace Zest {
         /// Stops accepting, lets every session answer the request it is processing (DRAIN_TIMEOUT at most), closes the
         /// rest and joins the IO threads. Does nothing the second time.
         void stop();
+
+        /// Closes every session of `username`: an idle one at once, a busy one once its current command is answered.
+        void revokeUser(const std::string& username);
 
         /// Number of open client sessions, authenticated or not.
         size_t connections() const {

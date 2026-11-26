@@ -64,6 +64,11 @@ namespace Zest {
             SessionRevoked = 302,
             ReadOnly = 303,
             RateLimited = 304,
+            UserExists = 305,
+            UserNotFound = 306,
+            InvalidUserName = 307,
+            InvalidRole = 308,
+            LastAdmin = 309,
 
             UnknownConfigParam = 400,
             InvalidConfigValue = 401,

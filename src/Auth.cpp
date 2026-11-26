@@ -75,6 +75,15 @@ namespace Zest {
         return it->second.role;
     }
 
+    std::optional<Role> ZestDB::roleOf(const std::string& username, const std::string& tokenHash) const {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        auto it = this->users.find(username);
+        if (it == this->users.end() || it->second.tokenHash != tokenHash) {
+            return std::nullopt;
+        }
+        return it->second.role;
+    }
+
     std::shared_ptr<UserLimiter> ZestDB::limiterOf(const std::string& username) const {
         std::shared_lock<std::shared_mutex> lock(this->usersMtx);
         auto it = this->limiters.find(username);

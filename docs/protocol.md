@@ -31,7 +31,7 @@ A session must first send:
 ```
 Authorization: <username>.<sha256(username+password)>
 ```
-The server replies with `{"code":0,...}` on success; on failure it replies with code `300` and closes the connection. Any other command sent before authentication gets the same answer: code `300`, then the connection is closed. With no user in `config.yaml`, no client can authenticate. Each user has a role, checked on every command (see [users and roles](configuration.md#users-and-roles)).
+The server replies with `{"code":0,...}` on success; on failure it replies with code `300` and closes the connection. Any other command sent before authentication gets the same answer: code `300`, then the connection is closed. With no user in `config.yaml`, no client can authenticate. Each user has a role, checked on every command (see [users and roles](configuration.md#users-and-roles)). Deleting a user or changing its password (`user del`, `user passwd`, or a `reload`) closes its open connections: an idle one at once, a busy one after its current command, the rest of the batch being answered with code `302`.
 
 A user is locked out for 60 seconds after 5 failed authentications. The lock is per user rather than per address, so it still works behind a proxy such as ngrok (where every client comes from `127.0.0.1`); the flip side is that anyone can lock a known user out for a minute.
 

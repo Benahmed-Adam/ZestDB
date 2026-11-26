@@ -1384,3 +1384,86 @@ TEST_CASE("ZestDB info reports the keys, the size on disk, the cache hit ratio a
     REQUIRE(info["lastArchive"]["name"].get<std::string>().starts_with("zestdb_archive_"));
     REQUIRE(std::regex_match(info["lastArchive"]["date"].get<std::string>(), std::regex(R"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)")));
 }
+
+TEST_CASE("ZestDB manages users at runtime and saves them in config.yaml", "[commands][users]") {
+    TempDbDir tmp("zestdb_test_users", "users:\n  - user: root\n    role: admin\n    password: r\n  - user: bob\n    password: b\n    rateLimit: 50\n", 29601);
+    {
+        ZestDB db;
+        REQUIRE(db.execCmd(R"(user add carol "c4rol")", Role::Admin).code == ResultType::Code::Success);
+        REQUIRE(db.execCmd(R"(user add dave "d" admin)", Role::Admin).code == ResultType::Code::Success);
+        REQUIRE(db.execCmd(R"(user passwd bob "new pass")", Role::Admin).code == ResultType::Code::Success);
+        REQUIRE(db.execCmd("user role carol read", Role::Admin).code == ResultType::Code::Success);
+        REQUIRE(db.execCmd("user del dave", Role::Admin).code == ResultType::Code::Success);
+
+        auto res = db.execCmd("user ls", Role::Admin);
+        REQUIRE(res.code == ResultType::Code::Success);
+        REQUIRE(res.affectedRows == 3);
+        REQUIRE(nlohmann::json::parse(res.response) == nlohmann::json::parse(R"([{"role":"write","user":"bob"},{"role":"read","user":"carol"},{"role":"admin","user":"root"}])"));
+    }
+
+    const std::string saved = [&] {
+        std::ifstream in(tmp.dir / "config.yaml");
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    }();
+    REQUIRE(saved.find("rateLimit") != std::string::npos);
+    REQUIRE(saved.find("new pass") == std::string::npos);
+    REQUIRE(saved.find("password") == std::string::npos);
+    REQUIRE(saved.find("dave") == std::string::npos);
+
+    ZestDB db;
+    REQUIRE(db.authenticate("bob", sha256("bobnew pass")) == Role::Write);
+    REQUIRE_FALSE(db.authenticate("bob", sha256("bobb")));
+    REQUIRE(db.authenticate("carol", sha256("carolc4rol")) == Role::Read);
+    REQUIRE(db.authenticate("root", sha256("rootr")) == Role::Admin);
+    REQUIRE_FALSE(db.authenticate("dave", sha256("daved")));
+    REQUIRE(db.limiterOf("bob") != nullptr);
+}
+
+TEST_CASE("ZestDB refuses invalid user commands", "[commands][users]") {
+    TempDbDir tmp("zestdb_test_users_errors", "users:\n  - user: root\n    role: admin\n    password: r\n  - user: bob\n    password: b\n", 29603);
+    ZestDB db;
+    const std::pair<const char*, ResultType::Code> cases[] = {
+        { R"(user add a.b "x")", ResultType::Code::InvalidUserName },
+        { R"(user add "quoted" "x")", ResultType::Code::InvalidUserName },
+        { R"(user add bob "x")", ResultType::Code::UserExists },
+        { R"(user add eve "x" superuser)", ResultType::Code::InvalidRole },
+        { R"(user add eve "")", ResultType::Code::EmptyValue },
+        { "user add eve nopassword", ResultType::Code::InvalidValueFormat },
+        { "user add eve", ResultType::Code::MissingArguments },
+        { R"(user passwd nobody "x")", ResultType::Code::UserNotFound },
+        { "user role nobody read", ResultType::Code::UserNotFound },
+        { "user role bob boss", ResultType::Code::InvalidRole },
+        { "user del nobody", ResultType::Code::UserNotFound },
+        { "user del root", ResultType::Code::LastAdmin },
+        { "user role root write", ResultType::Code::LastAdmin },
+        { "user rename bob", ResultType::Code::UnknownCommand },
+        { "user", ResultType::Code::MissingArguments },
+    };
+    for (const auto& [cmd, code] : cases) {
+        INFO(cmd);
+        REQUIRE(db.execCmd(cmd, Role::Admin).code == code);
+    }
+    REQUIRE(db.execCmd(R"(user add eve "x")", Role::Write).code == ResultType::Code::PermissionDenied);
+    REQUIRE(db.execCmd("user ls", Role::Read).code == ResultType::Code::PermissionDenied);
+
+    // With a second admin, the first one can go
+    REQUIRE(db.execCmd(R"(user add root2 "x" admin)", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("user del root", Role::Admin).code == ResultType::Code::Success);
+}
+
+TEST_CASE("ZestDB keeps user commands and passwords out of the WAL", "[commands][users]") {
+    TempDbDir tmp("zestdb_test_users_wal", "users:\n  - user: root\n    role: admin\n    password: r\n", 29605);
+    ZestDB db;
+    REQUIRE(db.execCmd(R"(user add carol "s3cret-pass")", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(s k "v")").code == ResultType::Code::Success);
+    std::string wal;
+    for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+        if (entry.path().filename() == "WAL") {
+            std::ifstream in(entry.path(), std::ios::binary);
+            wal += std::string(std::istreambuf_iterator<char>(in), {});
+        }
+    }
+    REQUIRE(wal.find(R"(s k "v")") != std::string::npos);
+    REQUIRE(wal.find("s3cret-pass") == std::string::npos);
+    REQUIRE(wal.find("user") == std::string::npos);
+}

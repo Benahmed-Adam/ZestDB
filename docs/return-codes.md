@@ -65,9 +65,14 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | ---: | --- | --- |
 | 300 | `AuthFailed` | Wrong user or token, malformed `Authorization` line, or the user is locked out after too many failures; the connection is closed. |
 | 301 | `PermissionDenied` | The user's role does not allow this command. |
-| 302 | `SessionRevoked` | The user was removed from the configuration; the connection is closed. |
+| 302 | `SessionRevoked` | The user was deleted or its password changed (`user del`, `user passwd` or a `reload`); the connection is closed. |
 | 303 | `ReadOnly` | `readOnly` is enabled and the command writes. |
 | 304 | `RateLimited` | The user's `rateLimit` or `bandwidthLimit` is exceeded: the command was not run. Retry later (see [rate limits](configuration.md#rate-limits)). |
+| 305 | `UserExists` | `user add`: a user of that name already exists. |
+| 306 | `UserNotFound` | `user passwd`, `role` or `del`: no user of that name. |
+| 307 | `InvalidUserName` | `user add`: the name is empty, longer than 64 characters, or holds a `.`, a space, a quote or a backslash. |
+| 308 | `InvalidRole` | The role is not `read`, `write` or `admin`. |
+| 309 | `LastAdmin` | `user del` or `user role` would leave no admin. |
 
 ## 4xx - Configuration
 
