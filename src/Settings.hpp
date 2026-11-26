@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <regex>
 #include <string>
 
@@ -62,6 +63,12 @@ namespace Zest {
             PermissionDenied = 301,
             SessionRevoked = 302,
             ReadOnly = 303,
+            RateLimited = 304,
+            UserExists = 305,
+            UserNotFound = 306,
+            InvalidUserName = 307,
+            InvalidRole = 308,
+            LastAdmin = 309,
 
             UnknownConfigParam = 400,
             InvalidConfigValue = 401,
@@ -86,6 +93,17 @@ namespace Zest {
         long long affectedRows = 0; // entries read or modified
     };
 
+    /// Rate limits of a user; an absent limit means unlimited.
+    struct UserLimits {
+        std::optional<double> rateLimit;        // commands per second
+        std::optional<double> burst;            // commands allowed at once; rateLimit when absent
+        std::optional<uint64_t> bandwidthLimit; // request bytes per second
+
+        bool unlimited() const {
+            return !rateLimit && !bandwidthLimit;
+        }
+    };
+
     /// The configuration read from config.yaml (see docs/configuration.md for each field).
     /// Each shard keeps a copy in which DbPath, IndexPath and WalPath point to its own files.
     /// The initial values are the defaults of a field missing from config.yaml (loadConfig reads them from here).
@@ -106,7 +124,7 @@ namespace Zest {
         uint16_t DBPort = 7321;
         uint16_t WebPort = 1237;
 
-        std::regex NetworkValidation; // compiled from NetworkValidationStr
+        std::regex NetworkValidation;
         std::string NetworkValidationStr = ".*";
 
         unsigned int ArchiveCreationDelay = 3600;
@@ -122,6 +140,8 @@ namespace Zest {
         bool jsonOnly = false;
         bool readOnly = false;
         bool fsyncOnWrite = true;
+
+        UserLimits defaultLimits; // the top-level rateLimit, burst and bandwidthLimit, for the users that set none
     };
 
 } // namespace Zest

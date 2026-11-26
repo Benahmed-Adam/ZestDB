@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -34,6 +35,61 @@ namespace Zest {
         return node.contains(key) && !node[key].is_null() ? node[key].get_value<T>() : std::move(def);
     }
 
+    /// A byte count: a positive integer, or a string with a `KB`, `MB` or `GB` suffix (powers of 1024), such as `10MB`.
+    static uint64_t parseSize(const fkyaml::node& value, const std::string& where) {
+        if (value.is_integer()) {
+            const auto bytes = value.get_value<int64_t>();
+            if (bytes <= 0) {
+                throw std::runtime_error(std::format("{}: bandwidthLimit must be positive", where));
+            }
+            return static_cast<uint64_t>(bytes);
+        }
+        const std::string text = value.is_string() ? value.get_value<std::string>() : "";
+        uint64_t number = 0;
+        const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), number);
+        std::string unit(end, text.data() + text.size());
+        std::erase(unit, ' ');
+        std::ranges::transform(unit, unit.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        const std::pair<const char*, uint64_t> units[] = { { "", 1 }, { "B", 1 }, { "KB", 1ULL << 10 }, { "MB", 1ULL << 20 }, { "GB", 1ULL << 30 } };
+        const auto* found = std::ranges::find_if(units, [&unit](const auto& u) { return unit == u.first; });
+        if (ec != std::errc() || end == text.data() || number == 0 || found == std::end(units) || number > UINT64_MAX / found->second) {
+            throw std::runtime_error(std::format("{}: invalid bandwidthLimit '{}' (use a byte count or a KB, MB or GB suffix)", where, text));
+        }
+        return number * found->second;
+    }
+
+    /// The rateLimit, burst and bandwidthLimit set in `node` (the top level, or one user), each absent when not set.
+    static UserLimits parseLimits(const fkyaml::node& node, const std::string& where) {
+        const auto number = [&](const char* key) -> std::optional<double> {
+            if (!node.contains(key) || node[key].is_null()) {
+                return std::nullopt;
+            }
+            const fkyaml::node& value = node[key];
+            double n = 0;
+            if (value.is_integer()) {
+                n = static_cast<double>(value.get_value<int64_t>());
+            } else if (value.is_float_number()) {
+                n = value.get_value<double>();
+            } else {
+                throw std::runtime_error(std::format("{}: {} must be a number", where, key));
+            }
+            if (!(n > 0)) {
+                throw std::runtime_error(std::format("{}: {} must be positive", where, key));
+            }
+            return n;
+        };
+        UserLimits limits;
+        limits.rateLimit = number("rateLimit");
+        limits.burst = number("burst");
+        if (limits.burst && *limits.burst < 1) {
+            throw std::runtime_error(std::format("{}: burst must be at least 1", where));
+        }
+        if (node.contains("bandwidthLimit") && !node["bandwidthLimit"].is_null()) {
+            limits.bandwidthLimit = parseSize(node["bandwidthLimit"], where);
+        }
+        return limits;
+    }
+
     /// `read`, `write` or `admin` as a Role, nullopt for anything else.
     static std::optional<Role> parseRole(const std::string& name) {
         if (name == "read") {
@@ -46,6 +102,29 @@ namespace Zest {
             return Role::Admin;
         }
         return std::nullopt;
+    }
+
+    /// The name of a role in config.yaml.
+    static const char* roleName(Role role) {
+        switch (role) {
+        case Role::Read:
+            return "read";
+        case Role::Admin:
+            return "admin";
+        default:
+            return "write";
+        }
+    }
+
+    /// A name usable in `Authorization: <user>.<token>`: 1 to 64 printable characters, without `.` (it ends the name
+    /// in that line), spaces, quotes or backslashes.
+    static bool validUserName(const std::string& name) {
+        return !name.empty() && name.size() <= 64 && std::ranges::all_of(name, [](char c) { return c > ' ' && c < 127 && c != '.' && c != '"' && c != '\\'; });
+    }
+
+    /// The number of admins in `users`.
+    static size_t adminCount(const std::unordered_map<std::string, UserEntry>& users) {
+        return static_cast<size_t>(std::ranges::count_if(users, [](const auto& entry) { return entry.second.role == Role::Admin; }));
     }
 
     Settings ZestDB::loadConfig(std::unordered_map<std::string, UserEntry>& usersOut) {
@@ -125,6 +204,8 @@ namespace Zest {
                 }
             }
 
+            result.defaultLimits = parseLimits(node, "config");
+
             if (node.contains("users") && node["users"].is_sequence()) {
                 for (const auto& user_node : node["users"]) {
                     std::string username = user_node["user"].get_value<std::string>();
@@ -134,7 +215,14 @@ namespace Zest {
                         throw std::runtime_error(std::format("user {}: unknown role '{}' (use read, write or admin)", username, roleName));
                     }
                     std::string tokenHash = user_node.contains("tokenHash") ? user_node["tokenHash"].get_value<std::string>() : sha256(sha256(username + user_node["password"].get_value<std::string>()));
-                    parsedUsers[username] = { std::move(tokenHash), *role };
+                    // Each limit the user does not set falls back to the top-level one, then to unlimited. The top-level
+                    // burst goes with the top-level rateLimit: a user who sets a rateLimit without a burst gets a burst
+                    // equal to that rateLimit.
+                    const UserLimits own = parseLimits(user_node, "user " + username);
+                    const UserLimits& top = result.defaultLimits;
+                    const std::optional<double> burst = own.burst ? own.burst : (own.rateLimit ? std::nullopt : top.burst);
+                    const UserLimits limits{ own.rateLimit ? own.rateLimit : top.rateLimit, burst, own.bandwidthLimit ? own.bandwidthLimit : top.bandwidthLimit };
+                    parsedUsers[username] = { std::move(tokenHash), *role, limits };
                 }
             }
         } catch (const std::exception& e) {
@@ -188,9 +276,23 @@ namespace Zest {
             }
 
             this->settings = std::move(s);
+            std::vector<std::string> revoked;
             {
                 std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+                // The sessions of a user that is gone, or whose password changed, are closed below
+                for (const auto& [name, user] : this->users) {
+                    auto it = newUsers.find(name);
+                    if (it == newUsers.end() || it->second.tokenHash != user.tokenHash) {
+                        revoked.push_back(name);
+                    }
+                }
                 this->users = std::move(newUsers);
+                this->rebuildLimiters();
+            }
+            if (this->socket) {
+                for (const std::string& name : revoked) {
+                    this->socket->revokeUser(name);
+                }
             }
             setLoggerDebugMode(this->settings.isDebug);
             this->shardManager->reloadSettings(this->settings);
@@ -204,6 +306,167 @@ namespace Zest {
                                                  e.what()));
         }
         return { ResultType::Code::ReloadFailed };
+    }
+
+    ResultType ZestDB::changeUsers(const std::string& name, bool revoke, const std::function<ResultType(std::unordered_map<std::string, UserEntry>&)>& change) {
+        {
+            std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
+            std::unordered_map<std::string, UserEntry> updated = this->users;
+            ResultType result = change(updated);
+            if (result.code != ResultType::Code::Success) {
+                return result;
+            }
+            if (!this->writeUsers(updated)) {
+                return { ResultType::Code::WriteFailed };
+            }
+            this->users = std::move(updated);
+            this->rebuildLimiters();
+        }
+        if (revoke) {
+            {
+                std::lock_guard<std::mutex> lock(this->authFailuresMtx);
+                this->authFailures.erase(name);
+            }
+            if (this->socket) {
+                this->socket->revokeUser(name);
+            }
+        }
+        return { ResultType::Code::Success, "", 1 };
+    }
+
+    ResultType ZestDB::addUser(const std::string& name, const std::string& password, const std::string& role) {
+        if (!validUserName(name)) {
+            return { ResultType::Code::InvalidUserName };
+        }
+        const std::optional<Role> parsed = role.empty() ? std::optional<Role>(Role::Write) : parseRole(role);
+        if (!parsed) {
+            return { ResultType::Code::InvalidRole };
+        }
+        return this->changeUsers(name, false, [&](auto& list) -> ResultType {
+            if (list.contains(name)) {
+                return { ResultType::Code::UserExists };
+            }
+            // A new user has no limit of its own: the top-level ones apply, as for a user of config.yaml
+            list[name] = { sha256(sha256(name + password)), *parsed, this->settings.defaultLimits };
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::setUserPassword(const std::string& name, const std::string& password) {
+        return this->changeUsers(name, true, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            it->second.tokenHash = sha256(sha256(name + password));
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::setUserRole(const std::string& name, const std::string& role) {
+        const std::optional<Role> parsed = parseRole(role);
+        if (!parsed) {
+            return { ResultType::Code::InvalidRole };
+        }
+        return this->changeUsers(name, false, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            if (it->second.role == Role::Admin && *parsed != Role::Admin && adminCount(list) == 1) {
+                return { ResultType::Code::LastAdmin };
+            }
+            it->second.role = *parsed;
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::deleteUser(const std::string& name) {
+        return this->changeUsers(name, true, [&](auto& list) -> ResultType {
+            auto it = list.find(name);
+            if (it == list.end()) {
+                return { ResultType::Code::UserNotFound };
+            }
+            if (it->second.role == Role::Admin && adminCount(list) == 1) {
+                return { ResultType::Code::LastAdmin };
+            }
+            list.erase(it);
+            return { ResultType::Code::Success };
+        });
+    }
+
+    ResultType ZestDB::listUsers() const {
+        std::shared_lock<std::shared_mutex> lock(this->usersMtx);
+        std::vector<std::pair<std::string, Role>> sorted;
+        sorted.reserve(this->users.size());
+        for (const auto& [name, user] : this->users) {
+            sorted.emplace_back(name, user.role);
+        }
+        std::ranges::sort(sorted);
+        json out = json::array();
+        for (const auto& [name, role] : sorted) {
+            out.push_back({ { "user", name }, { "role", roleName(role) } });
+        }
+        return { ResultType::Code::Success, out.dump(-1, ' ', false, json::error_handler_t::replace), static_cast<long long>(sorted.size()) };
+    }
+
+    bool ZestDB::writeUsers(const std::unordered_map<std::string, UserEntry>& updated) {
+        const fs::path configPath = fs::current_path() / "config.yaml";
+        const fs::path tmpPath = fs::current_path() / "config.yaml.tmp";
+        try {
+            std::stringstream buffer;
+            buffer << std::ifstream(configPath).rdbuf();
+            auto node = fkyaml::node::deserialize(buffer.str());
+
+            // The entries of the users still there keep their place and their other fields (limits); a `password`
+            // field gives way to the tokenHash
+            fkyaml::node list = fkyaml::node::sequence();
+            std::unordered_set<std::string> written;
+            if (node.contains("users") && node["users"].is_sequence()) {
+                for (const auto& entry : node["users"]) {
+                    const std::string name = entry["user"].get_value<std::string>();
+                    auto it = updated.find(name);
+                    if (it == updated.end() || !written.insert(name).second) {
+                        continue;
+                    }
+                    fkyaml::node kept = entry;
+                    kept.as_map().erase(fkyaml::node("password"));
+                    kept["role"] = std::string(roleName(it->second.role));
+                    kept["tokenHash"] = it->second.tokenHash;
+                    list.as_seq().push_back(std::move(kept));
+                }
+            }
+            std::vector<std::string> added;
+            for (const auto& [name, user] : updated) {
+                if (!written.contains(name)) {
+                    added.push_back(name);
+                }
+            }
+            std::ranges::sort(added);
+            for (const std::string& name : added) {
+                fkyaml::node entry = fkyaml::node::mapping();
+                entry["user"] = name;
+                entry["role"] = std::string(roleName(updated.at(name).role));
+                entry["tokenHash"] = updated.at(name).tokenHash;
+                list.as_seq().push_back(std::move(entry));
+            }
+            node["users"] = std::move(list);
+
+            {
+                std::ofstream out(tmpPath, std::ios::trunc);
+                out << node;
+                if (!out.good()) {
+                    throw std::runtime_error("cannot write " + tmpPath.string());
+                }
+            }
+            fs::rename(tmpPath, configPath);
+            return true;
+        } catch (const std::exception& e) {
+            ZestLog(LogLevel::Error, std::format("Cannot save the users to config.yaml: {}", e.what()));
+            std::error_code ec;
+            fs::remove(tmpPath, ec);
+            return false;
+        }
     }
 
     void ZestDB::setConfig() {

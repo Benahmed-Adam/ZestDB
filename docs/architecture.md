@@ -25,7 +25,7 @@ ZestDB follows a layered design where each layer is independently testable:
           +---------------+-----+---------------+
 ```
 
-- `ZestDB` is the main facade: it parses commands, applies validation rules, and coordinates shards. It also owns the HTTP server and the background flush/archive threads.
+- `ZestDB` is the main facade: it parses commands, applies validation rules, and coordinates shards. It also owns the HTTP server and the background flush/archive threads. Its code is split by concern: `Commands.cpp` (parsing, and a table that maps each command name to its handler, required role and locking), `Config.cpp`, `Archive.cpp` and `Auth.cpp`.
 - `ScriptEngine` holds the Lua scripts, their functions and triggers, with one Lua state per server thread (see [scripting](scripting.md)).
 - `ShardManager` routes each key to a shard by hash and parallelizes bulk operations over the thread pool.
 - Each `Shard` owns a self-contained storage engine (index, segments, cache, WAL) and a background compactor thread.
@@ -103,9 +103,9 @@ The database directory (`DbPath`) is organized as follows:
 
 ### On-disk formats
 
-- **Index**: an append-only log of records, each a packed header (`klen`, `offset`, `segmentId`, `size`, `isTombstone`, `expiresAt`) followed by the key bytes; the last record of a key wins.
-- **Segments**: raw concatenated values, referenced by offset and size from the index.
-- **WAL**: length-prefixed commands followed by a sequence number and a newline, sorted by sequence number on replay.
+- **Index**: the header `ZIDX` and a version byte, then an append-only log of records, each a packed header (`crc`, `klen`, `offset`, `segmentId`, `size`, `flags`, `expiresAt`, `valueCrc`) followed by the key bytes. `crc` is the CRC-32 of the rest of the record, `valueCrc` the CRC-32 of the value bytes in the segment, and `flags` marks tombstones. The last record of a key wins.
+- **Segments**: concatenated values, each a zstd frame or the raw value, referenced by offset and size from the index.
+- **WAL**: the header `ZWAL` and a version byte, then records made of a length, a CRC-32 (of the length, the command and the sequence number), the command and its sequence number. The records of every shard are sorted by sequence number on replay.
 
 ### Lifecycle
 

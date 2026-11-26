@@ -86,7 +86,7 @@ namespace Zest {
 
         /// Turns the failed result of a ZestDB call made by a script into a Lua error (sol2 converts the exception).
         /// A limit keeps its message, so the outer call still reports ScriptLimitExceeded.
-        [[noreturn]] void fail(const ResultType& result) {
+        void fail(const ResultType& result) {
             if (result.code == ResultType::Code::ScriptLimitExceeded) {
                 throw std::runtime_error(result.response.empty() ? std::string(LIMIT_MARK) : result.response);
             }

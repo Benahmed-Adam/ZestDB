@@ -48,6 +48,12 @@ public:
         cfg << "  - user: root\n";
         cfg << "    role: admin\n";
         cfg << "    password: r\n";
+        cfg << "  - user: limited\n";
+        cfg << "    password: l\n";
+        cfg << "    rateLimit: 5\n";
+        cfg << "  - user: narrow\n";
+        cfg << "    password: n\n";
+        cfg << "    bandwidthLimit: 1KB\n";
     }
 
     SessionFixture() {
@@ -97,6 +103,39 @@ public:
         asio::streambuf buf;
         asio::read_until(sock, buf, '\n', ec);
         return std::string(asio::buffers_begin(buf.data()), asio::buffers_end(buf.data()));
+    }
+
+    /// Sends `cmds` as one batch and reads the reply until it holds one response per command.
+    std::string sendBatch(const std::vector<std::string>& cmds) {
+        std::string payload;
+        for (const auto& cmd : cmds) {
+            payload += be32(static_cast<uint32_t>(cmd.size())) + cmd;
+        }
+        asio::write(sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload));
+        std::string reply;
+        while (countOf(reply, "\"code\":") < cmds.size() || !reply.ends_with('\n')) {
+            char buf[65536];
+            reply.append(buf, sock.read_some(asio::buffer(buf)));
+        }
+        return reply;
+    }
+
+    static size_t countOf(const std::string& text, const std::string& what) {
+        size_t n = 0;
+        for (size_t pos = text.find(what); pos != std::string::npos; pos = text.find(what, pos + what.size())) {
+            n++;
+        }
+        return n;
+    }
+
+    /// True if the server closes the connection within `timeout`, without anything being sent to it.
+    bool closedWithin(std::chrono::milliseconds timeout) {
+        bool closed = false;
+        char byte;
+        sock.async_read_some(asio::buffer(&byte, 1), [&closed](std::error_code ec, std::size_t) { closed = ec == asio::error::eof || ec == asio::error::connection_reset; });
+        ctx.restart();
+        ctx.run_for(timeout);
+        return closed;
     }
 
     std::string send(const std::string& cmd) {
@@ -169,13 +208,13 @@ TEST_CASE_METHOD(SessionFixture, "Session enforces the user's role", "[session]"
     REQUIRE(admin.send("gcfg").find(codeOf(ResultType::Code::Success)) != std::string::npos);
 }
 
-TEST_CASE_METHOD(SessionFixture, "Session is revoked when a reload removes its user", "[session]") {
+TEST_CASE_METHOD(SessionFixture, "A reload that removes a user closes its idle connections at once", "[session]") {
     Client c;
     REQUIRE(c.send("Authorization: alice." + sha256("alicesecret")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
     writeConfig(false);
     REQUIRE(db->execCmd("r").code == ResultType::Code::Success);
-    REQUIRE(c.send("g k").find(codeOf(ResultType::Code::SessionRevoked)) != std::string::npos);
+    REQUIRE(c.closedWithin(std::chrono::milliseconds(1000)));
 }
 
 TEST_CASE_METHOD(SessionFixture, "Session serves several clients in parallel", "[session]") {
@@ -299,4 +338,132 @@ TEST_CASE_METHOD(SessionFixture, "Stopping the server closes idle sessions witho
 
     REQUIRE(idle.send("g k").empty());
     REQUIRE(unauthenticated.send("Authorization: bob." + sha256("bobbob")).empty());
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session runs the first commands of a batch that exceeds the rate limit and refuses the rest", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: limited." + sha256("limitedl")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    std::vector<std::string> cmds;
+    for (int i = 0; i < 8; i++) {
+        cmds.push_back(std::format(R"(s k{} "v")", i));
+    }
+    const std::string reply = c.sendBatch(cmds);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::Success)) == 5);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 3);
+    REQUIRE(reply.find(codeOf(ResultType::Code::RateLimited)) > reply.rfind(codeOf(ResultType::Code::Success)));
+    REQUIRE(db->execCmd("exists k4").response == "true");
+    REQUIRE(db->execCmd("exists k5").response == "false");
+
+    REQUIRE(c.send("g k0").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    REQUIRE(c.send("g k0").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(db->limiterOf("limited")->refusedCommands() == 4);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session shares a user's rate limit between its connections", "[session][ratelimit]") {
+    Client a;
+    Client b;
+    for (Client* c : { &a, &b }) {
+        REQUIRE(c->send("Authorization: limited." + sha256("limitedl")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    }
+    const std::string first = a.sendBatch({ "g x", "g x", "g x" });
+    const std::string second = b.sendBatch({ "g x", "g x", "g x" });
+    REQUIRE(Client::countOf(first + second, codeOf(ResultType::Code::RateLimited)) == 1);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session drops the requests that exceed the bandwidth limit", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: narrow." + sha256("narrown")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    // Larger than the 1 KB/s limit, but the bucket is full: it passes and leaves a debt
+    REQUIRE(c.send(std::format(R"(s big "{}")", std::string(3000, 'x'))).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+
+    // While the debt lasts, every command of a request is refused, here over several 64 KB chunks
+    std::vector<std::string> cmds;
+    for (int i = 0; i < 200; i++) {
+        cmds.push_back(std::format(R"(s n{} "{}")", i, std::string(1000, 'y')));
+    }
+    const std::string reply = c.sendBatch(cmds);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 200);
+    REQUIRE(db->execCmd("exists n0").response == "false");
+
+    // The session is still in step with the protocol after the dropped request
+    REQUIRE(c.send("g big").find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+    REQUIRE(db->limiterOf("narrow")->refusedCommands() == 201);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session answers MalformedBatch for a dropped request whose lengths do not add up", "[session][ratelimit]") {
+    Client c;
+    REQUIRE(c.send("Authorization: narrow." + sha256("narrown")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(std::format(R"(s big "{}")", std::string(3000, 'x'))).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    const std::string payload = be32(3) + "g a" + be32(50) + "short";
+    const std::string reply = c.sendRaw(be32(static_cast<uint32_t>(payload.size())) + payload);
+    REQUIRE(reply.find(codeOf(ResultType::Code::RateLimited)) != std::string::npos);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Session does not limit a user without limits", "[session][ratelimit]") {
+    REQUIRE(db->limiterOf("bob") == nullptr);
+    Client c;
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    const std::string reply = c.sendBatch(std::vector<std::string>(500, "g x"));
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::RateLimited)) == 0);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Deleting a user closes its idle connections at once", "[session][users]") {
+    Client c;
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(db->execCmd("user del bob", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(c.closedWithin(std::chrono::milliseconds(1000)));
+
+    Client again;
+    REQUIRE(again.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
+}
+
+TEST_CASE_METHOD(SessionFixture, "Changing a password closes the user's connections and only the new one is accepted", "[session][users]") {
+    Client c;
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(db->execCmd(R"(user passwd bob "n3w")", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(c.closedWithin(std::chrono::milliseconds(1000)));
+
+    Client oldPassword;
+    REQUIRE(oldPassword.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::AuthFailed)) != std::string::npos);
+    Client newPassword;
+    REQUIRE(newPassword.send("Authorization: bob." + sha256("bobn3w")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+}
+
+TEST_CASE_METHOD(SessionFixture, "A revoked session finishes its current command but not the rest of the batch", "[session][users]") {
+    Client c;
+    REQUIRE(c.send("Authorization: root." + sha256("rootr")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    std::string payload;
+    for (const std::string cmd : { R"(s before "1")", R"(user passwd root "other")", R"(s after "1")", "g before" }) {
+        payload += be32(static_cast<uint32_t>(cmd.size())) + cmd;
+    }
+    asio::write(c.sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload));
+    // The server answers the commands it ran, then closes the connection
+    std::string reply;
+    asio::error_code ec;
+    while (!ec) {
+        char buf[4096];
+        reply.append(buf, c.sock.read_some(asio::buffer(buf), ec));
+    }
+    REQUIRE(ec == asio::error::eof);
+    REQUIRE(Client::countOf(reply, "\"code\":") == 3);
+    REQUIRE(Client::countOf(reply, codeOf(ResultType::Code::Success)) == 2);
+    REQUIRE(reply.find(codeOf(ResultType::Code::SessionRevoked)) != std::string::npos);
+    REQUIRE(db->execCmd("exists after").response == "false");
+}
+
+TEST_CASE_METHOD(SessionFixture, "A new role applies to an open session from its next command", "[session][users]") {
+    Client c;
+    REQUIRE(c.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(db->execCmd("user role bob read", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(c.send(R"(s k "w")").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    REQUIRE(c.send("g k").find(codeOf(ResultType::Code::Success)) != std::string::npos);
+}
+
+TEST_CASE_METHOD(SessionFixture, "A user added at runtime can log in", "[session][users]") {
+    REQUIRE(db->execCmd(R"(user add carol "c4rol" read)", Role::Admin).code == ResultType::Code::Success);
+    Client c;
+    REQUIRE(c.send("Authorization: carol." + sha256("carolc4rol")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
 }

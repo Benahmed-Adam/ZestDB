@@ -88,6 +88,9 @@ namespace Zest {
             return this->liveSize.load();
         }
 
+        /// Number of keys in memory, without scanning them: expired keys count until the next compaction drops them.
+        size_t size();
+
     private:
         /// What the index stores per key: an IndexEntry without the key and the tombstone flag.
         struct Location {

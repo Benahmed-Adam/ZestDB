@@ -65,8 +65,14 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | ---: | --- | --- |
 | 300 | `AuthFailed` | Wrong user or token, malformed `Authorization` line, or the user is locked out after too many failures; the connection is closed. |
 | 301 | `PermissionDenied` | The user's role does not allow this command. |
-| 302 | `SessionRevoked` | The user was removed from the configuration; the connection is closed. |
+| 302 | `SessionRevoked` | The user was deleted or its password changed (`user del`, `user passwd` or a `reload`); the connection is closed. |
 | 303 | `ReadOnly` | `readOnly` is enabled and the command writes. |
+| 304 | `RateLimited` | The user's `rateLimit` or `bandwidthLimit` is exceeded: the command was not run. Retry later (see [rate limits](configuration.md#rate-limits)). |
+| 305 | `UserExists` | `user add`: a user of that name already exists. |
+| 306 | `UserNotFound` | `user passwd`, `role` or `del`: no user of that name. |
+| 307 | `InvalidUserName` | `user add`: the name is empty, longer than 64 characters, or holds a `.`, a space, a quote or a backslash. |
+| 308 | `InvalidRole` | The role is not `read`, `write` or `admin`. |
+| 309 | `LastAdmin` | `user del` or `user role` would leave no admin. |
 
 ## 4xx - Configuration
 
@@ -82,7 +88,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | Code | Name | Meaning |
 | ---: | --- | --- |
 | 500 | `InternalError` | The command raised an unexpected exception. |
-| 501 | `ReadFailed` | The value could not be read from its data segment. |
+| 501 | `ReadFailed` | The value could not be read from its data segment, failed its checksum (corrupted on disk) or could not be decompressed. |
 | 502 | `WriteFailed` | The value could not be written to a data segment, or a script file could not be written or removed. |
 | 503 | `WalWriteFailed` | The write was applied but could not be logged in the WAL. |
 | 504 | `ArchiveFailed` | `save` could not create the archive (or an archive or a restore is already in progress). |

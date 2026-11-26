@@ -11,7 +11,7 @@ No library has to be installed: on the first build, CMake (`FetchContent`) downl
 | --- | --- | --- |
 | OpenSSL | system 3.x, else 3.5.9 (via openssl-cmake 4.1.0) | TLS, SHA-256 |
 | Asio (standalone) | 1.38.2 | TCP/SSL server |
-| libzip + zlib | 1.12.1 + 1.3.2 | archives |
+| libzip + zlib | 1.12.1 + 1.3.2 | archives; zlib also computes the CRC-32 checksums |
 | libzippp | 7.1-1.10.1 | archives (C++ wrapper) |
 | zstd | 1.5.7 | value compression |
 | Lua | 5.4.8 | scripting (compiled as C++, so Lua errors unwind as C++ exceptions) |
@@ -146,11 +146,11 @@ In CI, the summary is shown on the run's page and the HTML report is attached as
 
 `main` and `dev` are protected by two repository rulesets:
 - no direct push: every change goes through a pull request (no approval required);
-- the checks `build`, `build-windows`, `docker`, `format`, `clang-tidy`, `sanitize-asan` and `sanitize-tsan` must pass (`coverage` is informative);
+- the checks must pass: `build`, `build-windows` and `docker` on both, plus `format`, `clang-tidy`, `sanitize-asan` and `sanitize-tsan` on `dev` (`coverage` is informative);
 - review threads must be resolved;
 - no force-push, no deletion.
 
-Into `main`, the branch must be up to date with `main` and only merge commits are allowed. This keeps `main` and `dev` sharing their history, which squashing would break. Into `dev`, merge commits and squash merges are both allowed.
+The branch must be up to date with its target, and only merge commits are allowed. This keeps `main` and `dev` sharing their history, which squashing would break.
 
 ## Project structure
 
@@ -168,6 +168,8 @@ Into `main`, the branch must be up to date with `main` and only merge commits ar
 │   ├── Config.cpp                # loading, reloading and changing the configuration
 │   ├── Archive.cpp               # archive creation, restore and listing
 │   ├── Auth.cpp                  # tokens, roles, lockout, address filter
+│   ├── Metrics.cpp               # Prometheus metrics served at /metrics
+│   ├── RateLimiter.{hpp,cpp}     # per-user token buckets (rate and bandwidth limits)
 │   ├── ScriptEngine.{hpp,cpp}    # Lua scripts, functions and triggers
 │   ├── Server.{hpp,cpp}          # Asio TCP/SSL server and protocol
 │   ├── Settings.hpp              # settings, result codes, validation rules
@@ -182,6 +184,7 @@ Into `main`, the branch must be up to date with `main` and only merge commits ar
 │   ├── ThreadPool.{hpp,cpp}      # parallel task execution
 │   ├── Logger.{hpp,cpp}          # multi-level colored logging
 │   ├── File.hpp                  # fsync helper
+│   ├── Checksum.hpp              # CRC-32 helper (zlib)
 │   ├── main.cpp                  # entry point, REPL, signal handling
 │   └── lib/                      # vendored third-party headers
 ├── tests/                        # Catch2 unit tests

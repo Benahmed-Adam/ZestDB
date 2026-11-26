@@ -244,6 +244,11 @@ namespace Zest {
         return res;
     }
 
+    size_t IndexManager::size() {
+        std::unique_lock<std::mutex> lock(this->mtx);
+        return this->memoryTree.size();
+    }
+
     size_t IndexManager::count(const std::function<bool(std::string_view)>& matches) {
         std::unique_lock<std::mutex> lock(this->mtx);
 

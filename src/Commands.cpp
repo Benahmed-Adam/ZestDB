@@ -220,7 +220,7 @@ namespace Zest {
         out.line = sv;
 
         static const std::unordered_map<std::string_view, std::string_view> aliases = {
-            { "get", "g" }, { "set", "s" }, { "del", "d" }, { "getby", "gb" }, { "setby", "sb" }, { "delby", "db" }, { "flush", "f" }, { "reload", "r" }, { "help", "h" },
+            { "get", "g" }, { "set", "s" }, { "del", "d" }, { "getby", "gb" }, { "setby", "sb" }, { "delby", "db" }, { "flush", "f" }, { "reload", "r" }, { "help", "h" }, { "stats", "info" },
         };
         out.name = toLowerStr(out.words[0]);
         if (auto it = aliases.find(out.name); it != aliases.end()) {
@@ -251,6 +251,8 @@ namespace Zest {
             { "count", { &ZestDB::cmdCount, Access::Read, Locking::Shared } },
             { "keys", { &ZestDB::cmdKeys, Access::Read, Locking::Shared } },
             { "h", { &ZestDB::cmdHelp, Access::Read, Locking::Shared } },
+            { "info", { &ZestDB::cmdInfo, Access::Read, Locking::Shared } },
+            { "user", { &ZestDB::cmdUser, Access::Admin, Locking::Exclusive } },
             { "f", { &ZestDB::cmdFlush, Access::Admin, Locking::None } },
             { "r", { &ZestDB::cmdReload, Access::Admin, Locking::Exclusive } },
             { "scfg", { &ZestDB::cmdSetConfig, Access::Admin, Locking::Exclusive } },
@@ -616,21 +618,71 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdHelp([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdHelp(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result.code = ResultType::Code::Success;
         result.response = this->help();
         return result;
     }
 
-    ResultType ZestDB::cmdFlush([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdUser(Command& c) {
+        const std::vector<std::string_view>& words = c.words;
+        const std::string_view sv = c.line;
+        if (words.size() < 2) {
+            return { ResultType::Code::MissingArguments };
+        }
+        const std::string sub = toLowerStr(words[1]);
+        if (sub == "ls" && words.size() == 2) {
+            return this->listUsers();
+        }
+        if (sub != "add" && sub != "passwd" && sub != "role" && sub != "del") {
+            return { ResultType::Code::UnknownCommand };
+        }
+        if (words.size() < 3 || (sub != "del" && words.size() < 4)) {
+            return { ResultType::Code::MissingArguments };
+        }
+        const std::string name(words[2]);
+        if (sub == "del") {
+            return words.size() == 3 ? this->deleteUser(name) : ResultType{ ResultType::Code::InvalidUserName };
+        }
+        if (sub == "role") {
+            return words.size() == 4 ? this->setUserRole(name, std::string(words[3])) : ResultType{ ResultType::Code::InvalidRole };
+        }
+
+        // add / passwd: a quoted password, then for add an optional role
+        auto pos = static_cast<size_t>(words[3].data() - sv.data());
+        std::string password;
+        if (!readQuoted(sv, pos, password)) {
+            return { ResultType::Code::InvalidValueFormat };
+        }
+        if (password.empty()) {
+            return { ResultType::Code::EmptyValue };
+        }
+        std::string_view rest = sv.substr(pos);
+        const size_t first = rest.find_first_not_of(" \t");
+        rest = first == std::string_view::npos ? std::string_view{} : rest.substr(first, rest.find_last_not_of(" \t") - first + 1);
+        if (sub == "passwd") {
+            return rest.empty() ? this->setUserPassword(name, password) : ResultType{ ResultType::Code::InvalidValueFormat };
+        }
+        return this->addUser(name, password, std::string(rest));
+    }
+
+    ResultType ZestDB::cmdInfo(Command& c) {
+        (void)c;
+        return this->info();
+    }
+
+    ResultType ZestDB::cmdFlush(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         this->flush();
         result.code = ResultType::Code::Success;
         return result;
     }
 
-    ResultType ZestDB::cmdReload([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdReload(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result = this->reloadConfig();
         return result;
@@ -785,7 +837,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdGetConfig([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdGetConfig(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result.code = ResultType::Code::Success;
         result.response = this->getConfig();
@@ -803,7 +856,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdSave([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdSave(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         if (this->createArchive()) {
             result.code = ResultType::Code::Success;
@@ -814,7 +868,8 @@ namespace Zest {
         return result;
     }
 
-    ResultType ZestDB::cmdListSaves([[maybe_unused]] Command& c) {
+    ResultType ZestDB::cmdListSaves(Command& c) {
+        (void)c;
         ResultType result = { ResultType::Code::InternalError };
         result = this->listSaves();
         return result;
@@ -909,6 +964,12 @@ namespace Zest {
         oss << "save                                   - Create a zip archive of the database" << "\n";
         oss << "restore <archive.zip>                  - Replace the database with an archive of ArchiveStoragePath" << "\n";
         oss << "lsaves                                 - List the archives of ArchiveStoragePath, oldest first" << "\n";
+        oss << "info (or stats)                        - Number of keys, size on disk, cache hit ratio, last archive" << "\n";
+        oss << "user add <name> \"<password>\" [role]    - Create a user (role: read, write (default) or admin)" << "\n";
+        oss << "user passwd <name> \"<password>\"        - Change a password and close the user's connections" << "\n";
+        oss << "user role <name> <role>                - Change the role of a user" << "\n";
+        oss << "user del <name>                        - Delete a user and close its connections" << "\n";
+        oss << "user ls                                - List the users and their roles" << "\n";
         oss << "script load <name> \"<lua code>\"        - Save a Lua script and register its functions and triggers" << "\n";
         oss << "script del <name>                      - Remove a script with its functions and triggers" << "\n";
         oss << "script reload <name>                   - Reload DbPath/scripts/<name>.lua after editing it on disk" << "\n";

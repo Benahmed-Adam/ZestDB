@@ -35,9 +35,15 @@ Every command returns one JSON object with `code`, `response` and `affectedRows`
 | `save` | Manually create a zip archive of the database. |
 | `restore <archive.zip>` | Replace the database with an archive from `ArchiveStoragePath` (e.g. `restore zestdb_archive_2026-11-15_10-00-00.123456789.zip`). Everything written since that archive is lost. |
 | `lsaves` | List the archives of `ArchiveStoragePath` as a JSON array, oldest first (e.g. `["zestdb_archive_2026-11-15_10-00-00.123456789.zip"]`); `affectedRows` is their number. |
+| `info` / `stats` | Database summary as JSON, e.g. `{"cacheHitRatio":0.93,"diskBytes":1048576,"keys":1200,"lastArchive":{"date":"2026-11-15T10:00:00Z","name":"zestdb_archive_2026-11-15_10-00-00.123456789.zip"}}`. `keys` counts expired keys until the next compaction drops them; `diskBytes` is the size of every file of `DbPath`; `cacheHitRatio` is the share of `get` / `getby` served from the cache since startup (`null` before the first read); `lastArchive` is `null` without an archive. |
+| `user add <name> "<password>" [role]` | Create a user; the role is `read`, `write` (the default) or `admin` (see [managing users](configuration.md#managing-users-at-runtime)). |
+| `user passwd <name> "<password>"` | Change a user's password and close its open connections. |
+| `user role <name> <role>` | Change a user's role; its open connections get it from their next command. |
+| `user del <name>` | Delete a user and close its open connections. |
+| `user ls` | List the users and their roles as a JSON array, sorted by name (e.g. `[{"role":"admin","user":"root"}]`). |
 | `help` / `h` | Print command and usage help. |
 
-`script`, `scfg`, `reload`, `gcfg`, `save`, `restore`, `lsaves` and `flush` require the `admin` role; `call` and the commands that write require the `write` role (see [roles](configuration.md#users-and-roles)). `useSSL`, the ports and the connection limits can only be changed in `config.yaml`, followed by a restart.
+`script`, `user`, `scfg`, `reload`, `gcfg`, `save`, `restore`, `lsaves` and `flush` require the `admin` role; `call` and the commands that write require the `write` role (see [roles](configuration.md#users-and-roles)). `useSSL`, the ports and the connection limits can only be changed in `config.yaml`, followed by a restart.
 
 ## Values
 
