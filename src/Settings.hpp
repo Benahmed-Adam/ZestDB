@@ -23,7 +23,8 @@ namespace Zest {
     enum class Role {
         Read,
         Write,
-        Admin
+        Admin,
+        Replica // only for the replication link of a replica: no ordinary command
     };
 
     /// The result of every command, sent to the client as `{"affectedRows":..,"code":..,"response":..}`.
@@ -104,6 +105,21 @@ namespace Zest {
         }
     };
 
+    /// The `replication` block of config.yaml. Read at startup only: a reload cannot change it.
+    struct ReplicationSettings {
+        bool replica = false; // `role: replica`; every instance is a primary by default
+        // Replica side: the primary's address and the user (with the `replica` role there) to log in with
+        std::string primaryHost;
+        uint16_t primaryPort = 0;
+        std::string user;
+        std::string password;
+        // Primary side: the addresses allowed to replicate (a regex) and the number of events kept for a replica to catch up
+        std::string allowedReplicasStr = ".*";
+        size_t historySize = 100000;
+
+        bool operator==(const ReplicationSettings&) const = default;
+    };
+
     /// The configuration read from config.yaml (see docs/configuration.md for each field).
     /// Each shard keeps a copy in which DbPath, IndexPath and WalPath point to its own files.
     /// The initial values are the defaults of a field missing from config.yaml (loadConfig reads them from here).
@@ -142,6 +158,9 @@ namespace Zest {
         bool fsyncOnWrite = true;
 
         UserLimits defaultLimits; // the top-level rateLimit, burst and bandwidthLimit, for the users that set none
+
+        ReplicationSettings replication;
+        std::regex AllowedReplicas{ ".*" };
     };
 
 } // namespace Zest

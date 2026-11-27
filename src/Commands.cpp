@@ -278,7 +278,7 @@ namespace Zest {
             return { ResultType::Code::UnknownCommand };
         }
         const CommandSpec& spec = it->second;
-        if ((spec.access == Access::Write && role == Role::Read) || (spec.access == Access::Admin && role != Role::Admin)) {
+        if (role == Role::Replica || (spec.access == Access::Write && role == Role::Read) || (spec.access == Access::Admin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
 

@@ -1509,3 +1509,68 @@ TEST_CASE("ZestDB numbers the WAL records of a key in the order its writes were 
         REQUIRE(lastN == R"(s n "16000")");
     }
 }
+
+TEST_CASE("ZestDB reads the replication block of config.yaml", "[commands][replication]") {
+    SECTION("an instance is a primary by default") {
+        TempDbDir tmp("zestdb_test_repl_default", "", 29609);
+        ZestDB db;
+        const ReplicationSettings& r = db.getSettings().replication;
+        REQUIRE_FALSE(r.replica);
+        REQUIRE(r.historySize == 100000);
+        REQUIRE(std::regex_match("10.0.0.7", db.getSettings().AllowedReplicas));
+    }
+    SECTION("a primary limits the replica addresses and its history") {
+        TempDbDir tmp("zestdb_test_repl_primary", "replication:\n  allowedReplicas: '10\\.0\\.0\\..*'\n  historySize: 500\n", 29609);
+        ZestDB db;
+        REQUIRE(db.getSettings().replication.historySize == 500);
+        REQUIRE(std::regex_match("10.0.0.7", db.getSettings().AllowedReplicas));
+        REQUIRE_FALSE(std::regex_match("192.168.1.2", db.getSettings().AllowedReplicas));
+    }
+    SECTION("a replica names its primary and how to log in") {
+        TempDbDir tmp("zestdb_test_repl_replica", "replication:\n  role: replica\n  primary: \"[::1]:7321\"\n  user: repl\n  password: \"s3cret\"\n", 29609);
+        ZestDB db;
+        const ReplicationSettings& r = db.getSettings().replication;
+        REQUIRE(r.replica);
+        REQUIRE(r.primaryHost == "::1");
+        REQUIRE(r.primaryPort == 7321);
+        REQUIRE(r.user == "repl");
+        REQUIRE(r.password == "s3cret");
+    }
+}
+
+TEST_CASE("ZestDB refuses an invalid replication block", "[commands][replication]") {
+    for (const char* bad : {
+             "replication:\n  role: master\n",
+             "replication:\n  historySize: 0\n",
+             "replication:\n  allowedReplicas: \"(\"\n",
+             "replication:\n  role: replica\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host\"\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:99999\"\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:7321\"\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:7321\"\n  user: repl\n",
+         }) {
+        INFO(bad);
+        TempDbDir tmp("zestdb_test_repl_invalid", bad, 29611);
+        REQUIRE_THROWS(ZestDB());
+    }
+}
+
+TEST_CASE("ZestDB cannot change the replication block on reload", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_reload", "", 29613);
+    ZestDB db;
+    tmp.writeConfig(std::format("DbPath: {}\nMaxKeySize: 255\nDBPort: 29613\nWebPort: 29614\nArchiveStoragePath: {}\nAutoArchiveSaving: false\nreplication:\n  historySize: 10\n", (tmp.dir / "db").string(), (tmp.dir / "archive").string()));
+    REQUIRE(db.execCmd("r", Role::Admin).code == ResultType::Code::ConfigNotReloadable);
+    REQUIRE(db.getSettings().replication.historySize == 100000);
+}
+
+TEST_CASE("The replica role runs no ordinary command", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_role", "users:\n  - user: root\n    role: admin\n    password: r\n  - user: repl\n    role: replica\n    password: p\n", 29615);
+    ZestDB db;
+    REQUIRE(db.authenticate("repl", sha256("replp")) == Role::Replica);
+    for (const char* cmd : { "g k", R"(s k "v")", "info", "user ls", "help" }) {
+        INFO(cmd);
+        REQUIRE(db.execCmd(cmd, Role::Replica).code == ResultType::Code::PermissionDenied);
+    }
+    REQUIRE(db.execCmd(R"(user add repl2 "x" replica)", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("user ls", Role::Admin).response.find(R"({"role":"replica","user":"repl2"})") != std::string::npos);
+}
