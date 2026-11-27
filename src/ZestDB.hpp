@@ -244,9 +244,12 @@ namespace Zest {
         bool scripted() const;
         /// Runs the `before set` triggers on `value` (which they may change), then checks the new value again.
         ResultType beforeWrite(const std::string& key, std::string& value);
-        /// After a successful write: appends `walCommand` to the WAL, then runs the `after` triggers. Returns `result` on
-        /// success, otherwise the WAL or trigger error (the write itself stays done).
-        ResultType finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result);
+        /// After a successful write: appends `walCommand` to the WAL. Called under the shard's write order lock, so the
+        /// records are numbered in the order the writes were applied. Returns `result`, or WalWriteFailed.
+        ResultType logWrite(const std::string& key, const std::string& walCommand, ResultType result);
+        /// After a successful, logged write: runs the `after` triggers, without the write order lock (they may write).
+        /// Returns `result`, or the trigger error (the write itself stays done).
+        ResultType afterWrite(TriggerEvent event, const std::string& key, const std::string& value, ResultType result);
         /// setBy with an explicit choice: `perRow` goes key by key through set(), so triggers run and each row is logged.
         ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
         /// delBy with an explicit choice, like setBy.

@@ -110,6 +110,12 @@ namespace Zest {
             return *this->wal;
         };
 
+        /// Held by ZestDB from a write to its WAL record, so the records of this shard are numbered in the order the
+        /// writes were applied. Never held while a trigger runs.
+        std::mutex& writeOrderMutex() {
+            return this->writeOrderMtx;
+        }
+
         StorageManager& getStorageManager() {
             return *this->storageManager;
         }
@@ -142,6 +148,7 @@ namespace Zest {
 
         std::shared_mutex readMtx;       // shared by reads, exclusive for writes, flushes and compaction
         std::shared_mutex compactionMtx; // exclusive during compaction, shared while an archive copies the files
+        std::mutex writeOrderMtx;
 
         std::atomic<bool> isStopped = false;
         std::atomic<uint64_t> compactionCount = 0;

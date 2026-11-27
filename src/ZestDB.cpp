@@ -353,12 +353,16 @@ namespace Zest {
         return this->checkWrite(key, value);
     }
 
-    ResultType ZestDB::finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result) {
+    ResultType ZestDB::logWrite(const std::string& key, const std::string& walCommand, ResultType result) {
+        if (result.code == ResultType::Code::Success && !this->appendToWAL(key, walCommand)) {
+            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
+        }
+        return result;
+    }
+
+    ResultType ZestDB::afterWrite(TriggerEvent event, const std::string& key, const std::string& value, ResultType result) {
         if (result.code != ResultType::Code::Success) {
             return result;
-        }
-        if (!this->appendToWAL(key, walCommand)) {
-            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
         }
         if (this->scripted()) {
             ResultType after = this->scriptEngine->after(event, key, value);
@@ -379,8 +383,11 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->set(key, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::replace(const std::string& key, const std::string& value) {
@@ -394,8 +401,11 @@ namespace Zest {
             return before;
         }
         uint64_t expiresAt = 0;
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->replace(key, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::setnx(const std::string& key, const std::string& value) {
@@ -408,8 +418,11 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->setnx(key, stored);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, 0), result);
+        result = this->logWrite(key, setCommand(key, stored, 0), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::cas(const std::string& key, const std::string& expected, const std::string& value) {
@@ -427,8 +440,11 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->cas(key, expected, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
@@ -442,11 +458,9 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->setTTL(key, expiresAt);
-        if (result.code == ResultType::Code::Success && !this->appendToWAL(key, expiresAt != 0 ? std::format("expireat {} {}", key, expiresAt) : std::format("persist {}", key))) {
-            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
-        }
-        return result;
+        return this->logWrite(key, expiresAt != 0 ? std::format("expireat {} {}", key, expiresAt) : std::format("persist {}", key), result);
     }
 
     ResultType ZestDB::getTTL(const std::string& key) {
@@ -475,8 +489,11 @@ namespace Zest {
                 return before;
             }
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->del(key);
-        return this->finishWrite(TriggerEvent::Del, key, "", std::format("d {}", key), result);
+        result = this->logWrite(key, std::format("d {}", key), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Del, key, "", result);
     }
 
     ResultType ZestDB::getBy(ValidationRule& valid) {
@@ -551,8 +568,11 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->incr(key, delta, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, result.response, setCommand(key, result.response, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, result.response, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, result.response, result);
     }
 
     ResultType ZestDB::exists(const std::string& key) {

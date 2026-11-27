@@ -75,6 +75,7 @@ ZestDB follows a layered design where each layer is independently testable:
 - Every successful write is appended to a WAL file, which guarantees durability across unexpected shutdowns.
 - Writes are journaled as their effect, not as the command: `setex` / `expire` as an absolute date (`setexat` / `expireat`), and `incr`, `setnx`, `cas` and values changed by a script trigger as the value they wrote. Replaying the WAL therefore gives the same state, without running any trigger again.
 - Optional `fsyncOnWrite` to force a synchronous fsync after every write.
+- Each shard has a write order lock, held from a write until its record is appended. So the records of one key are numbered in the order its writes were applied, even when they come from several threads. A `setby` / `delby` logged as one record holds the locks of every shard. Triggers run after the lock is released.
 - On startup, WAL entries are collected, sorted by sequence number, and replayed to rebuild the in-memory state, after which the WAL is cleared.
 - The WAL is flushed and cleared together with the index and segments during a flush cycle.
 - The WAL file starts with a versioned header (`ZWAL`), and every record carries a CRC-32. The replay of a shard's WAL stops at the first record that is cut short or fails its checksum, since the records after it may depend on it.

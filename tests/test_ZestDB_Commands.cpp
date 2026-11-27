@@ -1467,3 +1467,45 @@ TEST_CASE("ZestDB keeps user commands and passwords out of the WAL", "[commands]
     REQUIRE(wal.find("s3cret-pass") == std::string::npos);
     REQUIRE(wal.find("user") == std::string::npos);
 }
+
+TEST_CASE("ZestDB numbers the WAL records of a key in the order its writes were applied", "[commands][wal]") {
+    TempDbDir tmp("zestdb_test_wal_order", "fsyncOnWrite: false\n", 29607);
+    std::string lastValue;
+    {
+        ZestDB db;
+        std::vector<std::jthread> writers;
+        for (int t = 0; t < 8; t++) {
+            writers.emplace_back([&db, t] {
+                for (int i = 0; i < 2000; i++) {
+                    db.execCmd(std::format(R"(s k "{}-{}")", t, i), Role::Write, false);
+                    db.execCmd("incr n", Role::Write, false);
+                }
+            });
+        }
+        writers.clear();
+        lastValue = db.execCmd("g k").response;
+        REQUIRE(db.execCmd("g n").response == "16000");
+        REQUIRE(db.syncWAL());
+
+        // The last record of each key, by sequence number, must hold its current value
+        std::vector<WalEntry> records;
+        Settings s;
+        for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+            if (entry.path().filename() == "WAL") {
+                auto cmds = WAL(s, entry.path()).getCmds();
+                records.insert(records.end(), cmds.begin(), cmds.end());
+            }
+        }
+        std::ranges::sort(records, {}, &WalEntry::seq);
+        std::string lastK, lastN;
+        for (const WalEntry& r : records) {
+            if (r.cmd.starts_with("s k ")) {
+                lastK = r.cmd;
+            } else if (r.cmd.starts_with("s n ")) {
+                lastN = r.cmd;
+            }
+        }
+        REQUIRE(lastK == std::format(R"(s k "{}")", lastValue));
+        REQUIRE(lastN == R"(s n "16000")");
+    }
+}

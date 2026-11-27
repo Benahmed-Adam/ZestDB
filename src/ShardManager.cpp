@@ -298,6 +298,19 @@ namespace Zest {
         return shard->getWAL().append(command);
     }
 
+    std::unique_lock<std::mutex> ShardManager::lockWrites(const std::string& key) {
+        return std::unique_lock<std::mutex>(this->shards[static_cast<size_t>(this->getShardId(key))]->writeOrderMutex());
+    }
+
+    std::vector<std::unique_lock<std::mutex>> ShardManager::lockAllWrites() {
+        std::vector<std::unique_lock<std::mutex>> locks;
+        locks.reserve(this->shards.size());
+        for (auto& shard : this->shards) {
+            locks.emplace_back(shard->writeOrderMutex());
+        }
+        return locks;
+    }
+
     void ShardManager::reloadSettings(Settings& set) {
         this->settings = set;
 

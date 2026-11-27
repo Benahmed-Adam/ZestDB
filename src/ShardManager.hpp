@@ -59,6 +59,10 @@ namespace Zest {
         void replayAllWAL(const std::function<std::string(const std::string&)>& execCmdFunc);
         /// Appends `command` to the WAL of `key`'s shard (buffered, see syncWAL()).
         bool appendToWAL(const std::string& key, const std::string& command);
+        /// The write order lock of `key`'s shard (see Shard::writeOrderMutex()).
+        std::unique_lock<std::mutex> lockWrites(const std::string& key);
+        /// The write order locks of every shard, taken in shard order, for a setby / delby logged as one record.
+        std::vector<std::unique_lock<std::mutex>> lockAllWrites();
         /// Syncs the WAL of every shard. @return false if one of them failed.
         bool syncWAL();
 

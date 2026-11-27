@@ -292,13 +292,21 @@ namespace Zest {
             sharedLock.lock();
         }
 
+        // Without triggers, setby / delby are logged as one record: no other write may come between them and it
+        const bool loggedAsOne = (cmd.name == "sb" || cmd.name == "db") && !this->scripted();
+        std::vector<std::unique_lock<std::mutex>> order;
+        if (loggedAsOne) {
+            order = this->shardManager->lockAllWrites();
+        }
+
         ResultType result = (this->*spec.handler)(cmd);
 
         if (!this->replaying.load() && spec.access == Access::Write) {
             bool walOk = true;
-            if (result.code == ResultType::Code::Success && (cmd.name == "sb" || cmd.name == "db") && !cmd.rowsLogged) {
+            if (result.code == ResultType::Code::Success && loggedAsOne && !cmd.rowsLogged) {
                 walOk = this->appendToWAL(std::string(cmd.words[1]), command);
             }
+            order.clear();
             if (syncWal) {
                 walOk = this->shardManager->syncWAL() && walOk;
             }
