@@ -166,8 +166,9 @@ namespace Zest {
 
         /// `replicate <historyId> <fromSeq>` from a replica at `remoteIp`: checks it may replicate, starts the
         /// replication log, then answers `{"mode":"stream"|"fullsync","historyId":..,"nextSeq":..}`. `stream` when the
-        /// log still holds every write from `fromSeq` of the same history, `fullsync` otherwise.
-        ResultType replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq);
+        /// log still holds every write from `fromSeq` of the same history, `fullsync` otherwise. `knownHistoryId` is this
+        /// primary's id as the replica got it at its last handshake (`-` for none).
+        ResultType replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut = nullptr);
 
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {

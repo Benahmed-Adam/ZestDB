@@ -41,4 +41,31 @@ namespace Zest {
         return this->next;
     }
 
+    uint64_t ReplicationLog::subscribe(std::function<void()> wake) {
+        std::lock_guard<std::mutex> lock(this->subscribersMtx);
+        const uint64_t id = this->nextSubscriber++;
+        this->subscribers.emplace(id, std::move(wake));
+        return id;
+    }
+
+    void ReplicationLog::unsubscribe(uint64_t id) {
+        std::lock_guard<std::mutex> lock(this->subscribersMtx);
+        this->subscribers.erase(id);
+    }
+
+    void ReplicationLog::notify() {
+        // Called outside the lock: a waker may drop the last reference to a session, whose destructor unsubscribes
+        thread_local std::vector<std::function<void()>> wakers;
+        {
+            std::lock_guard<std::mutex> lock(this->subscribersMtx);
+            for (const auto& [id, wake] : this->subscribers) {
+                wakers.push_back(wake);
+            }
+        }
+        for (const auto& wake : wakers) {
+            wake();
+        }
+        wakers.clear();
+    }
+
 } // namespace Zest

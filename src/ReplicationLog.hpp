@@ -3,8 +3,10 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Zest {
@@ -48,6 +50,12 @@ namespace Zest {
         /// The sequence number of the next write.
         uint64_t nextSeq();
 
+        /// Registers `wake`, called after each new event (it must only schedule work, not do it). @return its id.
+        uint64_t subscribe(std::function<void()> wake);
+        void unsubscribe(uint64_t id);
+        /// Calls every subscriber; ZestDB calls it after push(), once lock() is released.
+        void notify();
+
     private:
         const size_t capacity;
         std::atomic<bool> isActive{ false };
@@ -55,6 +63,10 @@ namespace Zest {
         std::deque<ReplicationEvent> events; // in sequence order; seqs may skip a number taken by a failed WAL write
         uint64_t horizon = 0;                // every successful write numbered from here on is in `events`
         uint64_t next = 0;                   // one past the last kept event, or `horizon`
+
+        std::mutex subscribersMtx;
+        std::unordered_map<uint64_t, std::function<void()>> subscribers;
+        uint64_t nextSubscriber = 1;
     };
 
 } // namespace Zest

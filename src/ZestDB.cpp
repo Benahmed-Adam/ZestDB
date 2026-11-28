@@ -352,7 +352,7 @@ namespace Zest {
         return this->scripted() || (!this->replaying.load() && this->replicationLog && this->replicationLog->active());
     }
 
-    ResultType ZestDB::replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq) {
+    ResultType ZestDB::replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut) {
         if (this->settings.replication.replica) {
             return { ResultType::Code::NotPrimary };
         }
@@ -363,6 +363,9 @@ namespace Zest {
         this->startReplicationLog();
         std::vector<ReplicationEvent> none;
         const bool stream = knownHistoryId == this->historyId && this->replicationLog->since(fromSeq, none, 0);
+        if (streamOut) {
+            *streamOut = stream;
+        }
         json reply = { { "mode", stream ? "stream" : "fullsync" }, { "historyId", this->historyId }, { "nextSeq", this->replicationLog->nextSeq() } };
         ZestLog(LogLevel::Info, std::format("Replication: {} connected, {}", remoteIp, stream ? std::format("streaming from {}", fromSeq) : "full sync needed"));
         return { ResultType::Code::Success, reply.dump(), 1 };
@@ -635,13 +638,16 @@ namespace Zest {
         if (!this->replicationLog->active()) {
             return this->shardManager->appendToWAL(key, command);
         }
-        // The log's lock spans the numbering of the record and its push, so the log stays in sequence order
-        std::lock_guard<std::mutex> lock(this->replicationLog->lock());
-        uint64_t seq = 0;
-        if (!this->shardManager->appendToWAL(key, command, &seq)) {
-            return false;
+        {
+            // The log's lock spans the numbering of the record and its push, so the log stays in sequence order
+            std::lock_guard<std::mutex> lock(this->replicationLog->lock());
+            uint64_t seq = 0;
+            if (!this->shardManager->appendToWAL(key, command, &seq)) {
+                return false;
+            }
+            this->replicationLog->push(seq, command);
         }
-        this->replicationLog->push(seq, command);
+        this->replicationLog->notify();
         return true;
     }
 

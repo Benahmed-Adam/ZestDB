@@ -1,10 +1,12 @@
 #include <asio.hpp>
 #include <atomic>
 #include <catch2/catch_all.hpp>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <future>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -58,6 +60,8 @@ public:
         cfg << "  - user: repl\n";
         cfg << "    role: replica\n";
         cfg << "    password: p\n";
+        cfg << "replication:\n";
+        cfg << "  historySize: 5000\n";
     }
 
     SessionFixture() {
@@ -490,8 +494,8 @@ TEST_CASE_METHOD(SessionFixture, "A replica gets a full sync, then a stream once
         historyId = first["historyId"];
         nextSeq = first["nextSeq"];
         REQUIRE(historyId == db->getHistoryId());
-        // One handshake per session
-        REQUIRE(c.send("replicate - 0").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+        // Past the handshake, any request closes the link, a second `replicate` too
+        REQUIRE(c.send("replicate - 0").empty());
     }
     REQUIRE(db->getReplicationLog().active());
     REQUIRE(db->execCmd(R"(s k "v")").code == ResultType::Code::Success);
@@ -526,4 +530,161 @@ TEST_CASE_METHOD(SessionFixture, "A replication link is not closed by the idle t
     REQUIRE(repl.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
     replicateReply(repl.send("replicate - 0"));
     REQUIRE_FALSE(repl.closedWithin(std::chrono::milliseconds(3000))); // IdleTimeout is 2 s
+}
+
+/// A replica's end of the link: requests, then the frames of events the primary pushes.
+class ReplicaClient {
+public:
+    asio::io_context ctx;
+    asio::ip::tcp::socket sock{ ctx };
+    std::string pending; // bytes received and not consumed yet
+
+    ReplicaClient() {
+        sock.connect({ asio::ip::make_address("127.0.0.1"), TEST_DB_PORT });
+    }
+
+    /// Sends one command and returns its reply line.
+    std::string request(const std::string& cmd) {
+        std::string payload = be32(static_cast<uint32_t>(cmd.size())) + cmd;
+        asio::write(sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload));
+        while (pending.find('\n') == std::string::npos) {
+            REQUIRE(fill(pending.size() + 1, std::chrono::seconds(5)));
+        }
+        std::string line = pending.substr(0, pending.find('\n') + 1);
+        pending.erase(0, line.size());
+        return line;
+    }
+
+    /// The events of the next frame (empty for a heartbeat), or nullopt if none came within `timeout` or the link closed.
+    std::optional<std::vector<std::pair<uint64_t, std::string>>> nextFrame(std::chrono::milliseconds timeout) {
+        if (!fill(4, timeout)) {
+            return std::nullopt;
+        }
+        const uint32_t size = readBe32(0);
+        if (!fill(4 + size, timeout)) {
+            return std::nullopt;
+        }
+        std::vector<std::pair<uint64_t, std::string>> events;
+        for (size_t pos = 4; pos < 4 + size;) {
+            const uint32_t itemSize = readBe32(pos);
+            const std::string item = pending.substr(pos + 4, itemSize);
+            const size_t space = item.find(' ');
+            events.emplace_back(std::stoull(item.substr(0, space)), item.substr(space + 1));
+            pos += 4 + itemSize;
+        }
+        pending.erase(0, 4 + size);
+        return events;
+    }
+
+    /// The next `count` events, skipping the heartbeats.
+    std::vector<std::pair<uint64_t, std::string>> events(size_t count) {
+        std::vector<std::pair<uint64_t, std::string>> all;
+        while (all.size() < count) {
+            auto frame = nextFrame(std::chrono::seconds(5));
+            REQUIRE(frame.has_value());
+            all.insert(all.end(), frame->begin(), frame->end());
+        }
+        return all;
+    }
+
+private:
+    uint32_t readBe32(size_t pos) const {
+        uint32_t v;
+        std::memcpy(&v, pending.data() + pos, 4);
+        return ntohl(v);
+    }
+
+    /// Reads until `pending` holds `n` bytes. @return false on timeout or when the link closes.
+    bool fill(size_t n, std::chrono::milliseconds timeout) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (pending.size() < n) {
+            char buf[65536];
+            bool done = false;
+            std::error_code error;
+            size_t got = 0;
+            sock.async_read_some(asio::buffer(buf), [&](std::error_code ec, std::size_t length) {
+                done = true;
+                error = ec;
+                got = length;
+            });
+            ctx.restart();
+            ctx.run_until(deadline);
+            if (!done) {
+                sock.cancel();
+                ctx.restart();
+                ctx.run();
+                return false;
+            }
+            if (error) {
+                return false;
+            }
+            pending.append(buf, got);
+        }
+        return true;
+    }
+};
+
+/// A replica link streaming from the next write of the primary.
+static void startStreaming(ZestDB& db, ReplicaClient& r, uint64_t fromSeq) {
+    REQUIRE(r.request("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    auto reply = nlohmann::json::parse(r.request(std::format("replicate {} {}", db.getHistoryId(), fromSeq)));
+    REQUIRE(reply["response"]["mode"] == "stream");
+}
+
+TEST_CASE_METHOD(SessionFixture, "The primary streams its writes to a replica, in order", "[session][replication]") {
+    db->startReplicationLog();
+    const uint64_t from = db->getReplicationLog().nextSeq();
+    ReplicaClient r;
+    startStreaming(*db, r, from);
+
+    REQUIRE(db->execCmd(R"(s a "1")").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("incr n 2").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("d a").code == ResultType::Code::Success);
+
+    auto events = r.events(3);
+    REQUIRE(events.size() == 3);
+    REQUIRE(events[0] == std::pair<uint64_t, std::string>{ from, R"(s a "1")" });
+    REQUIRE(events[1] == std::pair<uint64_t, std::string>{ from + 1, R"(s n "2")" });
+    REQUIRE(events[2] == std::pair<uint64_t, std::string>{ from + 2, "d a" });
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica that reconnects gets the writes it missed, over several frames", "[session][replication]") {
+    db->startReplicationLog();
+    const uint64_t from = db->getReplicationLog().nextSeq();
+    for (int i = 0; i < 3000; i++) {
+        REQUIRE(db->execCmd(std::format(R"(s k{} "v")", i), Role::Write, false).code == ResultType::Code::Success);
+    }
+    ReplicaClient r;
+    startStreaming(*db, r, from);
+    auto events = r.events(3000);
+    REQUIRE(events.size() == 3000);
+    for (size_t i = 0; i < events.size(); i++) {
+        REQUIRE(events[i].first == from + i);
+    }
+    REQUIRE(events.back().second == R"(s k2999 "v")");
+}
+
+TEST_CASE_METHOD(SessionFixture, "An idle replication link gets heartbeats", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    auto frame = r.nextFrame(std::chrono::milliseconds(2500));
+    REQUIRE(frame.has_value());
+    REQUIRE(frame->empty());
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica that falls more than historySize writes behind is disconnected", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    // The replica reads nothing meanwhile: its socket fills up, and the log (5000 events) moves past its cursor
+    const std::string value(9000, 'x');
+    for (int i = 0; i < 7000; i++) {
+        REQUIRE(db->execCmd(std::format(R"(s big{} "{}")", i, value), Role::Write, false).code == ResultType::Code::Success);
+    }
+    bool closed = false;
+    for (int frames = 0; frames < 10000 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(5)).has_value();
+    }
+    REQUIRE(closed);
 }
