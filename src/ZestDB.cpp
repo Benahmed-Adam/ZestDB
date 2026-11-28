@@ -223,6 +223,7 @@ namespace Zest {
 
     void ZestDB::boot() {
         this->settings = this->loadConfig(this->users);
+        this->replicationLog = std::make_unique<ReplicationLog>(this->settings.replication.historySize);
         {
             std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
             this->rebuildLimiters();
@@ -340,6 +341,20 @@ namespace Zest {
 
     bool ZestDB::scripted() const {
         return !this->replaying.load() && this->scriptEngine && this->scriptEngine->hasTriggers();
+    }
+
+    bool ZestDB::logsRows() const {
+        return this->scripted() || (!this->replaying.load() && this->replicationLog && this->replicationLog->active());
+    }
+
+    void ZestDB::startReplicationLog() {
+        if (this->settings.replication.replica) {
+            return;
+        }
+        // With every write order lock held, no write is between its change and its WAL record: the log misses none
+        std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+        auto order = this->shardManager->lockAllWrites();
+        this->replicationLog->activate(WAL::nextSequence());
     }
 
     ResultType ZestDB::beforeWrite(const std::string& key, std::string& value) {
@@ -501,7 +516,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value) {
-        return this->setBy(valid, value, this->scripted());
+        return this->setBy(valid, value, this->logsRows());
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value, bool perRow) {
@@ -536,7 +551,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid) {
-        return this->delBy(valid, this->scripted());
+        return this->delBy(valid, this->logsRows());
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid, bool perRow) {
@@ -595,8 +610,18 @@ namespace Zest {
         if (this->replaying.load()) {
             return true;
         }
-
-        return this->shardManager->appendToWAL(key, command);
+        // Every caller holds a write order lock, which startReplicationLog() takes too: `active` cannot change here
+        if (!this->replicationLog->active()) {
+            return this->shardManager->appendToWAL(key, command);
+        }
+        // The log's lock spans the numbering of the record and its push, so the log stays in sequence order
+        std::lock_guard<std::mutex> lock(this->replicationLog->lock());
+        uint64_t seq = 0;
+        if (!this->shardManager->appendToWAL(key, command, &seq)) {
+            return false;
+        }
+        this->replicationLog->push(seq, command);
+        return true;
     }
 
     bool ZestDB::syncWAL() {

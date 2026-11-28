@@ -292,10 +292,10 @@ namespace Zest {
         return ok;
     }
 
-    bool ShardManager::appendToWAL(const std::string& key, const std::string& command) {
+    bool ShardManager::appendToWAL(const std::string& key, const std::string& command, uint64_t* seq) {
         int shardId = this->getShardId(key);
         auto& shard = this->getShards()[static_cast<size_t>(shardId)];
-        return shard->getWAL().append(command);
+        return shard->getWAL().append(command, seq);
     }
 
     std::unique_lock<std::mutex> ShardManager::lockWrites(const std::string& key) {

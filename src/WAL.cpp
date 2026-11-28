@@ -72,7 +72,7 @@ namespace Zest {
         }
     }
 
-    bool WAL::append(const std::string& cmd) {
+    bool WAL::append(const std::string& cmd, uint64_t* seqOut) {
         std::lock_guard<std::mutex> lock(this->mtx);
         if (!this->wal.is_open()) {
             ZestLog(LogLevel::Error, "WAL::append - WAL not open");
@@ -83,6 +83,9 @@ namespace Zest {
 
         uint32_t size = static_cast<uint32_t>(cmd.size());
         uint64_t seq = nextSeq.fetch_add(1);
+        if (seqOut) {
+            *seqOut = seq;
+        }
 
         const uint32_t crc = recordCrc(size, cmd, seq);
         this->wal.write(reinterpret_cast<const char*>(&size), sizeof(size));
@@ -117,6 +120,10 @@ namespace Zest {
         uint64_t current = nextSeq.load();
         while (current < next && !nextSeq.compare_exchange_weak(current, next)) {
         }
+    }
+
+    uint64_t WAL::nextSequence() {
+        return nextSeq.load();
     }
 
     std::vector<WalEntry> WAL::getCmds() {

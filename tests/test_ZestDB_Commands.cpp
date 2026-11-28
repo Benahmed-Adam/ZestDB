@@ -1574,3 +1574,58 @@ TEST_CASE("The replica role runs no ordinary command", "[commands][replication]"
     REQUIRE(db.execCmd(R"(user add repl2 "x" replica)", Role::Admin).code == ResultType::Code::Success);
     REQUIRE(db.execCmd("user ls", Role::Admin).response.find(R"({"role":"replica","user":"repl2"})") != std::string::npos);
 }
+
+TEST_CASE("ZestDB keeps its writes for the replicas once the replication log is started", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_log", "", 29617);
+    ZestDB db;
+    REQUIRE(db.execCmd(R"(s before "x")").code == ResultType::Code::Success);
+    REQUIRE_FALSE(db.getReplicationLog().active());
+
+    db.startReplicationLog();
+    const uint64_t from = db.getReplicationLog().nextSeq();
+    REQUIRE(db.execCmd(R"(s u:1 "a")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(s u:2 "b")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("incr n 5").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(sb sw u: "z")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("db sw u:").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("expire n 60").code == ResultType::Code::Success);
+
+    std::vector<ReplicationEvent> events;
+    REQUIRE(db.getReplicationLog().since(from, events, 1000));
+    std::vector<std::string> cmds;
+    for (const auto& e : events) {
+        cmds.push_back(e.cmd);
+    }
+    // setby / delby arrive as the keys they touched, in any order between the two keys
+    REQUIRE(cmds.size() == 8);
+    REQUIRE(cmds[0] == R"(s u:1 "a")");
+    REQUIRE(cmds[1] == R"(s u:2 "b")");
+    REQUIRE(cmds[2] == R"(s n "5")");
+    REQUIRE(std::set<std::string>{ cmds[3], cmds[4] } == std::set<std::string>{ R"(s u:1 "z")", R"(s u:2 "z")" });
+    REQUIRE(std::set<std::string>{ cmds[5], cmds[6] } == std::set<std::string>{ "d u:1", "d u:2" });
+    REQUIRE(cmds[7].starts_with("expireat n "));
+    REQUIRE(std::ranges::is_sorted(events, {}, &ReplicationEvent::seq));
+
+    // The WAL replays the per-key records just as well
+    REQUIRE(db.execCmd("g u:1").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE("ZestDB keeps the replication log in sequence order under concurrent writes", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_log_order", "fsyncOnWrite: false\n", 29619);
+    ZestDB db;
+    db.startReplicationLog();
+    const uint64_t from = db.getReplicationLog().nextSeq();
+    std::vector<std::jthread> writers;
+    for (int t = 0; t < 8; t++) {
+        writers.emplace_back([&db, t] {
+            for (int i = 0; i < 500; i++) {
+                db.execCmd(std::format(R"(s k{}-{} "v")", t, i), Role::Write, false);
+            }
+        });
+    }
+    writers.clear();
+    std::vector<ReplicationEvent> events;
+    REQUIRE(db.getReplicationLog().since(from, events, 100000));
+    REQUIRE(events.size() == 4000);
+    REQUIRE(std::ranges::is_sorted(events, {}, &ReplicationEvent::seq));
+}

@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "RateLimiter.hpp"
+#include "ReplicationLog.hpp"
 #include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
@@ -150,6 +151,14 @@ namespace Zest {
         /// the shards. Does nothing the second time.
         void stop();
 
+        /// Starts keeping the writes for the replicas (see ReplicationLog), from the next one on. Does nothing on a
+        /// replica, or the second time.
+        void startReplicationLog();
+
+        ReplicationLog& getReplicationLog() {
+            return *this->replicationLog;
+        }
+
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {
             return this->settings;
@@ -242,6 +251,8 @@ namespace Zest {
 
         /// True when triggers must run: some are loaded and the WAL is not being replayed.
         bool scripted() const;
+        /// True when setby / delby must log each key they touch, not the command: for the triggers, or for the replicas.
+        bool logsRows() const;
         /// Runs the `before set` triggers on `value` (which they may change), then checks the new value again.
         ResultType beforeWrite(const std::string& key, std::string& value);
         /// After a successful write: appends `walCommand` to the WAL. Called under the shard's write order lock, so the
@@ -318,6 +329,7 @@ namespace Zest {
         std::atomic<bool> running{ true };
         std::atomic<bool> archiving{ false }; // an archive or a restore is in progress: only one at a time
         std::unique_ptr<ShardManager> shardManager;
+        std::unique_ptr<ReplicationLog> replicationLog;
         std::unique_ptr<ScriptEngine> scriptEngine; // declared after shardManager, so it is destroyed first
         std::unique_ptr<Server> socket;
 
