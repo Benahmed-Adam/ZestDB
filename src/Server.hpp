@@ -108,7 +108,7 @@ namespace Zest {
         // shortcut: bounded in events, not bytes; with values near SegSize a frame can reach several hundred MB
         static constexpr size_t MAX_EVENTS_PER_FRAME = 1024;
         static constexpr std::chrono::seconds HEARTBEAT_INTERVAL{ 1 };
-        static constexpr size_t SNAPSHOT_CHUNK = 1024 * 1024;
+        static constexpr size_t SNAPSHOT_CHUNK = size_t{ 1024 } * 1024;
 
         ZestStream stream_;
         asio::steady_timer timer_;

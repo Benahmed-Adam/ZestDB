@@ -53,7 +53,7 @@ namespace Zest {
         /// the flush and archive threads and prepares the HTTP stats server (main() makes it listen).
         ZestDB();
         /// Reads `config.yaml` from `configDir` instead of the current folder.
-        explicit ZestDB(const std::filesystem::path& configDir);
+        explicit ZestDB(std::filesystem::path configDir);
         /// Stops the database if stop() was not called.
         ~ZestDB();
 

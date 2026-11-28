@@ -119,7 +119,7 @@ namespace Zest {
         {
             std::ofstream out(this->incomingPath, std::ios::binary | std::ios::trunc);
             for (uint64_t left = bytes; left > 0;) {
-                const size_t chunk = static_cast<size_t>(std::min<uint64_t>(left, 1024 * 1024));
+                const size_t chunk = static_cast<size_t>(std::min<uint64_t>(left, uint64_t{ 1024 } * 1024));
                 const std::string data = this->readExact(chunk, LINK_TIMEOUT);
                 out.write(data.data(), static_cast<std::streamsize>(data.size()));
                 left -= chunk;
@@ -160,7 +160,7 @@ namespace Zest {
         this->wait(
             [&](auto handler) {
                 resolver.async_resolve(this->config.primaryHost, std::to_string(this->config.primaryPort), [&endpoints, handler](std::error_code ec, auto results) mutable {
-                    endpoints = results;
+                    endpoints = std::move(results);
                     handler(ec, 0);
                 });
             },

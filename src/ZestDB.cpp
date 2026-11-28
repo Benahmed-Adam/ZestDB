@@ -54,8 +54,8 @@ namespace Zest {
         : ZestDB(fs::current_path()) {
     }
 
-    ZestDB::ZestDB(const fs::path& configFolder)
-        : configDir(configFolder),
+    ZestDB::ZestDB(fs::path configFolder)
+        : configDir(std::move(configFolder)),
           replaying(false) {
         ZestLog(LogLevel::Info, "Initializing ZestDB...");
         this->boot();
