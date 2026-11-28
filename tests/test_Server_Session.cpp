@@ -1,14 +1,18 @@
 #include <asio.hpp>
 #include <atomic>
 #include <catch2/catch_all.hpp>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <future>
+#include <libzippp/libzippp.h>
+#include <optional>
 #include <thread>
 #include <vector>
 
 #include "ZestDB.hpp"
+#include "lib/json.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -54,6 +58,11 @@ public:
         cfg << "  - user: narrow\n";
         cfg << "    password: n\n";
         cfg << "    bandwidthLimit: 1KB\n";
+        cfg << "  - user: repl\n";
+        cfg << "    role: replica\n";
+        cfg << "    password: p\n";
+        cfg << "replication:\n";
+        cfg << "  historySize: 5000\n";
     }
 
     SessionFixture() {
@@ -466,4 +475,281 @@ TEST_CASE_METHOD(SessionFixture, "A user added at runtime can log in", "[session
     Client c;
     REQUIRE(c.send("Authorization: carol." + sha256("carolc4rol")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+}
+
+/// The JSON object a successful `replicate` answers with.
+static nlohmann::json replicateReply(const std::string& reply) {
+    auto outer = nlohmann::json::parse(reply);
+    REQUIRE(outer["code"] == 0);
+    return outer["response"];
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica gets a full sync, then a stream once it knows the history", "[session][replication]") {
+    std::string historyId;
+    uint64_t nextSeq = 0;
+    {
+        Client c;
+        REQUIRE(c.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+        auto first = replicateReply(c.send("replicate - 0"));
+        REQUIRE(first["mode"] == "fullsync");
+        historyId = first["historyId"];
+        nextSeq = first["nextSeq"];
+        REQUIRE(historyId == db->getHistoryId());
+    }
+    REQUIRE(db->getReplicationLog().active());
+    REQUIRE(db->execCmd(R"(s k "v")").code == ResultType::Code::Success);
+
+    Client again;
+    REQUIRE(again.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    auto resumed = replicateReply(again.send(std::format("replicate {} {}", historyId, nextSeq)));
+    REQUIRE(resumed["mode"] == "stream");
+    REQUIRE(resumed["nextSeq"] == nextSeq + 1);
+
+    // Another history, or a position the log does not hold: full sync
+    Client other;
+    REQUIRE(other.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(replicateReply(other.send(std::format("replicate {} {}", historyId, nextSeq + 100)))["mode"] == "fullsync");
+}
+
+TEST_CASE_METHOD(SessionFixture, "Only the replica role may replicate, and it may do nothing else", "[session][replication]") {
+    Client bob;
+    REQUIRE(bob.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(bob.send("replicate - 0").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+
+    Client repl;
+    REQUIRE(repl.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(repl.send("g k").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    REQUIRE(repl.send("replicate abc").find(codeOf(ResultType::Code::InvalidValueFormat)) != std::string::npos);
+    REQUIRE(repl.send("replicate - 1 2").find(codeOf(ResultType::Code::InvalidValueFormat)) != std::string::npos);
+    REQUIRE_FALSE(db->getReplicationLog().active());
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replication link is not closed by the idle timeout", "[session][replication]") {
+    Client repl;
+    REQUIRE(repl.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    replicateReply(repl.send("replicate - 0"));
+    REQUIRE_FALSE(repl.closedWithin(std::chrono::milliseconds(3000))); // IdleTimeout is 2 s
+}
+
+/// A replica's end of the link: requests, then the frames of events the primary pushes.
+class ReplicaClient {
+public:
+    asio::io_context ctx;
+    asio::ip::tcp::socket sock{ ctx };
+    std::string pending; // bytes received and not consumed yet
+
+    ReplicaClient() {
+        sock.connect({ asio::ip::make_address("127.0.0.1"), TEST_DB_PORT });
+    }
+
+    /// Sends one command and returns its reply line.
+    std::string request(const std::string& cmd) {
+        std::string payload = be32(static_cast<uint32_t>(cmd.size())) + cmd;
+        asio::write(sock, asio::buffer(be32(static_cast<uint32_t>(payload.size())) + payload));
+        while (pending.find('\n') == std::string::npos) {
+            REQUIRE(fill(pending.size() + 1, std::chrono::seconds(5)));
+        }
+        std::string line = pending.substr(0, pending.find('\n') + 1);
+        pending.erase(0, line.size());
+        return line;
+    }
+
+    /// The events of the next frame (empty for a heartbeat), or nullopt if none came within `timeout` or the link closed.
+    std::optional<std::vector<std::pair<uint64_t, std::string>>> nextFrame(std::chrono::milliseconds timeout) {
+        if (!fill(4, timeout)) {
+            return std::nullopt;
+        }
+        const uint32_t size = readBe32(0);
+        if (!fill(4 + size, timeout)) {
+            return std::nullopt;
+        }
+        std::vector<std::pair<uint64_t, std::string>> events;
+        for (size_t pos = 4; pos < 4 + size;) {
+            const uint32_t itemSize = readBe32(pos);
+            const std::string item = pending.substr(pos + 4, itemSize);
+            const size_t space = item.find(' ');
+            events.emplace_back(std::stoull(item.substr(0, space)), item.substr(space + 1));
+            pos += 4 + itemSize;
+        }
+        pending.erase(0, 4 + size);
+        return events;
+    }
+
+    /// The next `n` raw bytes (the snapshot of a full sync).
+    std::string raw(size_t n) {
+        REQUIRE(fill(n, std::chrono::seconds(10)));
+        std::string bytes = pending.substr(0, n);
+        pending.erase(0, n);
+        return bytes;
+    }
+
+    /// The next `count` events, skipping the heartbeats.
+    std::vector<std::pair<uint64_t, std::string>> events(size_t count) {
+        std::vector<std::pair<uint64_t, std::string>> all;
+        while (all.size() < count) {
+            auto frame = nextFrame(std::chrono::seconds(5));
+            REQUIRE(frame.has_value());
+            all.insert(all.end(), frame->begin(), frame->end());
+        }
+        return all;
+    }
+
+private:
+    uint32_t readBe32(size_t pos) const {
+        uint32_t v;
+        std::memcpy(&v, pending.data() + pos, 4);
+        return ntohl(v);
+    }
+
+    /// Reads until `pending` holds `n` bytes. @return false on timeout or when the link closes.
+    bool fill(size_t n, std::chrono::milliseconds timeout) {
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        while (pending.size() < n) {
+            char buf[65536];
+            bool done = false;
+            std::error_code error;
+            size_t got = 0;
+            sock.async_read_some(asio::buffer(buf), [&](std::error_code ec, std::size_t length) {
+                done = true;
+                error = ec;
+                got = length;
+            });
+            ctx.restart();
+            ctx.run_until(deadline);
+            if (!done) {
+                sock.cancel();
+                ctx.restart();
+                ctx.run();
+                return false;
+            }
+            if (error) {
+                return false;
+            }
+            pending.append(buf, got);
+        }
+        return true;
+    }
+};
+
+/// A replica link streaming from the next write of the primary.
+static void startStreaming(ZestDB& db, ReplicaClient& r, uint64_t fromSeq) {
+    REQUIRE(r.request("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    auto reply = nlohmann::json::parse(r.request(std::format("replicate {} {}", db.getHistoryId(), fromSeq)));
+    REQUIRE(reply["response"]["mode"] == "stream");
+}
+
+TEST_CASE_METHOD(SessionFixture, "The primary streams its writes to a replica, in order", "[session][replication]") {
+    db->startReplicationLog();
+    const uint64_t from = db->getReplicationLog().nextSeq();
+    ReplicaClient r;
+    startStreaming(*db, r, from);
+
+    REQUIRE(db->execCmd(R"(s a "1")").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("incr n 2").code == ResultType::Code::Success);
+    REQUIRE(db->execCmd("d a").code == ResultType::Code::Success);
+
+    auto events = r.events(3);
+    REQUIRE(events.size() == 3);
+    REQUIRE(events[0] == std::pair<uint64_t, std::string>{ from, R"(s a "1")" });
+    REQUIRE(events[1] == std::pair<uint64_t, std::string>{ from + 1, R"(s n "2")" });
+    REQUIRE(events[2] == std::pair<uint64_t, std::string>{ from + 2, "d a" });
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica that reconnects gets the writes it missed, over several frames", "[session][replication]") {
+    db->startReplicationLog();
+    const uint64_t from = db->getReplicationLog().nextSeq();
+    for (int i = 0; i < 3000; i++) {
+        REQUIRE(db->execCmd(std::format(R"(s k{} "v")", i), Role::Write, false).code == ResultType::Code::Success);
+    }
+    ReplicaClient r;
+    startStreaming(*db, r, from);
+    auto events = r.events(3000);
+    REQUIRE(events.size() == 3000);
+    for (size_t i = 0; i < events.size(); i++) {
+        REQUIRE(events[i].first == from + i);
+    }
+    REQUIRE(events.back().second == R"(s k2999 "v")");
+}
+
+TEST_CASE_METHOD(SessionFixture, "An idle replication link gets heartbeats", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    auto frame = r.nextFrame(std::chrono::milliseconds(2500));
+    REQUIRE(frame.has_value());
+    REQUIRE(frame->empty());
+
+    // The replica sends nothing on its link: a request, even a second `replicate`, closes it
+    const std::string cmd = "replicate - 0";
+    asio::write(r.sock, asio::buffer(be32(static_cast<uint32_t>(cmd.size() + 4)) + be32(static_cast<uint32_t>(cmd.size())) + cmd));
+    bool closed = false;
+    for (int frames = 0; frames < 20 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(3)).has_value();
+    }
+    REQUIRE(closed);
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica that falls more than historySize writes behind is disconnected", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    // The replica reads nothing meanwhile: its socket fills up, and the log (5000 events) moves past its cursor
+    const std::string value(9000, 'x');
+    for (int i = 0; i < 7000; i++) {
+        REQUIRE(db->execCmd(std::format(R"(s big{} "{}")", i, value), Role::Write, false).code == ResultType::Code::Success);
+    }
+    bool closed = false;
+    for (int frames = 0; frames < 10000 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(5)).has_value();
+    }
+    REQUIRE(closed);
+}
+
+TEST_CASE_METHOD(SessionFixture, "A new replica gets a snapshot, then the writes made after it", "[session][replication]") {
+    REQUIRE(db->execCmd(R"(s before "1")").code == ResultType::Code::Success);
+    ReplicaClient r;
+    REQUIRE(r.request("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(nlohmann::json::parse(r.request("replicate - 0"))["response"]["mode"] == "fullsync");
+
+    auto header = r.nextFrame(std::chrono::seconds(10));
+    REQUIRE(header.has_value());
+    REQUIRE(header->size() == 1);
+    const auto [seq, item] = header->front();
+    REQUIRE(item.starts_with("snapshot "));
+    const std::string zip = r.raw(std::stoull(item.substr(9)));
+
+    const fs::path zipPath = testDir / "received.zip";
+    std::ofstream(zipPath, std::ios::binary) << zip;
+    libzippp::ZipArchive archive(zipPath.string());
+    REQUIRE(archive.open(libzippp::ZipArchive::ReadOnly));
+    size_t shardFiles = 0;
+    for (const auto& entry : archive.getEntries()) {
+        shardFiles += entry.getName().starts_with("shards/");
+    }
+    archive.close();
+    REQUIRE(shardFiles > 0);
+
+    // Then the stream, from the first write the snapshot does not hold
+    REQUIRE(db->execCmd(R"(s after "2")").code == ResultType::Code::Success);
+    auto events = r.events(1);
+    REQUIRE(events.front() == std::pair<uint64_t, std::string>{ seq, R"(s after "2")" });
+    REQUIRE(fs::is_empty(testDir / "archive" / ".replication"));
+}
+
+TEST_CASE_METHOD(SessionFixture, "A restore on the primary starts a new history and closes the replication links", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    const std::string before = db->getHistoryId();
+
+    REQUIRE(db->execCmd("save", Role::Admin).code == ResultType::Code::Success);
+    const std::string zipname = nlohmann::json::parse(db->execCmd("lsaves", Role::Admin).response).at(0);
+    REQUIRE(db->execCmd("restore " + zipname, Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db->getHistoryId() != before);
+
+    bool closed = false;
+    for (int frames = 0; frames < 20 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(3)).has_value();
+    }
+    REQUIRE(closed);
 }

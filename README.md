@@ -11,7 +11,8 @@ ZestDB is a high-performance, disk-persistent key-value store written in modern 
 - **Key-value commands** on string keys and values: `get`, `set`, `del`, TTL (`setex`, `expire`, `ttl`), atomic `incr`, `setnx` and `cas`, and pattern commands (`getby`, `setby`, `delby`, `count`, `keys`) by prefix, suffix, substring or regex.
 - **Durable storage**: 32 shards, each with append-only segments, an in-memory index, an LRU cache and a write-ahead log. Values are zstd-compressed when that makes them smaller, every record and value carries a CRC-32 checksum, and a shard is compacted in the background once half of its data is dead.
 - **Lua scripting**: functions called in one round trip and triggers that validate, transform or react to writes, in a sandbox with instruction and memory limits.
-- **Network server**: asynchronous TCP with batched commands, optional TLS, per-user roles (`read`, `write`, `admin`) and an IP allow-list.
+- **Network server**: asynchronous TCP with batched commands, optional TLS, per-user roles (`read`, `write`, `admin`, `replica`) and an IP allow-list.
+- **Replication**: asynchronous primary → replicas streaming, with catch-up after a disconnection, full sync from an archive, and TLS with certificate checks.
 - **Operations**: hot-reloadable configuration, zip archives with restore, and live per-shard statistics over HTTP, as JSON and as Prometheus metrics.
 
 ## Quick start
@@ -57,11 +58,11 @@ These results are from one run on a single machine, with client and server side 
 | | |
 | --- | --- |
 | [Commands](docs/commands.md) | Every command and its options |
-| [Configuration](docs/configuration.md) | `config.yaml`, users and roles |
+| [Configuration](docs/configuration.md) | `config.yaml`, users and roles, replication |
 | [Network protocol](docs/protocol.md) | Framing, authentication, responses |
 | [Lua scripting](docs/scripting.md) | Functions, triggers, API ([examples](scripts_examples/)) |
 | [Return codes](docs/return-codes.md) | Every response code |
-| [Operations](docs/operations.md) | Docker, archives, monitoring, logging |
+| [Operations](docs/operations.md) | Docker, archives, replication, monitoring, logging |
 | [Architecture](docs/architecture.md) | How the storage engine works |
 | [Building and testing](docs/building.md) | Dependencies, Windows build, tests, CI, branches |
 | [Benchmarks](docs/benchmarks.md) | Full results and how to run them |

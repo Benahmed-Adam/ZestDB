@@ -24,6 +24,7 @@ namespace Zest {
     Session::Session(ZestStream stream, ZestDB& db, Limits limits, std::shared_ptr<std::atomic<size_t>> activeSessions)
         : stream_(std::move(stream)),
           timer_(std::visit([](auto& s) { return s.get_executor(); }, stream_)),
+          heartbeat_(timer_.get_executor()),
           db_(db),
           limits_(limits),
           activeSessions_(std::move(activeSessions)) {
@@ -31,6 +32,14 @@ namespace Zest {
     }
 
     Session::~Session() {
+        if (this->subscription_) {
+            this->db_.getReplicationLog().unsubscribe(this->subscription_);
+        }
+        if (!this->snapshotPath_.empty()) {
+            std::error_code ec;
+            this->snapshot_.close();
+            std::filesystem::remove(this->snapshotPath_, ec);
+        }
         this->activeSessions_->fetch_sub(1);
     }
 
@@ -69,6 +78,10 @@ namespace Zest {
     }
 
     void Session::touch() {
+        if (this->replicating_) {
+            this->deadline_ = std::chrono::steady_clock::time_point::max();
+            return;
+        }
         this->deadline_ = std::chrono::steady_clock::now() + (this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
     }
 
@@ -100,6 +113,12 @@ namespace Zest {
         }
     }
 
+    void Session::closeIfReplica() {
+        if (this->replicating_) {
+            this->close_stream();
+        }
+    }
+
     void Session::revokeIfUser(const std::string& username) {
         if (this->authenticated_ && this->username_ == username) {
             this->drain();
@@ -122,6 +141,11 @@ namespace Zest {
             [this, self](auto& stream) {
                 asio::async_read(stream, this->buffer_, asio::transfer_exactly(4), [this, self](std::error_code ec, std::size_t length) {
                     this->waitingForRequest_ = false;
+                    if (!ec && this->replicating_) {
+                        ZestLog(LogLevel::Warning, std::format("Replication: {} sent a request on its replication link, closing it", this->remote_ip_));
+                        this->close_stream();
+                        return;
+                    }
                     if (!ec && length == 4) {
                         std::istream is(&this->buffer_);
                         uint32_t payload_size;
@@ -336,12 +360,142 @@ namespace Zest {
             return ZestDB::responseToJson({ ResultType::Code::SessionRevoked });
         }
 
+        if (cmd == "replicate" || cmd.starts_with("replicate ")) {
+            return ZestDB::responseToJson(this->handle_replicate(cmd, *role));
+        }
+
         try {
             return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false, this->username_));
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("Session: command failed with an exception: {}", e.what()));
             return ZestDB::responseToJson({ ResultType::Code::InternalError });
         }
+    }
+
+    ResultType Session::handle_replicate(const std::string& cmd, Role role) {
+        if (role != Role::Replica || this->replicating_) {
+            return { ResultType::Code::PermissionDenied };
+        }
+        std::istringstream in(cmd.substr(std::string_view("replicate").size()));
+        std::string historyId;
+        uint64_t fromSeq = 0;
+        if (!(in >> historyId >> fromSeq) || !(in >> std::ws).eof()) {
+            return { ResultType::Code::InvalidValueFormat };
+        }
+        bool stream = false;
+        ResultType result = this->db_.replicationHandshake(this->remote_ip_, historyId, fromSeq, &stream);
+        if (result.code == ResultType::Code::Success) {
+            this->replicating_ = true;
+            this->touch();
+            // Posted, so what follows goes after the handshake reply, which is queued once the batch is done
+            if (stream) {
+                asio::post(this->executor(), [self = this->shared_from_this(), fromSeq] { self->start_stream(fromSeq); });
+            } else {
+                asio::post(this->executor(), [self = this->shared_from_this()] { self->start_fullsync(); });
+            }
+        }
+        return result;
+    }
+
+    void Session::start_stream(uint64_t fromSeq) {
+        this->cursor_ = fromSeq;
+        this->streaming_ = true;
+        std::weak_ptr<Session> weak = this->shared_from_this();
+        // Called by every write: one post at most until the session has sent what is pending
+        this->subscription_ = this->db_.getReplicationLog().subscribe([weak] {
+            if (auto session = weak.lock(); session && !session->wakePending_.exchange(true)) {
+                asio::post(session->executor(), [session] {
+                    session->wakePending_ = false;
+                    session->send_events();
+                });
+            }
+        });
+        this->send_events();
+        this->schedule_heartbeat();
+    }
+
+    void Session::start_fullsync() {
+        // shortcut: archived on the IO thread, which stalls its other sessions meanwhile (writes are blocked for all of
+        // them anyway while the snapshot is taken); move it to a worker if large databases make that noticeable
+        std::filesystem::path zip;
+        uint64_t seq = 0;
+        if (!this->db_.createReplicaSnapshot(zip, seq)) {
+            this->close_stream();
+            return;
+        }
+        this->snapshotPath_ = zip;
+        this->snapshotSeq_ = seq;
+        std::error_code ec;
+        const auto bytes = std::filesystem::file_size(zip, ec);
+        this->snapshot_.open(zip, std::ios::binary);
+        if (ec || !this->snapshot_) {
+            ZestLog(LogLevel::Error, std::format("Replication: cannot read the snapshot {}", zip.string()));
+            this->close_stream();
+            return;
+        }
+        ZestLog(LogLevel::Info, std::format("Replication: sending a snapshot of {} bytes to {}, then the writes from {}", bytes, this->remote_ip_, seq));
+        const std::string item = std::format("{} snapshot {}", seq, bytes);
+        const uint32_t itemSize = htonl(static_cast<uint32_t>(item.size()));
+        const uint32_t frameSize = htonl(static_cast<uint32_t>(item.size() + 4));
+        std::string frame(reinterpret_cast<const char*>(&frameSize), 4);
+        frame.append(reinterpret_cast<const char*>(&itemSize), 4);
+        frame += item;
+        this->queue_write(frame);
+    }
+
+    void Session::send_snapshot_chunk() {
+        std::string chunk(SNAPSHOT_CHUNK, '\0');
+        this->snapshot_.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        chunk.resize(static_cast<size_t>(this->snapshot_.gcount()));
+        if (!chunk.empty()) {
+            this->queue_write(chunk);
+            return;
+        }
+        this->snapshot_.close();
+        std::error_code ec;
+        std::filesystem::remove(this->snapshotPath_, ec);
+        this->snapshotPath_.clear();
+        this->start_stream(this->snapshotSeq_);
+    }
+
+    void Session::send_events() {
+        if (!this->streaming_ || !this->write_queue_.empty()) {
+            return;
+        }
+        std::vector<ReplicationEvent> events;
+        if (!this->db_.getReplicationLog().since(this->cursor_, events, MAX_EVENTS_PER_FRAME)) {
+            ZestLog(LogLevel::Warning, std::format("Replication: {} fell more than historySize writes behind, closing its link (it will need a full sync)", this->remote_ip_));
+            this->close_stream();
+            return;
+        }
+        if (events.empty()) {
+            return;
+        }
+        // Same framing as a request: a frame of length-prefixed items, each item `<seq> <command>`
+        std::string frame(4, '\0');
+        for (const ReplicationEvent& e : events) {
+            const std::string item = std::format("{} {}", e.seq, e.cmd);
+            const uint32_t size = htonl(static_cast<uint32_t>(item.size()));
+            frame.append(reinterpret_cast<const char*>(&size), 4);
+            frame += item;
+        }
+        const uint32_t total = htonl(static_cast<uint32_t>(frame.size() - 4));
+        std::memcpy(frame.data(), &total, 4);
+        this->cursor_ = events.back().seq + 1;
+        this->queue_write(frame);
+    }
+
+    void Session::schedule_heartbeat() {
+        this->heartbeat_.expires_after(HEARTBEAT_INTERVAL);
+        this->heartbeat_.async_wait([self = this->shared_from_this()](std::error_code ec) {
+            if (ec || !self->streaming_) {
+                return;
+            }
+            if (self->write_queue_.empty()) {
+                self->queue_write(std::string(4, '\0'));
+            }
+            self->schedule_heartbeat();
+        });
     }
 
     void Session::queue_write(const std::string& message, bool closeAfter) {
@@ -365,6 +519,10 @@ namespace Zest {
                             this->do_write();
                         } else if (closing_) {
                             this->close_stream();
+                        } else if (this->snapshot_.is_open()) {
+                            this->send_snapshot_chunk();
+                        } else if (this->streaming_) {
+                            this->send_events();
                         }
                     } else {
                         this->close_stream();
@@ -375,13 +533,24 @@ namespace Zest {
     }
 
     void Session::close_stream() {
+        this->streaming_ = false;
         this->timer_.cancel();
+        this->heartbeat_.cancel();
         std::visit(
             [](auto& s) {
                 std::error_code ec;
                 s.lowest_layer().close(ec);
             },
             this->stream_);
+    }
+
+    void Server::closeReplicas() {
+        std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+        for (auto& weak : this->sessions_) {
+            if (auto session = weak.lock()) {
+                asio::post(session->executor(), [session] { session->closeIfReplica(); });
+            }
+        }
     }
 
     void Server::revokeUser(const std::string& username) {

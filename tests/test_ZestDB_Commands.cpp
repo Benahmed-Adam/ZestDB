@@ -1467,3 +1467,180 @@ TEST_CASE("ZestDB keeps user commands and passwords out of the WAL", "[commands]
     REQUIRE(wal.find("s3cret-pass") == std::string::npos);
     REQUIRE(wal.find("user") == std::string::npos);
 }
+
+TEST_CASE("ZestDB numbers the WAL records of a key in the order its writes were applied", "[commands][wal]") {
+    TempDbDir tmp("zestdb_test_wal_order", "fsyncOnWrite: false\n", 29607);
+    std::string lastValue;
+    {
+        ZestDB db;
+        std::vector<std::jthread> writers;
+        for (int t = 0; t < 8; t++) {
+            writers.emplace_back([&db, t] {
+                for (int i = 0; i < 2000; i++) {
+                    db.execCmd(std::format(R"(s k "{}-{}")", t, i), Role::Write, false);
+                    db.execCmd("incr n", Role::Write, false);
+                }
+            });
+        }
+        writers.clear();
+        lastValue = db.execCmd("g k").response;
+        REQUIRE(db.execCmd("g n").response == "16000");
+        REQUIRE(db.syncWAL());
+
+        // The last record of each key, by sequence number, must hold its current value
+        std::vector<WalEntry> records;
+        Settings s;
+        for (const auto& entry : fs::recursive_directory_iterator(tmp.dir / "db")) {
+            if (entry.path().filename() == "WAL") {
+                auto cmds = WAL(s, entry.path()).getCmds();
+                records.insert(records.end(), cmds.begin(), cmds.end());
+            }
+        }
+        std::ranges::sort(records, {}, &WalEntry::seq);
+        std::string lastK, lastN;
+        for (const WalEntry& r : records) {
+            if (r.cmd.starts_with("s k ")) {
+                lastK = r.cmd;
+            } else if (r.cmd.starts_with("s n ")) {
+                lastN = r.cmd;
+            }
+        }
+        REQUIRE(lastK == std::format(R"(s k "{}")", lastValue));
+        REQUIRE(lastN == R"(s n "16000")");
+    }
+}
+
+TEST_CASE("ZestDB reads the replication block of config.yaml", "[commands][replication]") {
+    SECTION("an instance is a primary by default") {
+        TempDbDir tmp("zestdb_test_repl_default", "", 29609);
+        ZestDB db;
+        const ReplicationSettings& r = db.getSettings().replication;
+        REQUIRE_FALSE(r.replica);
+        REQUIRE(r.historySize == 100000);
+        REQUIRE(std::regex_match("10.0.0.7", db.getSettings().AllowedReplicas));
+    }
+    SECTION("a primary limits the replica addresses and its history") {
+        TempDbDir tmp("zestdb_test_repl_primary", "replication:\n  allowedReplicas: '10\\.0\\.0\\..*'\n  historySize: 500\n", 29609);
+        ZestDB db;
+        REQUIRE(db.getSettings().replication.historySize == 500);
+        REQUIRE(std::regex_match("10.0.0.7", db.getSettings().AllowedReplicas));
+        REQUIRE_FALSE(std::regex_match("192.168.1.2", db.getSettings().AllowedReplicas));
+    }
+    SECTION("a replica names its primary and how to log in") {
+        TempDbDir tmp("zestdb_test_repl_replica", "replication:\n  role: replica\n  primary: \"[::1]:7321\"\n  user: repl\n  password: \"s3cret\"\n", 29609);
+        ZestDB db;
+        const ReplicationSettings& r = db.getSettings().replication;
+        REQUIRE(r.replica);
+        REQUIRE(r.primaryHost == "::1");
+        REQUIRE(r.primaryPort == 7321);
+        REQUIRE(r.user == "repl");
+        REQUIRE(r.password == "s3cret");
+    }
+}
+
+TEST_CASE("ZestDB refuses an invalid replication block", "[commands][replication]") {
+    for (const char* bad : {
+             "replication:\n  role: master\n",
+             "replication:\n  historySize: 0\n",
+             "replication:\n  allowedReplicas: \"(\"\n",
+             "replication:\n  role: replica\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host\"\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:99999\"\n  user: repl\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:7321\"\n  password: p\n",
+             "replication:\n  role: replica\n  primary: \"host:7321\"\n  user: repl\n",
+         }) {
+        INFO(bad);
+        TempDbDir tmp("zestdb_test_repl_invalid", bad, 29611);
+        REQUIRE_THROWS(ZestDB());
+    }
+}
+
+TEST_CASE("ZestDB cannot change the replication block on reload", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_reload", "", 29613);
+    ZestDB db;
+    tmp.writeConfig(std::format("DbPath: {}\nMaxKeySize: 255\nDBPort: 29613\nWebPort: 29614\nArchiveStoragePath: {}\nAutoArchiveSaving: false\nreplication:\n  historySize: 10\n", (tmp.dir / "db").string(), (tmp.dir / "archive").string()));
+    REQUIRE(db.execCmd("r", Role::Admin).code == ResultType::Code::ConfigNotReloadable);
+    REQUIRE(db.getSettings().replication.historySize == 100000);
+}
+
+TEST_CASE("The replica role runs no ordinary command", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_role", "users:\n  - user: root\n    role: admin\n    password: r\n  - user: repl\n    role: replica\n    password: p\n", 29615);
+    ZestDB db;
+    REQUIRE(db.authenticate("repl", sha256("replp")) == Role::Replica);
+    for (const char* cmd : { "g k", R"(s k "v")", "info", "user ls", "help" }) {
+        INFO(cmd);
+        REQUIRE(db.execCmd(cmd, Role::Replica).code == ResultType::Code::PermissionDenied);
+    }
+    REQUIRE(db.execCmd(R"(user add repl2 "x" replica)", Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("user ls", Role::Admin).response.find(R"({"role":"replica","user":"repl2"})") != std::string::npos);
+}
+
+TEST_CASE("ZestDB keeps its writes for the replicas once the replication log is started", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_log", "", 29617);
+    ZestDB db;
+    REQUIRE(db.execCmd(R"(s before "x")").code == ResultType::Code::Success);
+    REQUIRE_FALSE(db.getReplicationLog().active());
+
+    db.startReplicationLog();
+    const uint64_t from = db.getReplicationLog().nextSeq();
+    REQUIRE(db.execCmd(R"(s u:1 "a")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(s u:2 "b")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("incr n 5").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd(R"(sb sw u: "z")").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("db sw u:").code == ResultType::Code::Success);
+    REQUIRE(db.execCmd("expire n 60").code == ResultType::Code::Success);
+
+    std::vector<ReplicationEvent> events;
+    REQUIRE(db.getReplicationLog().since(from, events, 1000));
+    std::vector<std::string> cmds;
+    for (const auto& e : events) {
+        cmds.push_back(e.cmd);
+    }
+    // setby / delby arrive as the keys they touched, in any order between the two keys
+    REQUIRE(cmds.size() == 8);
+    REQUIRE(cmds[0] == R"(s u:1 "a")");
+    REQUIRE(cmds[1] == R"(s u:2 "b")");
+    REQUIRE(cmds[2] == R"(s n "5")");
+    REQUIRE(std::set<std::string>{ cmds[3], cmds[4] } == std::set<std::string>{ R"(s u:1 "z")", R"(s u:2 "z")" });
+    REQUIRE(std::set<std::string>{ cmds[5], cmds[6] } == std::set<std::string>{ "d u:1", "d u:2" });
+    REQUIRE(cmds[7].starts_with("expireat n "));
+    REQUIRE(std::ranges::is_sorted(events, {}, &ReplicationEvent::seq));
+
+    // The WAL replays the per-key records just as well
+    REQUIRE(db.execCmd("g u:1").code == ResultType::Code::KeyNotFound);
+}
+
+TEST_CASE("ZestDB keeps the replication log in sequence order under concurrent writes", "[commands][replication]") {
+    TempDbDir tmp("zestdb_test_repl_log_order", "fsyncOnWrite: false\n", 29619);
+    ZestDB db;
+    db.startReplicationLog();
+    const uint64_t from = db.getReplicationLog().nextSeq();
+    std::vector<std::jthread> writers;
+    for (int t = 0; t < 8; t++) {
+        writers.emplace_back([&db, t] {
+            for (int i = 0; i < 500; i++) {
+                db.execCmd(std::format(R"(s k{}-{} "v")", t, i), Role::Write, false);
+            }
+        });
+    }
+    writers.clear();
+    std::vector<ReplicationEvent> events;
+    REQUIRE(db.getReplicationLog().since(from, events, 100000));
+    REQUIRE(events.size() == 4000);
+    REQUIRE(std::ranges::is_sorted(events, {}, &ReplicationEvent::seq));
+}
+
+TEST_CASE("ZestDB refuses a replica outside allowedReplicas, and replication from a replica", "[commands][replication]") {
+    SECTION("allowedReplicas") {
+        TempDbDir tmp("zestdb_test_repl_allowed", "replication:\n  allowedReplicas: '10\\.0\\..*'\n", 29621);
+        ZestDB db;
+        REQUIRE(db.replicationHandshake("127.0.0.1", "-", 0).code == ResultType::Code::ReplicaNotAllowed);
+        REQUIRE_FALSE(db.getReplicationLog().active());
+        REQUIRE(db.replicationHandshake("10.0.3.4", "-", 0).code == ResultType::Code::Success);
+    }
+    SECTION("a replica serves no replica") {
+        TempDbDir tmp("zestdb_test_repl_notprimary", "replication:\n  role: replica\n  primary: \"10.0.0.1:7321\"\n  user: repl\n  password: p\n", 29621);
+        ZestDB db;
+        REQUIRE(db.replicationHandshake("127.0.0.1", "-", 0).code == ResultType::Code::NotPrimary);
+    }
+}

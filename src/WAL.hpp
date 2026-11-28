@@ -33,8 +33,9 @@ namespace Zest {
         void clear();
 
         /// Appends one record. It is buffered: call sync() before acknowledging the write.
+        /// @param seq  receives the record's sequence number, if not null.
         /// @return false if the file is not open or the write failed.
-        bool append(const std::string& cmd);
+        bool append(const std::string& cmd, uint64_t* seq = nullptr);
 
         /// Pushes the buffered records to the file, with an fsync when `fsyncOnWrite` is set. Several appends can share
         /// one sync (group commit). @return false if the write failed.
@@ -45,6 +46,8 @@ namespace Zest {
 
         /// Makes the next sequence numbers start at `next` or above, so new records come after the replayed ones.
         static void advanceSequence(uint64_t next);
+        /// The sequence number the next record will get.
+        static uint64_t nextSequence();
 
     private:
         Settings& settings;

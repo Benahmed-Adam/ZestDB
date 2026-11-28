@@ -101,7 +101,58 @@ namespace Zest {
         if (name == "admin") {
             return Role::Admin;
         }
+        if (name == "replica") {
+            return Role::Replica;
+        }
         return std::nullopt;
+    }
+
+    /// The `replication` block; a replica must name its primary (`host:port`, `[v6]:port`), a user and its password.
+    static ReplicationSettings parseReplication(fkyaml::node& node) {
+        ReplicationSettings r;
+        if (!node.contains("replication") || node["replication"].is_null()) {
+            return r;
+        }
+        fkyaml::node& block = node["replication"];
+        const std::string role = getOr<std::string>(block, "role", "primary");
+        if (role != "primary" && role != "replica") {
+            throw std::runtime_error(std::format("replication: unknown role '{}' (use primary or replica)", role));
+        }
+        r.replica = role == "replica";
+        r.allowedReplicasStr = getOr<std::string>(block, "allowedReplicas", r.allowedReplicasStr);
+        const auto historySize = getOr<int64_t>(block, "historySize", static_cast<int64_t>(r.historySize));
+        if (historySize < 1) {
+            throw std::runtime_error("replication: historySize must be at least 1");
+        }
+        r.historySize = static_cast<size_t>(historySize);
+        if (!r.replica) {
+            return r;
+        }
+
+        const std::string primary = getOr<std::string>(block, "primary", "");
+        const size_t colon = primary.rfind(':');
+        int port = 0;
+        if (colon != std::string::npos) {
+            auto [end, ec] = std::from_chars(primary.data() + colon + 1, primary.data() + primary.size(), port);
+            if (ec != std::errc() || end != primary.data() + primary.size()) {
+                port = 0;
+            }
+        }
+        r.primaryHost = colon == std::string::npos ? "" : primary.substr(0, colon);
+        if (r.primaryHost.size() > 2 && r.primaryHost.front() == '[' && r.primaryHost.back() == ']') {
+            r.primaryHost = r.primaryHost.substr(1, r.primaryHost.size() - 2);
+        }
+        if (r.primaryHost.empty() || port < 1 || port > 65535) {
+            throw std::runtime_error(std::format("replication: primary must be host:port, not '{}'", primary));
+        }
+        r.primaryPort = static_cast<uint16_t>(port);
+        r.primaryCA = getOr<std::string>(block, "primaryCA", "");
+        r.user = getOr<std::string>(block, "user", "");
+        r.password = getOr<std::string>(block, "password", "");
+        if (r.user.empty() || r.password.empty()) {
+            throw std::runtime_error("replication: a replica needs the user and password it logs in to the primary with");
+        }
+        return r;
     }
 
     /// The name of a role in config.yaml.
@@ -111,6 +162,8 @@ namespace Zest {
             return "read";
         case Role::Admin:
             return "admin";
+        case Role::Replica:
+            return "replica";
         default:
             return "write";
         }
@@ -131,7 +184,7 @@ namespace Zest {
         Settings result;
         std::unordered_map<std::string, UserEntry> parsedUsers;
 
-        const fs::path current_path = fs::current_path().string();
+        const fs::path current_path = this->configDir;
         const std::string configName = "config.yaml";
 
         fs::path configPath = current_path / configName;
@@ -205,6 +258,12 @@ namespace Zest {
             }
 
             result.defaultLimits = parseLimits(node, "config");
+            result.replication = parseReplication(node);
+            try {
+                result.AllowedReplicas = std::regex(result.replication.allowedReplicasStr);
+            } catch (const std::regex_error& e) {
+                throw std::runtime_error("replication: invalid allowedReplicas regex: " + std::string(e.what()));
+            }
 
             if (node.contains("users") && node["users"].is_sequence()) {
                 for (const auto& user_node : node["users"]) {
@@ -212,7 +271,7 @@ namespace Zest {
                     std::string roleName = user_node.contains("role") ? user_node["role"].get_value<std::string>() : "write";
                     std::optional<Role> role = parseRole(roleName);
                     if (!role) {
-                        throw std::runtime_error(std::format("user {}: unknown role '{}' (use read, write or admin)", username, roleName));
+                        throw std::runtime_error(std::format("user {}: unknown role '{}' (use read, write, admin or replica)", username, roleName));
                     }
                     std::string tokenHash = user_node.contains("tokenHash") ? user_node["tokenHash"].get_value<std::string>() : sha256(sha256(username + user_node["password"].get_value<std::string>()));
                     // Each limit the user does not set falls back to the top-level one, then to unlimited. The top-level
@@ -270,8 +329,8 @@ namespace Zest {
             }
 
             if (s.useSSL != oldSettings.useSSL || s.DBPort != oldSettings.DBPort || s.WebPort != oldSettings.WebPort || s.MaxConnections != oldSettings.MaxConnections || s.AuthTimeout != oldSettings.AuthTimeout ||
-                s.IdleTimeout != oldSettings.IdleTimeout) {
-                ZestLog(LogLevel::Error, "Cannot change the ports, SSL or connection limits during hot-reload.");
+                s.IdleTimeout != oldSettings.IdleTimeout || s.replication != oldSettings.replication) {
+                ZestLog(LogLevel::Error, "Cannot change the ports, SSL, connection limits or replication during hot-reload.");
                 return { ResultType::Code::ConfigNotReloadable };
             }
 
@@ -411,8 +470,8 @@ namespace Zest {
     }
 
     bool ZestDB::writeUsers(const std::unordered_map<std::string, UserEntry>& updated) {
-        const fs::path configPath = fs::current_path() / "config.yaml";
-        const fs::path tmpPath = fs::current_path() / "config.yaml.tmp";
+        const fs::path configPath = this->configDir / "config.yaml";
+        const fs::path tmpPath = this->configDir / "config.yaml.tmp";
         try {
             std::stringstream buffer;
             buffer << std::ifstream(configPath).rdbuf();
@@ -470,7 +529,7 @@ namespace Zest {
     }
 
     void ZestDB::setConfig() {
-        const fs::path current_path = fs::current_path();
+        const fs::path current_path = this->configDir;
         const std::string configName = "config.yaml";
         fs::path configPath = current_path / configName;
 

@@ -12,6 +12,8 @@
 #include <unordered_map>
 
 #include "RateLimiter.hpp"
+#include "ReplicationLog.hpp"
+#include "Replicator.hpp"
 #include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
@@ -50,6 +52,8 @@ namespace Zest {
         /// Reads config.yaml, opens the shards, loads the scripts, replays the WAL, starts the TCP server, then starts
         /// the flush and archive threads and prepares the HTTP stats server (main() makes it listen).
         ZestDB();
+        /// Reads `config.yaml` from `configDir` instead of the current folder.
+        explicit ZestDB(std::filesystem::path configDir);
         /// Stops the database if stop() was not called.
         ~ZestDB();
 
@@ -150,6 +154,41 @@ namespace Zest {
         /// the shards. Does nothing the second time.
         void stop();
 
+        /// Starts keeping the writes for the replicas (see ReplicationLog), from the next one on. Does nothing on a
+        /// replica, or the second time.
+        void startReplicationLog();
+
+        ReplicationLog& getReplicationLog() {
+            return *this->replicationLog;
+        }
+
+        /// Random id of the current history of writes: sequence numbers only mean something within one history id.
+        /// A new one is drawn at startup and by a `restore`.
+        std::string getHistoryId() const {
+            std::lock_guard<std::mutex> lock(this->historyMtx);
+            return this->historyId;
+        }
+
+        /// `replicate <historyId> <fromSeq>` from a replica at `remoteIp`: checks it may replicate, starts the
+        /// replication log, then answers `{"mode":"stream"|"fullsync","historyId":..,"nextSeq":..}`. `stream` when the
+        /// log still holds every write from `fromSeq` of the same history, `fullsync` otherwise. `knownHistoryId` is this
+        /// primary's id as the replica got it at its last handshake (`-` for none).
+        ResultType replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut = nullptr);
+        /// For a full sync: an archive of the database in `<ArchiveStoragePath>/.replication/`, and the sequence number
+        /// of the first write it does not hold, from which the replica streams. The caller deletes the file.
+        /// @return false if another archive or a restore is in progress, or the archive could not be written.
+        bool createReplicaSnapshot(std::filesystem::path& zipPath, uint64_t& seq);
+        /// On a replica: runs one write received from the primary, like the WAL replay does (no trigger, no check of
+        /// the value or of read-only mode), but logged in the local WAL.
+        ResultType applyReplicated(const std::string& command);
+        /// Replaces the database with the archive at `archivePath` (`restore` takes it from ArchiveStoragePath).
+        ResultType restoreArchive(const std::filesystem::path& archivePath);
+
+        /// The replica's link to its primary, or null on a primary.
+        const Replicator* getReplicator() const {
+            return this->replicator.get();
+        }
+
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {
             return this->settings;
@@ -242,11 +281,18 @@ namespace Zest {
 
         /// True when triggers must run: some are loaded and the WAL is not being replayed.
         bool scripted() const;
+        /// True while the WAL is replayed or a replicated write runs: the values were checked when first written.
+        bool unchecked() const;
+        /// True when setby / delby must log each key they touch, not the command: for the triggers, or for the replicas.
+        bool logsRows() const;
         /// Runs the `before set` triggers on `value` (which they may change), then checks the new value again.
         ResultType beforeWrite(const std::string& key, std::string& value);
-        /// After a successful write: appends `walCommand` to the WAL, then runs the `after` triggers. Returns `result` on
-        /// success, otherwise the WAL or trigger error (the write itself stays done).
-        ResultType finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result);
+        /// After a successful write: appends `walCommand` to the WAL. Called under the shard's write order lock, so the
+        /// records are numbered in the order the writes were applied. Returns `result`, or WalWriteFailed.
+        ResultType logWrite(const std::string& key, const std::string& walCommand, ResultType result);
+        /// After a successful, logged write: runs the `after` triggers, without the write order lock (they may write).
+        /// Returns `result`, or the trigger error (the write itself stays done).
+        ResultType afterWrite(TriggerEvent event, const std::string& key, const std::string& value, ResultType result);
         /// setBy with an explicit choice: `perRow` goes key by key through set(), so triggers run and each row is logged.
         ResultType setBy(ValidationRule& valid, const std::string& value, bool perRow);
         /// delBy with an explicit choice, like setBy.
@@ -289,6 +335,10 @@ namespace Zest {
         /// Commands are blocked only while the shards are flushed and the file sizes recorded; the files are then copied
         /// up to those sizes (compaction paused), and the zip is built from the copy.
         bool createArchive();
+        /// Flushes, then zips the database to `<ArchiveStoragePath>/<subfolder>/<name>` (see createArchive()). `seq`, if
+        /// not null, receives the sequence number of the first write the archive does not hold. The caller holds the
+        /// `archiving` flag.
+        bool writeArchive(const std::filesystem::path& subfolder, const std::string& name, std::filesystem::path& written, uint64_t* seq);
 
         // Declared first so they are built before, and destroyed after, everything that uses them
         Settings settings;
@@ -315,6 +365,13 @@ namespace Zest {
         std::atomic<bool> running{ true };
         std::atomic<bool> archiving{ false }; // an archive or a restore is in progress: only one at a time
         std::unique_ptr<ShardManager> shardManager;
+        std::unique_ptr<ReplicationLog> replicationLog;
+        std::unique_ptr<Replicator> replicator; // on a replica only
+        std::filesystem::path configDir;
+        std::string historyId;
+        mutable std::mutex historyMtx;
+        /// Draws a new historyId and closes the replication links: the data changed without numbered writes (restore).
+        void newHistory();
         std::unique_ptr<ScriptEngine> scriptEngine; // declared after shardManager, so it is destroyed first
         std::unique_ptr<Server> socket;
 

@@ -11,6 +11,7 @@
 #include <libzippp/libzippp.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -45,8 +46,17 @@ namespace Zest {
         return out;
     }
 
+    namespace {
+        thread_local bool applyingReplicated = false; // this thread runs a write received from the primary
+    } // namespace
+
     ZestDB::ZestDB()
-        : replaying(false) {
+        : ZestDB(fs::current_path()) {
+    }
+
+    ZestDB::ZestDB(fs::path configFolder)
+        : configDir(std::move(configFolder)),
+          replaying(false) {
         ZestLog(LogLevel::Info, "Initializing ZestDB...");
         this->boot();
 
@@ -56,6 +66,9 @@ namespace Zest {
 
         this->replayWAL();
         this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
+        if (this->settings.replication.replica) {
+            this->replicator = std::make_unique<Replicator>(*this, this->settings);
+        }
 
         ZestLog(LogLevel::Info, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
@@ -208,6 +221,9 @@ namespace Zest {
         ZestLog(LogLevel::Info, "Exiting ZestDB...");
 
         this->ioCtx.stop();
+        if (this->replicator) {
+            this->replicator->stop();
+        }
         if (this->socket)
             this->socket->stop();
         if (this->srv)
@@ -223,6 +239,10 @@ namespace Zest {
 
     void ZestDB::boot() {
         this->settings = this->loadConfig(this->users);
+        this->replicationLog = std::make_unique<ReplicationLog>(this->settings.replication.historySize);
+        // A new id for each run: the sequence numbers restart once the WAL was cleared, so a replica's position in the
+        // previous run means nothing in this one
+        this->newHistory();
         {
             std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
             this->rebuildLimiters();
@@ -293,7 +313,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::checkWrite(const std::string& key, const std::string& value) const {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -339,7 +359,69 @@ namespace Zest {
     }
 
     bool ZestDB::scripted() const {
-        return !this->replaying.load() && this->scriptEngine && this->scriptEngine->hasTriggers();
+        return !this->unchecked() && this->scriptEngine && this->scriptEngine->hasTriggers();
+    }
+
+    bool ZestDB::unchecked() const {
+        return this->replaying.load() || applyingReplicated;
+    }
+
+    ResultType ZestDB::applyReplicated(const std::string& command) {
+        applyingReplicated = true;
+        ResultType result;
+        try {
+            result = this->execCmd(command, Role::Admin, false);
+        } catch (...) {
+            applyingReplicated = false;
+            throw;
+        }
+        applyingReplicated = false;
+        return result;
+    }
+
+    bool ZestDB::logsRows() const {
+        return this->scripted() || (!this->replaying.load() && this->replicationLog && this->replicationLog->active());
+    }
+
+    void ZestDB::newHistory() {
+        std::random_device rd;
+        {
+            std::lock_guard<std::mutex> lock(this->historyMtx);
+            this->historyId = std::format("{:08x}{:08x}{:08x}{:08x}", rd(), rd(), rd(), rd());
+        }
+        if (this->socket) {
+            this->socket->closeReplicas();
+        }
+    }
+
+    ResultType ZestDB::replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut) {
+        if (this->settings.replication.replica) {
+            return { ResultType::Code::NotPrimary };
+        }
+        if (!std::regex_match(remoteIp, this->settings.AllowedReplicas)) {
+            ZestLog(LogLevel::Warning, std::format("Replication: {} is not in allowedReplicas", remoteIp));
+            return { ResultType::Code::ReplicaNotAllowed };
+        }
+        this->startReplicationLog();
+        std::vector<ReplicationEvent> none;
+        const std::string current = this->getHistoryId();
+        const bool stream = knownHistoryId == current && this->replicationLog->since(fromSeq, none, 0);
+        if (streamOut) {
+            *streamOut = stream;
+        }
+        json reply = { { "mode", stream ? "stream" : "fullsync" }, { "historyId", current }, { "nextSeq", this->replicationLog->nextSeq() } };
+        ZestLog(LogLevel::Info, std::format("Replication: {} connected, {}", remoteIp, stream ? std::format("streaming from {}", fromSeq) : "full sync needed"));
+        return { ResultType::Code::Success, reply.dump(), 1 };
+    }
+
+    void ZestDB::startReplicationLog() {
+        if (this->settings.replication.replica) {
+            return;
+        }
+        // With every write order lock held, no write is between its change and its WAL record: the log misses none
+        std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+        auto order = this->shardManager->lockAllWrites();
+        this->replicationLog->activate(WAL::nextSequence());
     }
 
     ResultType ZestDB::beforeWrite(const std::string& key, std::string& value) {
@@ -353,12 +435,16 @@ namespace Zest {
         return this->checkWrite(key, value);
     }
 
-    ResultType ZestDB::finishWrite(TriggerEvent event, const std::string& key, const std::string& value, const std::string& walCommand, ResultType result) {
+    ResultType ZestDB::logWrite(const std::string& key, const std::string& walCommand, ResultType result) {
+        if (result.code == ResultType::Code::Success && !this->appendToWAL(key, walCommand)) {
+            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
+        }
+        return result;
+    }
+
+    ResultType ZestDB::afterWrite(TriggerEvent event, const std::string& key, const std::string& value, ResultType result) {
         if (result.code != ResultType::Code::Success) {
             return result;
-        }
-        if (!this->appendToWAL(key, walCommand)) {
-            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
         }
         if (this->scripted()) {
             ResultType after = this->scriptEngine->after(event, key, value);
@@ -379,8 +465,11 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->set(key, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::replace(const std::string& key, const std::string& value) {
@@ -394,8 +483,11 @@ namespace Zest {
             return before;
         }
         uint64_t expiresAt = 0;
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->replace(key, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::setnx(const std::string& key, const std::string& value) {
@@ -408,8 +500,11 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->setnx(key, stored);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, 0), result);
+        result = this->logWrite(key, setCommand(key, stored, 0), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::cas(const std::string& key, const std::string& expected, const std::string& value) {
@@ -427,12 +522,15 @@ namespace Zest {
         if (before.code != ResultType::Code::Success) {
             return before;
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->cas(key, expected, stored, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, stored, setCommand(key, stored, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, stored, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, stored, result);
     }
 
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -442,11 +540,9 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->setTTL(key, expiresAt);
-        if (result.code == ResultType::Code::Success && !this->appendToWAL(key, expiresAt != 0 ? std::format("expireat {} {}", key, expiresAt) : std::format("persist {}", key))) {
-            return { ResultType::Code::WalWriteFailed, "", result.affectedRows };
-        }
-        return result;
+        return this->logWrite(key, expiresAt != 0 ? std::format("expireat {} {}", key, expiresAt) : std::format("persist {}", key), result);
     }
 
     ResultType ZestDB::getTTL(const std::string& key) {
@@ -458,7 +554,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::del(const std::string& key) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -475,8 +571,11 @@ namespace Zest {
                 return before;
             }
         }
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->del(key);
-        return this->finishWrite(TriggerEvent::Del, key, "", std::format("d {}", key), result);
+        result = this->logWrite(key, std::format("d {}", key), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Del, key, "", result);
     }
 
     ResultType ZestDB::getBy(ValidationRule& valid) {
@@ -484,11 +583,11 @@ namespace Zest {
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value) {
-        return this->setBy(valid, value, this->scripted());
+        return this->setBy(valid, value, this->logsRows());
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value, bool perRow) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -519,11 +618,11 @@ namespace Zest {
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid) {
-        return this->delBy(valid, this->scripted());
+        return this->delBy(valid, this->logsRows());
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid, bool perRow) {
-        if (!this->replaying.load() && this->settings.readOnly) {
+        if (!this->unchecked() && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
         }
 
@@ -551,8 +650,11 @@ namespace Zest {
             return { ResultType::Code::InvalidKey };
         }
 
+        std::unique_lock<std::mutex> order = this->shardManager->lockWrites(key);
         ResultType result = this->shardManager->incr(key, delta, expiresAt);
-        return this->finishWrite(TriggerEvent::Set, key, result.response, setCommand(key, result.response, expiresAt), result);
+        result = this->logWrite(key, setCommand(key, result.response, expiresAt), result);
+        order.unlock();
+        return this->afterWrite(TriggerEvent::Set, key, result.response, result);
     }
 
     ResultType ZestDB::exists(const std::string& key) {
@@ -575,8 +677,21 @@ namespace Zest {
         if (this->replaying.load()) {
             return true;
         }
-
-        return this->shardManager->appendToWAL(key, command);
+        // Every caller holds a write order lock, which startReplicationLog() takes too: `active` cannot change here
+        if (!this->replicationLog->active()) {
+            return this->shardManager->appendToWAL(key, command);
+        }
+        {
+            // The log's lock spans the numbering of the record and its push, so the log stays in sequence order
+            std::lock_guard<std::mutex> lock(this->replicationLog->lock());
+            uint64_t seq = 0;
+            if (!this->shardManager->appendToWAL(key, command, &seq)) {
+                return false;
+            }
+            this->replicationLog->push(seq, command);
+        }
+        this->replicationLog->notify();
+        return true;
     }
 
     bool ZestDB::syncWAL() {

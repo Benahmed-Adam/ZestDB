@@ -23,7 +23,8 @@ namespace Zest {
     enum class Role {
         Read,
         Write,
-        Admin
+        Admin,
+        Replica // only for the replication link of a replica: no ordinary command
     };
 
     /// The result of every command, sent to the client as `{"affectedRows":..,"code":..,"response":..}`.
@@ -69,6 +70,9 @@ namespace Zest {
             InvalidUserName = 307,
             InvalidRole = 308,
             LastAdmin = 309,
+            ReplicaNotAllowed = 310,
+            NotPrimary = 311,
+            ReplicaReadOnly = 312,
 
             UnknownConfigParam = 400,
             InvalidConfigValue = 401,
@@ -102,6 +106,22 @@ namespace Zest {
         bool unlimited() const {
             return !rateLimit && !bandwidthLimit;
         }
+    };
+
+    /// The `replication` block of config.yaml. Read at startup only: a reload cannot change it.
+    struct ReplicationSettings {
+        bool replica = false; // `role: replica`; every instance is a primary by default
+        // Replica side: the primary's address and the user (with the `replica` role there) to log in with
+        std::string primaryHost;
+        uint16_t primaryPort = 0;
+        std::string user;
+        std::string password;
+        std::string primaryCA; // with useSSL: the CA file the primary's certificate is checked against (unchecked if empty)
+        // Primary side: the addresses allowed to replicate (a regex) and the number of events kept for a replica to catch up
+        std::string allowedReplicasStr = ".*";
+        size_t historySize = 100000;
+
+        bool operator==(const ReplicationSettings&) const = default;
     };
 
     /// The configuration read from config.yaml (see docs/configuration.md for each field).
@@ -142,6 +162,9 @@ namespace Zest {
         bool fsyncOnWrite = true;
 
         UserLimits defaultLimits; // the top-level rateLimit, burst and bandwidthLimit, for the users that set none
+
+        ReplicationSettings replication;
+        std::regex AllowedReplicas{ ".*" };
     };
 
 } // namespace Zest

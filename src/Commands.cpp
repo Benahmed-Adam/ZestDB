@@ -278,8 +278,12 @@ namespace Zest {
             return { ResultType::Code::UnknownCommand };
         }
         const CommandSpec& spec = it->second;
-        if ((spec.access == Access::Write && role == Role::Read) || (spec.access == Access::Admin && role != Role::Admin)) {
+        if (role == Role::Replica || (spec.access == Access::Write && role == Role::Read) || (spec.access == Access::Admin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
+        }
+        // A replica takes its data from its primary only; `replicator` is set before any client connects
+        if (this->replicator && !this->unchecked() && (spec.access == Access::Write || cmd.name == "restore")) {
+            return { ResultType::Code::ReplicaReadOnly };
         }
 
         // `reload` and `scfg` replace the settings: no other command may run meanwhile. `flush`, `save` and `restore`
@@ -292,13 +296,28 @@ namespace Zest {
             sharedLock.lock();
         }
 
+        // Without triggers or replicas, setby / delby are logged as one record: no other write may come between them
+        // and it. Otherwise each key they touch is logged on its own (cmd.rowsLogged).
+        const bool setOrDelBy = cmd.name == "sb" || cmd.name == "db";
+        bool loggedAsOne = setOrDelBy && !this->logsRows();
+        std::vector<std::unique_lock<std::mutex>> order;
+        if (loggedAsOne) {
+            order = this->shardManager->lockAllWrites();
+            if (this->logsRows()) { // the replication log started meanwhile
+                order.clear();
+                loggedAsOne = false;
+            }
+        }
+        cmd.rowsLogged = setOrDelBy && !loggedAsOne;
+
         ResultType result = (this->*spec.handler)(cmd);
 
         if (!this->replaying.load() && spec.access == Access::Write) {
             bool walOk = true;
-            if (result.code == ResultType::Code::Success && (cmd.name == "sb" || cmd.name == "db") && !cmd.rowsLogged) {
+            if (result.code == ResultType::Code::Success && loggedAsOne) {
                 walOk = this->appendToWAL(std::string(cmd.words[1]), command);
             }
+            order.clear();
             if (syncWal) {
                 walOk = this->shardManager->syncWAL() && walOk;
             }
@@ -494,7 +513,6 @@ namespace Zest {
     ResultType ZestDB::cmdSetBy(Command& c) {
         const std::vector<std::string_view>& words = c.words;
         const std::string_view sv = c.line;
-        bool& rowsLogged = c.rowsLogged;
         ResultType result = { ResultType::Code::InternalError };
         if (words.size() < 4) {
             result.code = ResultType::Code::MissingValue;
@@ -523,8 +541,7 @@ namespace Zest {
                     result.code = ResultType::Code::InvalidRegex;
                 } else {
                     valid.limit = limit;
-                    rowsLogged = this->scripted();
-                    result = this->setBy(valid, value, rowsLogged);
+                    result = this->setBy(valid, value, c.rowsLogged);
                 }
             }
         }
@@ -533,7 +550,6 @@ namespace Zest {
 
     ResultType ZestDB::cmdDelBy(Command& c) {
         const std::vector<std::string_view>& words = c.words;
-        bool& rowsLogged = c.rowsLogged;
         ResultType result = { ResultType::Code::InternalError };
         if (words.size() < 3) {
             result.code = ResultType::Code::MissingPattern;
@@ -554,8 +570,7 @@ namespace Zest {
                 result.code = ResultType::Code::InvalidMode;
             } else {
                 valid.limit = limit;
-                rowsLogged = this->scripted();
-                result = this->delBy(valid, rowsLogged);
+                result = this->delBy(valid, c.rowsLogged);
             }
         }
         return result;

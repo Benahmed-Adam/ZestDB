@@ -39,6 +39,7 @@ ZestDB follows a layered design where each layer is independently testable:
 - Global flush thread: periodic disk synchronization.
 - Global archive (save) thread: periodic database zipping.
 - Thread pool: parallel execution of bulk `getBy`/`setBy`/`delBy` operations.
+- Replicator thread, on a replica only: the link to the primary (see [replication](#replication)).
 - Shared-mutex (`shared_mutex`) per shard allows concurrent reads while serializing writes.
 
 ## Sharding
@@ -75,9 +76,25 @@ ZestDB follows a layered design where each layer is independently testable:
 - Every successful write is appended to a WAL file, which guarantees durability across unexpected shutdowns.
 - Writes are journaled as their effect, not as the command: `setex` / `expire` as an absolute date (`setexat` / `expireat`), and `incr`, `setnx`, `cas` and values changed by a script trigger as the value they wrote. Replaying the WAL therefore gives the same state, without running any trigger again.
 - Optional `fsyncOnWrite` to force a synchronous fsync after every write.
+- Each shard has a write order lock, held from a write until its record is appended. So the records of one key are numbered in the order its writes were applied, even when they come from several threads. A `setby` / `delby` logged as one record holds the locks of every shard. Triggers run after the lock is released.
 - On startup, WAL entries are collected, sorted by sequence number, and replayed to rebuild the in-memory state, after which the WAL is cleared.
 - The WAL is flushed and cleared together with the index and segments during a flush cycle.
 - The WAL file starts with a versioned header (`ZWAL`), and every record carries a CRC-32. The replay of a shard's WAL stops at the first record that is cut short or fails its checksum, since the records after it may depend on it.
+
+## Replication
+
+- **Primary side.**
+  - The writes go to a `ReplicationLog`, an in-memory circular buffer of `historySize` WAL records. Each record carries its WAL sequence number.
+  - The log stays off until a replica first connects. Then every write is pushed to it in `appendToWAL`, under the write order lock, so the log keeps the WAL's order.
+  - Each replica's session sends the records from its own cursor and is woken after each push. A slow replica only delays itself. A replica that falls out of the buffer is disconnected.
+  - Pushing a record never waits for the network.
+- **Full sync.** A new or lagging replica gets a fresh archive, made like `save`, along with the sequence number of the first write it does not hold. The stream then starts from that number.
+- **History id.** Each run of the primary, and each `restore`, draws a random `historyId`. A replica whose id differs gets a full sync, since sequence numbers restart once the WAL is cleared.
+- **Replica side.**
+  - The `Replicator` thread applies each received record as the WAL replay does: no trigger, and no check of the value or of read-only mode. It still logs the record in its own WAL.
+  - After each frame, the replicator syncs the WAL, then writes its position to `replication.state`.
+  - Writes from the replica's own clients are refused.
+- The wire format is in [the protocol](protocol.md#replication-handshake).
 
 ## Durability and background maintenance
 

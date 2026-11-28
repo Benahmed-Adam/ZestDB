@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "WAL.hpp"
 #include "ZestDB.hpp"
 #include "lib/json.hpp"
 
@@ -91,6 +92,14 @@ namespace Zest {
             out["lastArchive"] = { { "name", last }, { "date", date + "Z" } };
         }
 
+        if (this->replicator) {
+            out["replication"] = {
+                { "role", "replica" }, { "primary", std::format("{}:{}", this->settings.replication.primaryHost, this->settings.replication.primaryPort) }, { "connected", this->replicator->connected() }, { "nextSeq", this->replicator->nextSeq() }
+            };
+        } else {
+            out["replication"] = { { "role", "primary" }, { "historyId", this->getHistoryId() }, { "nextSeq", WAL::nextSequence() }, { "replicas", this->replicationLog->subscriberCount() } };
+        }
+
         return { ResultType::Code::Success, out.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), 1 };
     }
 
@@ -151,6 +160,16 @@ namespace Zest {
 
         family(out, "zestdb_connections", "gauge", "Open client connections on the TCP server, authenticated or not.");
         std::format_to(std::back_inserter(out), "zestdb_connections {}\n", this->socket ? this->socket->connections() : 0);
+
+        family(out, "zestdb_replication_next_seq", "gauge", "On a primary, the sequence number of its next write; on a replica, of the next write it expects from its primary.");
+        std::format_to(std::back_inserter(out), "zestdb_replication_next_seq {}\n", this->replicator ? this->replicator->nextSeq() : WAL::nextSequence());
+        if (this->replicator) {
+            family(out, "zestdb_replication_connected", "gauge", "1 while the replica's link to its primary is up, 0 otherwise.");
+            std::format_to(std::back_inserter(out), "zestdb_replication_connected {}\n", this->replicator->connected() ? 1 : 0);
+        } else {
+            family(out, "zestdb_replicas", "gauge", "Replicas streaming from this primary.");
+            std::format_to(std::back_inserter(out), "zestdb_replicas {}\n", this->replicationLog->subscriberCount());
+        }
         return out;
     }
 

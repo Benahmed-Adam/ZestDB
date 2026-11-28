@@ -5,14 +5,19 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <variant>
 #include <vector>
+
+#include "Settings.hpp"
 
 namespace Zest {
 
@@ -48,6 +53,8 @@ namespace Zest {
         /// Closes the session like drain() if it is authenticated as `username` (deleted user, or new password).
         /// Must run on the session's executor.
         void revokeIfUser(const std::string& username);
+        /// Closes the session if it is a replication link. Must run on the session's executor.
+        void closeIfReplica();
 
         /// The executor (IO thread) the session runs on.
         asio::any_io_executor executor() {
@@ -67,6 +74,21 @@ namespace Zest {
         /// Runs one command. Before authentication, only `Authorization: <user>.<token>` is accepted. `should_close` is
         /// set when the connection must be closed after the reply (failed authentication, revoked user).
         std::string handle_command(const std::string& cmd, bool& should_close);
+        /// `replicate <historyId> <fromSeq>`, for the `replica` role only, once per session (see ZestDB::replicationHandshake).
+        ResultType handle_replicate(const std::string& cmd, Role role);
+        /// Turns the session into the sender of a replica: from `fromSeq` on, every write of the replication log is
+        /// sent to it, and a heartbeat when there is none.
+        void start_stream(uint64_t fromSeq);
+        /// Full sync: archives the database, sends the header item `<seq> snapshot <bytes>` and the archive's bytes, then
+        /// streams from `<seq>`.
+        void start_fullsync();
+        /// Sends the next chunk of the snapshot, or starts the stream once it is all sent.
+        void send_snapshot_chunk();
+        /// Sends the events after the cursor, MAX_EVENTS_PER_FRAME at most, unless a write is in progress (its end
+        /// calls it again). Closes the link if the log no longer holds the cursor: the replica then needs a full sync.
+        void send_events();
+        /// Sends an empty frame every HEARTBEAT_INTERVAL while nothing else is being sent.
+        void schedule_heartbeat();
 
         /// Pushes the inactivity deadline back (AuthTimeout before authentication, IdleTimeout after).
         void touch();
@@ -83,9 +105,14 @@ namespace Zest {
 
         static constexpr uint32_t MAX_UNAUTHENTICATED_PAYLOAD_SIZE = 1024 * 1024;
         static constexpr uint32_t MAX_PAYLOAD_SIZE = 64 * 1024 * 1024;
+        // shortcut: bounded in events, not bytes; with values near SegSize a frame can reach several hundred MB
+        static constexpr size_t MAX_EVENTS_PER_FRAME = 1024;
+        static constexpr std::chrono::seconds HEARTBEAT_INTERVAL{ 1 };
+        static constexpr size_t SNAPSHOT_CHUNK = size_t{ 1024 } * 1024;
 
         ZestStream stream_;
         asio::steady_timer timer_;
+        asio::steady_timer heartbeat_;
         std::chrono::steady_clock::time_point deadline_;
         asio::streambuf buffer_;
         ZestDB& db_;
@@ -96,6 +123,14 @@ namespace Zest {
         std::string username_;
         std::string tokenHash_; // of the token the session logged in with: a new password makes it stale
         bool authenticated_ = false;
+        bool replicating_ = false; // a replica's link, past its `replicate` handshake: never idle-timed out
+        bool streaming_ = false;   // sending the replication log from cursor_
+        uint64_t cursor_ = 0;      // sequence number of the next event to send
+        uint64_t subscription_ = 0;
+        std::atomic<bool> wakePending_{ false }; // a send_events() is already posted for the new events
+        std::filesystem::path snapshotPath_;     // the full sync's archive, deleted with the session
+        std::ifstream snapshot_;                 // open while its bytes are being sent
+        uint64_t snapshotSeq_ = 0;
         std::shared_ptr<UserLimiter> limiter_; // the user's limits, looked up for each request (null: unlimited)
 
         /// Where the parsing of a discarded request stands.
@@ -127,6 +162,8 @@ namespace Zest {
 
         /// Closes every session of `username`: an idle one at once, a busy one once its current command is answered.
         void revokeUser(const std::string& username);
+        /// Closes every replication link (after a `restore`: the replicas need a full sync).
+        void closeReplicas();
 
         /// Number of open client sessions, authenticated or not.
         size_t connections() const {

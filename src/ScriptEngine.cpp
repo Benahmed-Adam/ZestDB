@@ -43,6 +43,8 @@ namespace Zest {
                 return "write";
             case Role::Admin:
                 return "admin";
+            case Role::Replica:
+                return "replica";
             }
             return "unknown";
         }

@@ -48,6 +48,19 @@ docker run -it -p 7321:7321 -p 1237:1237 \
   - The archive's WAL is not replayed (archives are taken right after a flush, so it is empty).
   - Only the data is restored: the scripts currently loaded are kept.
 
+## Replication
+
+To add a replica (see [configuration](configuration.md#replication)):
+1. On the primary, add a user with the `replica` role, then `reload` (or `user add`). Widening `allowedReplicas` needs a restart.
+2. On the new instance, set the `replication` block with `role: replica`, then start it. Its first link is a full sync: the primary archives its database and sends it, so allow for the time and disk space of a `save`.
+
+Then:
+- `info` shows the state of each side, and `/metrics` shows `zestdb_replication_next_seq`, `zestdb_replicas` and `zestdb_replication_connected`. A replica's lag is its primary's `zestdb_replication_next_seq` minus its own.
+- A replica that loses its primary keeps serving reads and retries every 1 to 30 seconds. It resumes the stream if the primary still holds the writes it missed. Otherwise, or if the primary restarted, it gets a full sync.
+- A `restore` on the primary closes every replication link: each replica then gets a full sync.
+- There is no automatic failover. To promote a replica, stop the primary, set `role: primary` on the replica (or remove its `replication` block), restart it, and point the other replicas and the clients to it. The other replicas then get a full sync.
+- Writes acknowledged by the primary but not yet sent are lost if the primary is lost: replication is asynchronous.
+
 ## Database summary
 
 `info` (or `stats`, read role) returns the number of keys, the size of the database on disk, the cache hit ratio and the most recent archive as JSON (see [commands](commands.md)).
@@ -79,6 +92,9 @@ The same HTTP server serves every statistic at `/metrics`, in the Prometheus tex
 | `zestdb_compactions_total` | counter | `shard` | Compactions run since startup. |
 | `zestdb_rate_limited_total` | counter | `user` | Commands refused by the user's rate or bandwidth limit (users with a limit only). |
 | `zestdb_connections` | gauge | | Open TCP client connections. |
+| `zestdb_replication_next_seq` | gauge | | On a primary, the sequence number of its next write. On a replica, the next one it expects. A replica's lag is its primary's value minus its own. |
+| `zestdb_replicas` | gauge | | Primary only: the replicas streaming from it. |
+| `zestdb_replication_connected` | gauge | | Replica only: `1` while its link to the primary is up. |
 
 `op` is one of `get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`. The `total` of `/` has no series of its own: sum over the labels instead. The counters restart from zero with the server, which `rate()` handles.
 
