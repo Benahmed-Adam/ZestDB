@@ -83,7 +83,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | ---: | --- | --- |
 | 400 | `UnknownConfigParam` | `scfg` parameter does not exist. |
 | 401 | `InvalidConfigValue` | `scfg` value is invalid or out of range (e.g. `SegSize` not greater than `MaxValueSize`, `MaxKeySize` above 256, interval of 0, invalid regex). |
-| 402 | `ConfigNotReloadable` | The setting cannot change at runtime (paths, ports, SSL, connection limits): edit `config.yaml` and restart. |
+| 402 | `ConfigNotReloadable` | The setting cannot change at runtime (paths, ports, SSL, connection limits, the `replication` block): edit `config.yaml` and restart. |
 | 403 | `ReloadFailed` | `reload` could not read or parse `config.yaml`; the current configuration is kept. |
 
 ## 5xx - Server-side failure

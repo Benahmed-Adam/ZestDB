@@ -62,6 +62,9 @@ The project ships a test suite built with Catch2, covering every subsystem:
 | WAL | `tests/test_WAL.cpp` |
 | LRU cache | `tests/test_LRUCache.cpp` |
 | Thread pool | `tests/test_ThreadPool.cpp` |
+| Rate limiter | `tests/test_RateLimiter.cpp` |
+| Replication log | `tests/test_ReplicationLog.cpp` |
+| Replication, end to end (primary and replicas in one process) | `tests/test_Replication.cpp` |
 | Performance monitoring | `tests/test_PerfMonitoring.cpp` |
 | Logger | `tests/test_Logger.cpp` |
 | Server protocol | `tests/test_Server_Protocol.cpp` |
@@ -170,6 +173,8 @@ The branch must be up to date with its target, and only merge commits are allowe
 │   ├── Auth.cpp                  # tokens, roles, lockout, address filter
 │   ├── Metrics.cpp               # Prometheus metrics served at /metrics
 │   ├── RateLimiter.{hpp,cpp}     # per-user token buckets (rate and bandwidth limits)
+│   ├── ReplicationLog.{hpp,cpp}  # primary: in-memory history of writes for the replicas
+│   ├── Replicator.{hpp,cpp}      # replica: link to the primary, full sync, stream
 │   ├── ScriptEngine.{hpp,cpp}    # Lua scripts, functions and triggers
 │   ├── Server.{hpp,cpp}          # Asio TCP/SSL server and protocol
 │   ├── Settings.hpp              # settings, result codes, validation rules
