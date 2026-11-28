@@ -159,8 +159,10 @@ namespace Zest {
             return *this->replicationLog;
         }
 
-        /// Random id of this run's history of writes: sequence numbers only mean something within one history id.
-        const std::string& getHistoryId() const {
+        /// Random id of the current history of writes: sequence numbers only mean something within one history id.
+        /// A new one is drawn at startup and by a `restore`.
+        std::string getHistoryId() const {
+            std::lock_guard<std::mutex> lock(this->historyMtx);
             return this->historyId;
         }
 
@@ -169,6 +171,10 @@ namespace Zest {
         /// log still holds every write from `fromSeq` of the same history, `fullsync` otherwise. `knownHistoryId` is this
         /// primary's id as the replica got it at its last handshake (`-` for none).
         ResultType replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut = nullptr);
+        /// For a full sync: an archive of the database in `<ArchiveStoragePath>/.replication/`, and the sequence number
+        /// of the first write it does not hold, from which the replica streams. The caller deletes the file.
+        /// @return false if another archive or a restore is in progress, or the archive could not be written.
+        bool createReplicaSnapshot(std::filesystem::path& zipPath, uint64_t& seq);
 
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {
@@ -314,6 +320,10 @@ namespace Zest {
         /// Commands are blocked only while the shards are flushed and the file sizes recorded; the files are then copied
         /// up to those sizes (compaction paused), and the zip is built from the copy.
         bool createArchive();
+        /// Flushes, then zips the database to `<ArchiveStoragePath>/<subfolder>/<name>` (see createArchive()). `seq`, if
+        /// not null, receives the sequence number of the first write the archive does not hold. The caller holds the
+        /// `archiving` flag.
+        bool writeArchive(const std::filesystem::path& subfolder, const std::string& name, std::filesystem::path& written, uint64_t* seq);
 
         // Declared first so they are built before, and destroyed after, everything that uses them
         Settings settings;
@@ -342,6 +352,9 @@ namespace Zest {
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<ReplicationLog> replicationLog;
         std::string historyId;
+        mutable std::mutex historyMtx;
+        /// Draws a new historyId and closes the replication links: the data changed without numbered writes (restore).
+        void newHistory();
         std::unique_ptr<ScriptEngine> scriptEngine; // declared after shardManager, so it is destroyed first
         std::unique_ptr<Server> socket;
 

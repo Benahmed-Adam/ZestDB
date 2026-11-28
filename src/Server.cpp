@@ -35,6 +35,11 @@ namespace Zest {
         if (this->subscription_) {
             this->db_.getReplicationLog().unsubscribe(this->subscription_);
         }
+        if (!this->snapshotPath_.empty()) {
+            std::error_code ec;
+            this->snapshot_.close();
+            std::filesystem::remove(this->snapshotPath_, ec);
+        }
         this->activeSessions_->fetch_sub(1);
     }
 
@@ -105,6 +110,12 @@ namespace Zest {
             this->close_stream();
         } else {
             this->closing_ = true;
+        }
+    }
+
+    void Session::closeIfReplica() {
+        if (this->replicating_) {
+            this->close_stream();
         }
     }
 
@@ -376,9 +387,11 @@ namespace Zest {
         if (result.code == ResultType::Code::Success) {
             this->replicating_ = true;
             this->touch();
+            // Posted, so what follows goes after the handshake reply, which is queued once the batch is done
             if (stream) {
-                // Posted, so the events go after the handshake reply, which is queued once the batch is done
                 asio::post(this->executor(), [self = this->shared_from_this(), fromSeq] { self->start_stream(fromSeq); });
+            } else {
+                asio::post(this->executor(), [self = this->shared_from_this()] { self->start_fullsync(); });
             }
         }
         return result;
@@ -399,6 +412,50 @@ namespace Zest {
         });
         this->send_events();
         this->schedule_heartbeat();
+    }
+
+    void Session::start_fullsync() {
+        // shortcut: archived on the IO thread, which stalls its other sessions meanwhile (writes are blocked for all of
+        // them anyway while the snapshot is taken); move it to a worker if large databases make that noticeable
+        std::filesystem::path zip;
+        uint64_t seq = 0;
+        if (!this->db_.createReplicaSnapshot(zip, seq)) {
+            this->close_stream();
+            return;
+        }
+        this->snapshotPath_ = zip;
+        this->snapshotSeq_ = seq;
+        std::error_code ec;
+        const auto bytes = std::filesystem::file_size(zip, ec);
+        this->snapshot_.open(zip, std::ios::binary);
+        if (ec || !this->snapshot_) {
+            ZestLog(LogLevel::Error, std::format("Replication: cannot read the snapshot {}", zip.string()));
+            this->close_stream();
+            return;
+        }
+        ZestLog(LogLevel::Info, std::format("Replication: sending a snapshot of {} bytes to {}, then the writes from {}", bytes, this->remote_ip_, seq));
+        const std::string item = std::format("{} snapshot {}", seq, bytes);
+        const uint32_t itemSize = htonl(static_cast<uint32_t>(item.size()));
+        const uint32_t frameSize = htonl(static_cast<uint32_t>(item.size() + 4));
+        std::string frame(reinterpret_cast<const char*>(&frameSize), 4);
+        frame.append(reinterpret_cast<const char*>(&itemSize), 4);
+        frame += item;
+        this->queue_write(frame);
+    }
+
+    void Session::send_snapshot_chunk() {
+        std::string chunk(SNAPSHOT_CHUNK, '\0');
+        this->snapshot_.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        chunk.resize(static_cast<size_t>(this->snapshot_.gcount()));
+        if (!chunk.empty()) {
+            this->queue_write(chunk);
+            return;
+        }
+        this->snapshot_.close();
+        std::error_code ec;
+        std::filesystem::remove(this->snapshotPath_, ec);
+        this->snapshotPath_.clear();
+        this->start_stream(this->snapshotSeq_);
     }
 
     void Session::send_events() {
@@ -462,6 +519,8 @@ namespace Zest {
                             this->do_write();
                         } else if (closing_) {
                             this->close_stream();
+                        } else if (this->snapshot_.is_open()) {
+                            this->send_snapshot_chunk();
                         } else if (this->streaming_) {
                             this->send_events();
                         }
@@ -483,6 +542,15 @@ namespace Zest {
                 s.lowest_layer().close(ec);
             },
             this->stream_);
+    }
+
+    void Server::closeReplicas() {
+        std::lock_guard<std::mutex> lock(this->sessionsMtx_);
+        for (auto& weak : this->sessions_) {
+            if (auto session = weak.lock()) {
+                asio::post(session->executor(), [session] { session->closeIfReplica(); });
+            }
+        }
     }
 
     void Server::revokeUser(const std::string& username) {

@@ -227,8 +227,7 @@ namespace Zest {
         this->replicationLog = std::make_unique<ReplicationLog>(this->settings.replication.historySize);
         // A new id for each run: the sequence numbers restart once the WAL was cleared, so a replica's position in the
         // previous run means nothing in this one
-        std::random_device rd;
-        this->historyId = std::format("{:08x}{:08x}{:08x}{:08x}", rd(), rd(), rd(), rd());
+        this->newHistory();
         {
             std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
             this->rebuildLimiters();
@@ -352,6 +351,17 @@ namespace Zest {
         return this->scripted() || (!this->replaying.load() && this->replicationLog && this->replicationLog->active());
     }
 
+    void ZestDB::newHistory() {
+        std::random_device rd;
+        {
+            std::lock_guard<std::mutex> lock(this->historyMtx);
+            this->historyId = std::format("{:08x}{:08x}{:08x}{:08x}", rd(), rd(), rd(), rd());
+        }
+        if (this->socket) {
+            this->socket->closeReplicas();
+        }
+    }
+
     ResultType ZestDB::replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq, bool* streamOut) {
         if (this->settings.replication.replica) {
             return { ResultType::Code::NotPrimary };
@@ -362,11 +372,12 @@ namespace Zest {
         }
         this->startReplicationLog();
         std::vector<ReplicationEvent> none;
-        const bool stream = knownHistoryId == this->historyId && this->replicationLog->since(fromSeq, none, 0);
+        const std::string current = this->getHistoryId();
+        const bool stream = knownHistoryId == current && this->replicationLog->since(fromSeq, none, 0);
         if (streamOut) {
             *streamOut = stream;
         }
-        json reply = { { "mode", stream ? "stream" : "fullsync" }, { "historyId", this->historyId }, { "nextSeq", this->replicationLog->nextSeq() } };
+        json reply = { { "mode", stream ? "stream" : "fullsync" }, { "historyId", current }, { "nextSeq", this->replicationLog->nextSeq() } };
         ZestLog(LogLevel::Info, std::format("Replication: {} connected, {}", remoteIp, stream ? std::format("streaming from {}", fromSeq) : "full sync needed"));
         return { ResultType::Code::Success, reply.dump(), 1 };
     }

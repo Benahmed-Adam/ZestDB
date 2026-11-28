@@ -6,6 +6,7 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <libzippp/libzippp.h>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -494,8 +495,6 @@ TEST_CASE_METHOD(SessionFixture, "A replica gets a full sync, then a stream once
         historyId = first["historyId"];
         nextSeq = first["nextSeq"];
         REQUIRE(historyId == db->getHistoryId());
-        // Past the handshake, any request closes the link, a second `replicate` too
-        REQUIRE(c.send("replicate - 0").empty());
     }
     REQUIRE(db->getReplicationLog().active());
     REQUIRE(db->execCmd(R"(s k "v")").code == ResultType::Code::Success);
@@ -574,6 +573,14 @@ public:
         }
         pending.erase(0, 4 + size);
         return events;
+    }
+
+    /// The next `n` raw bytes (the snapshot of a full sync).
+    std::string raw(size_t n) {
+        REQUIRE(fill(n, std::chrono::seconds(10)));
+        std::string bytes = pending.substr(0, n);
+        pending.erase(0, n);
+        return bytes;
     }
 
     /// The next `count` events, skipping the heartbeats.
@@ -671,6 +678,15 @@ TEST_CASE_METHOD(SessionFixture, "An idle replication link gets heartbeats", "[s
     auto frame = r.nextFrame(std::chrono::milliseconds(2500));
     REQUIRE(frame.has_value());
     REQUIRE(frame->empty());
+
+    // The replica sends nothing on its link: a request, even a second `replicate`, closes it
+    const std::string cmd = "replicate - 0";
+    asio::write(r.sock, asio::buffer(be32(static_cast<uint32_t>(cmd.size() + 4)) + be32(static_cast<uint32_t>(cmd.size())) + cmd));
+    bool closed = false;
+    for (int frames = 0; frames < 20 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(3)).has_value();
+    }
+    REQUIRE(closed);
 }
 
 TEST_CASE_METHOD(SessionFixture, "A replica that falls more than historySize writes behind is disconnected", "[session][replication]") {
@@ -685,6 +701,55 @@ TEST_CASE_METHOD(SessionFixture, "A replica that falls more than historySize wri
     bool closed = false;
     for (int frames = 0; frames < 10000 && !closed; frames++) {
         closed = !r.nextFrame(std::chrono::seconds(5)).has_value();
+    }
+    REQUIRE(closed);
+}
+
+TEST_CASE_METHOD(SessionFixture, "A new replica gets a snapshot, then the writes made after it", "[session][replication]") {
+    REQUIRE(db->execCmd(R"(s before "1")").code == ResultType::Code::Success);
+    ReplicaClient r;
+    REQUIRE(r.request("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(nlohmann::json::parse(r.request("replicate - 0"))["response"]["mode"] == "fullsync");
+
+    auto header = r.nextFrame(std::chrono::seconds(10));
+    REQUIRE(header.has_value());
+    REQUIRE(header->size() == 1);
+    const auto [seq, item] = header->front();
+    REQUIRE(item.starts_with("snapshot "));
+    const std::string zip = r.raw(std::stoull(item.substr(9)));
+
+    const fs::path zipPath = testDir / "received.zip";
+    std::ofstream(zipPath, std::ios::binary) << zip;
+    libzippp::ZipArchive archive(zipPath.string());
+    REQUIRE(archive.open(libzippp::ZipArchive::ReadOnly));
+    size_t shardFiles = 0;
+    for (const auto& entry : archive.getEntries()) {
+        shardFiles += entry.getName().starts_with("shards/");
+    }
+    archive.close();
+    REQUIRE(shardFiles > 0);
+
+    // Then the stream, from the first write the snapshot does not hold
+    REQUIRE(db->execCmd(R"(s after "2")").code == ResultType::Code::Success);
+    auto events = r.events(1);
+    REQUIRE(events.front() == std::pair<uint64_t, std::string>{ seq, R"(s after "2")" });
+    REQUIRE(fs::is_empty(testDir / "archive" / ".replication"));
+}
+
+TEST_CASE_METHOD(SessionFixture, "A restore on the primary starts a new history and closes the replication links", "[session][replication]") {
+    db->startReplicationLog();
+    ReplicaClient r;
+    startStreaming(*db, r, db->getReplicationLog().nextSeq());
+    const std::string before = db->getHistoryId();
+
+    REQUIRE(db->execCmd("save", Role::Admin).code == ResultType::Code::Success);
+    const std::string zipname = nlohmann::json::parse(db->execCmd("lsaves", Role::Admin).response).at(0);
+    REQUIRE(db->execCmd("restore " + zipname, Role::Admin).code == ResultType::Code::Success);
+    REQUIRE(db->getHistoryId() != before);
+
+    bool closed = false;
+    for (int frames = 0; frames < 20 && !closed; frames++) {
+        closed = !r.nextFrame(std::chrono::seconds(3)).has_value();
     }
     REQUIRE(closed);
 }

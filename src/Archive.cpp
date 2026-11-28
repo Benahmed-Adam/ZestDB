@@ -9,6 +9,7 @@
 #include <libzippp/libzippp.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -60,20 +61,62 @@ namespace Zest {
         }
         ResetFlag resetFlag{ this->archiving };
 
+        fs::path archivePath;
+        unsigned int retention;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+            archivePath = this->settings.ArchiveStoragePath;
+            retention = this->settings.ArchiveRetention;
+        }
+        fs::path written;
+        if (!this->writeArchive("", std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", std::chrono::system_clock::now()), written, nullptr)) {
+            return false;
+        }
+
+        std::error_code ec;
+        if (retention > 0) {
+            std::vector<fs::path> archives;
+            for (const auto& entry : fs::directory_iterator(archivePath, ec)) {
+                const std::string name = entry.path().filename().string();
+                if (entry.is_regular_file() && name.starts_with("zestdb_archive_") && name.ends_with(".zip")) {
+                    archives.push_back(entry.path());
+                }
+            }
+            std::sort(archives.begin(), archives.end());
+            for (size_t i = 0; i + retention < archives.size(); i++) {
+                fs::remove(archives[i], ec);
+            }
+        }
+        return true;
+    }
+
+    bool ZestDB::createReplicaSnapshot(fs::path& zipPath, uint64_t& seq) {
+        if (this->archiving.exchange(true)) {
+            ZestLog(LogLevel::Warning, "Replication: an archive is being created or restored, the full sync is put off");
+            return false;
+        }
+        ResetFlag resetFlag{ this->archiving };
+        std::random_device rd;
+        return this->writeArchive(".replication", std::format("snapshot_{:08x}{:08x}.zip", rd(), rd()), zipPath, &seq);
+    }
+
+    bool ZestDB::writeArchive(const fs::path& subfolder, const std::string& name, fs::path& written, uint64_t* seq) {
         fs::path snapshot;
         std::error_code ec;
         try {
             fs::path folder_to_zip;
             fs::path archivePath;
-            unsigned int retention;
             std::vector<std::pair<fs::path, std::uintmax_t>> toCopy;
             auto compactionLocks = this->shardManager->pauseCompaction();
             {
                 std::unique_lock<std::shared_mutex> lock(this->writeMtx);
                 this->flushLocked();
+                // No write runs meanwhile: the archive holds exactly the writes numbered before this one
+                if (seq) {
+                    *seq = this->replicationLog->nextSeq();
+                }
                 folder_to_zip = this->settings.DbPath;
                 archivePath = this->settings.ArchiveStoragePath;
-                retention = this->settings.ArchiveRetention;
 
                 if (!fs::is_directory(folder_to_zip)) {
                     ZestLog(LogLevel::Error, std::format("Source folder does not exist : {}", folder_to_zip.string()));
@@ -112,7 +155,8 @@ namespace Zest {
             }
             compactionLocks.clear();
 
-            fs::path archive_full_path = archivePath / std::format("zestdb_archive_{:%Y-%m-%d_%H-%M-%S}.zip", std::chrono::system_clock::now());
+            fs::create_directories(archivePath / subfolder);
+            fs::path archive_full_path = archivePath / subfolder / name;
             libzippp::ZipArchive archive(archive_full_path.string());
             if (!archive.open(libzippp::ZipArchive::New)) {
                 ZestLog(LogLevel::Error, std::format("Impossible to create the archive : {}", archive_full_path.string()));
@@ -135,20 +179,7 @@ namespace Zest {
                 ZestLog(LogLevel::Error, std::format("Error while saving the archive : Error code : {}", close_result));
                 return false;
             }
-
-            if (retention > 0) {
-                std::vector<fs::path> archives;
-                for (const auto& entry : fs::directory_iterator(archivePath)) {
-                    const std::string name = entry.path().filename().string();
-                    if (entry.is_regular_file() && name.starts_with("zestdb_archive_") && name.ends_with(".zip")) {
-                        archives.push_back(entry.path());
-                    }
-                }
-                std::sort(archives.begin(), archives.end());
-                for (size_t i = 0; i + retention < archives.size(); i++) {
-                    fs::remove(archives[i], ec);
-                }
-            }
+            written = archive_full_path;
             return true;
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("Error while creating the archive : {}", e.what()));
@@ -278,6 +309,7 @@ namespace Zest {
             if (!restored) {
                 return { ResultType::Code::RestoreFailed };
             }
+            this->newHistory();
             ZestLog(LogLevel::Info, std::format("Restored the database from {}", archivePath.string()));
             return { ResultType::Code::Success };
         } catch (const std::exception& e) {

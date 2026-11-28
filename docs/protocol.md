@@ -65,6 +65,15 @@ N bytes      events, each a 4-byte length followed by `<seq> <command>`
 - An event is sent once it is in the primary's WAL buffer, possibly before the batch's WAL sync. If the primary crashes in between, the replica may hold a write the primary lost; the primary's next run has a new `historyId`, so the replica then gets a full sync.
 - A replica that falls more than `historySize` writes behind is disconnected; at its next handshake it gets `fullsync`.
 
+## Full sync
+
+In `fullsync` mode, the primary first archives its database, as `save` does (a flush, then a zip, while writes wait), into `<ArchiveStoragePath>/.replication/`. It then sends:
+1. A frame holding one item, `<seq> snapshot <bytes>`: the archive's size, and the sequence number of the first write it does not hold.
+2. The `<bytes>` of the zip archive, raw, without framing.
+3. The replication stream from `<seq>` on, as in `stream` mode.
+
+The archive file is deleted once it is sent, or when the link closes. If another archive or a restore is in progress, the primary closes the link and the replica retries later. A `restore` on the primary draws a new `historyId` and closes every replication link, so each replica gets a full sync at its next handshake.
+
 ## Response format
 
 Each command yields one JSON object:
