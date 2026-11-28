@@ -2,6 +2,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -131,6 +132,43 @@ TEST_CASE("A replica refuses its clients' writes", "[replication][e2e]") {
         const auto before = std::chrono::steady_clock::now();
         replica.stop();
         CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("A replica keeps the primary's absolute expiry dates", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replication_ttl";
+    fs::remove_all(root);
+    {
+        Node primary(root / "primary", 29641, "  historySize: 1000\n");
+        Node replica(root / "replica", 29643, "  role: replica\n  primary: 127.0.0.1:29641\n  user: repl\n  password: p\n");
+        primary.start();
+        replica.start();
+        const auto ttl = [](Node& node, const std::string& key) { return std::stoll(node.db->execCmd("ttl " + key).response); };
+        const auto eventually = [](const std::function<bool()>& done) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            while (!done() && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            return done();
+        };
+
+        REQUIRE(primary.db->execCmd(R"(setex short 2 "v")").code == ResultType::Code::Success);
+        REQUIRE(primary.db->execCmd(R"(s long "w")").code == ResultType::Code::Success);
+        REQUIRE(primary.db->execCmd("expire long 1000").code == ResultType::Code::Success);
+        CHECK(replica.eventuallyHas("short", "v"));
+        CHECK(eventually([&] { return ttl(replica, "long") > 2; }));
+        CHECK(ttl(replica, "long") == ttl(primary, "long"));
+        CHECK(ttl(replica, "short") <= 2);
+
+        REQUIRE(primary.db->execCmd("persist long").code == ResultType::Code::Success);
+        CHECK(eventually([&] { return ttl(replica, "long") == -1; }));
+
+        // The key expires on the replica at the same date, without the primary sending anything
+        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        CHECK(replica.db->execCmd("g short").code == ResultType::Code::KeyNotFound);
+        CHECK(primary.db->execCmd("g short").code == ResultType::Code::KeyNotFound);
+        CHECK(replica.eventuallyHas("long", "w"));
     }
     fs::remove_all(root);
 }
