@@ -4,19 +4,19 @@ MaxKeySize: 255 # Max key length
 MaxValueSize: 100000 # Max value length
 CacheSize: 2000 # Max number of values in the cache for each shard
 CompactingInterval: 300 # Maximum time in seconds between two compactions of a shard (earlier once half of its data is dead)
-FlushInterval: 10 # The ammount of time in seconds between each sync on the disk
+FlushInterval: 10 # The amount of time in seconds between each sync on the disk
 
 DBPort: 7321
 WebPort: 1237
 
 NetworkValidation: '^127\.0\.0\.1$' # Regex for allowed client IP addresses (TCP and HTTP stats); local only by default, widen it on purpose
 
-isDebug: false # Degug mode for the logger
+isDebug: false # Debug mode for the logger
 jsonOnly: false
 readOnly: false
 fsyncOnWrite: false # Force fsync on every write operation
 
-useSSL: false # Use SSL ?
+useSSL: false # TLS on the TCP and HTTP servers
 SSLCertPath: ./cert.pem # Path to the generated certification file, can be relative or absolute
 SSLKeyPath: ./key.pem # Path to the generated key file, can be relative or absolute
 
@@ -29,8 +29,31 @@ MaxConnections: 1024 # Max simultaneous client connections
 AuthTimeout: 10 # Seconds a client has to finish the TLS handshake and authenticate
 IdleTimeout: 300 # Seconds of inactivity before an authenticated connection is closed
 
+# Limits of every user that sets none of its own (unlimited when absent)
+# rateLimit: 500 # Commands per second
+# burst: 1000 # Commands at once (default: rateLimit)
+# bandwidthLimit: 5MB # Request bytes per second: a number, or a KB, MB or GB suffix
+
 users:
   # Development account (bob/bob): replace it before allowing remote addresses in NetworkValidation
   - user: bob
-    role: admin # read (get, getby), write (+ set, del, setby, delby) or admin (+ flush, reload, scfg, gcfg, save)
+    role: admin # read (get, getby, ...), write (+ set, del, setby, delby, call, ...), admin (+ flush, reload, scfg, gcfg, save, restore, user, script) or replica (replication link only)
     tokenHash: fa2c869a802a01ebc7a945b0c60f51dc8da08780209eeb27a833240c861db9c0 # sha256 of the token sha256("bob" + "bob")
+    # rateLimit: 1000 # This user's own limits, in place of the ones above
+    # burst: 2000
+    # bandwidthLimit: 10MB
+  # The user a replica logs in as (see the replication block below)
+  # - user: repl
+  #   role: replica
+  #   tokenHash: <sha256 of sha256("repl" + its password)>
+
+# Read at startup only: changing it needs a restart
+replication:
+  role: primary # primary (the default) or replica
+  allowedReplicas: '.*' # Primary: regex for the addresses allowed to replicate
+  historySize: 100000 # Primary: writes kept in memory for the replicas that reconnect; a replica further behind gets a full sync
+  # Replica only:
+  # primary: 127.0.0.1:7321 # host:port of the primary's DBPort ([v6]:port for an IPv6 address)
+  # user: repl # A user of the primary with the replica role
+  # password: secret
+  # primaryCA: ./ca.pem # With useSSL: the CA the primary's certificate is checked against (unchecked if empty)
