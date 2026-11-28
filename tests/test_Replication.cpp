@@ -1,5 +1,6 @@
 #include <catch2/catch_all.hpp>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -22,10 +23,11 @@ namespace {
         std::unique_ptr<ZestDB> db;
         std::vector<std::thread> ioThreads;
 
-        Node(const fs::path& folder, unsigned short port, const std::string& replication)
+        Node(const fs::path& folder, unsigned short port, const std::string& replication, const std::string& extra = "")
             : dir(folder) {
             fs::create_directories(dir);
             std::ofstream cfg(dir / "config.yaml");
+            cfg << extra;
             cfg << "DbPath: " << (dir / "db").string() << "\n";
             cfg << "DBPort: " << port << "\n";
             cfg << "WebPort: " << port + 1 << "\n";
@@ -188,7 +190,8 @@ TEST_CASE("info and /metrics show the replication state", "[replication][e2e]") 
         REQUIRE(primary.db->execCmd(R"(s a "one")").code == ResultType::Code::Success);
         CHECK(replica.eventuallyHas("a", "one"));
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-        while (info(primary).at("replicas") != 1 && std::chrono::steady_clock::now() < deadline) {
+        // The replica saves its position just after it restores the snapshot that holds `a`
+        while ((info(primary).at("replicas") != 1 || info(replica).at("nextSeq") != info(primary).at("nextSeq")) && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
@@ -209,6 +212,62 @@ TEST_CASE("info and /metrics show the replication state", "[replication][e2e]") 
         const std::string replicaMetrics = replica.db->prometheusMetrics();
         CHECK(replicaMetrics.find(seq) != std::string::npos);
         CHECK(replicaMetrics.find("zestdb_replication_connected 1\n") != std::string::npos);
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("A replica that fell out of the primary's history gets a full sync", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replication_behind";
+    fs::remove_all(root);
+    {
+        Node primary(root / "primary", 29671, "  historySize: 5\n");
+        Node replica(root / "replica", 29673, "  role: replica\n  primary: 127.0.0.1:29671\n  user: repl\n  password: p\n");
+        primary.start();
+        replica.start();
+        REQUIRE(primary.db->execCmd(R"(s k0 "v0")").code == ResultType::Code::Success);
+        CHECK(replica.eventuallyHas("k0", "v0"));
+
+        replica.stop();
+        for (int i = 1; i <= 20; i++) {
+            REQUIRE(primary.db->execCmd(std::format(R"(s k{} "v{}")", i, i)).code == ResultType::Code::Success);
+        }
+        replica.start();
+        for (int i = 0; i <= 20; i++) {
+            CHECK(replica.eventuallyHas(std::format("k{}", i), std::format("v{}", i)));
+        }
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("Replication over TLS checks the primary's certificate", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replication_tls";
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto makeCert = [&](const std::string& name) {
+        const std::string cmd =
+            std::format(R"(openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 -keyout "{}" -out "{}" > /dev/null 2>&1)", (root / (name + ".key")).string(), (root / (name + ".pem")).string());
+        return std::system(cmd.c_str()) == 0;
+    };
+    if (!makeCert("primary") || !makeCert("other")) {
+        fs::remove_all(root);
+        SKIP("the openssl command is needed to make the test certificates");
+    }
+    {
+        const std::string tls = std::format("useSSL: true\nSSLCertPath: {}\nSSLKeyPath: {}\n", (root / "primary.pem").string(), (root / "primary.key").string());
+        const std::string link = "  role: replica\n  primary: 127.0.0.1:29661\n  user: repl\n  password: p\n";
+        Node primary(root / "primary", 29661, "  historySize: 1000\n", tls);
+        Node trusting(root / "trusting", 29663, link + "  primaryCA: " + (root / "primary.pem").string() + "\n", tls);
+        Node wary(root / "wary", 29665, link + "  primaryCA: " + (root / "other.pem").string() + "\n", tls);
+        primary.start();
+        trusting.start();
+        wary.start();
+
+        REQUIRE(primary.db->execCmd(R"(s a "one")").code == ResultType::Code::Success);
+        CHECK(trusting.eventuallyHas("a", "one"));
+        CHECK(trusting.db->getReplicator()->connected());
+        // A certificate its CA did not sign: the handshake fails, and nothing is replicated
+        CHECK_FALSE(wary.db->getReplicator()->connected());
+        CHECK(wary.db->execCmd("g a").code == ResultType::Code::KeyNotFound);
     }
     fs::remove_all(root);
 }

@@ -38,6 +38,7 @@ Configuration is provided through `config.yaml` in the working directory. The fi
 | `burst` | `rateLimit` | Commands each such user may send at once. |
 | `bandwidthLimit` | unlimited | Request bytes per second allowed to each such user. |
 | `users` | empty | List of `{user, role, tokenHash}` entries (see below). |
+| `replication` | primary | Whether this instance is a primary or a replica, and how it replicates (see [replication](#replication)). |
 
 The server refuses to start when `MaxValueSize` is not smaller than `SegSize`, when an interval, a timeout or `MaxConnections` is `0`, when `DBPort` equals `WebPort`, when `useSSL` is set without `SSLCertPath` and `SSLKeyPath`, when a role is unknown, or when a rate limit is not positive (`burst` must be at least 1). A `MaxKeySize` above 256 is lowered to 256.
 
@@ -52,6 +53,7 @@ Each entry of `users` has a `user`, a `role` and a `tokenHash`:
 | `read` | `get`, `getby`, `ttl`, `exists`, `count`, `keys`, `help` |
 | `write` (the default) | `read` + `set`, `del`, `setby`, `delby`, `setex`, `setexat`, `expire`, `expireat`, `persist`, `incr`, `decr`, `setnx`, `cas`, `call` |
 | `admin` | `write` + `flush`, `reload`, `scfg`, `gcfg`, `save`, `restore`, `lsaves`, `script` |
+| `replica` | None: only the `replicate` handshake of a replica (see [replication](#replication)) |
 
 Roles are checked on every command, so a `reload` that removes a user or changes its role applies to open sessions.
 
@@ -66,7 +68,7 @@ A plaintext `password` field is still accepted but deprecated.
 The `user` commands (admin role) change the users without a restart, and write them to `config.yaml`:
 
 ```
-user add carol "s3cret" read      # role: read, write (default) or admin
+user add carol "s3cret" read      # role: read, write (default), admin or replica
 user passwd carol "n3w-s3cret"
 user role carol write
 user del carol
@@ -79,6 +81,48 @@ user ls                           # [{"role":"write","user":"carol"}, ...]
 - The last admin cannot be deleted or lose the role (code `309`): the REPL stays admin, but remote administration would be lost.
 - `config.yaml` is rewritten through a temporary file and a rename. Each entry keeps its other fields (its rate limits), a `password` field is replaced by the `tokenHash`, and new users are added at the end. Comments in the file are not kept.
 - A new user has no limit of its own: the top-level rate limits apply.
+
+## Replication
+
+One primary streams its writes to any number of replicas, asynchronously: a client gets its reply once the write is done on the primary, without waiting for the replicas. A replica serves reads and refuses every write from its own clients (code `312`).
+
+On the primary, the defaults need no `replication` block. Give each replica a user with the `replica` role:
+
+```yaml
+users:
+  - user: repl
+    role: replica
+    tokenHash: ...
+
+replication:
+  allowedReplicas: '^10\.0\.0\.[0-9]+$'   # addresses allowed to replicate (default: any)
+  historySize: 100000                     # writes kept for replicas that reconnect (default: 100000)
+```
+
+On each replica:
+
+```yaml
+replication:
+  role: replica
+  primary: 10.0.0.1:7321      # host:port of the primary's DBPort ([v6]:port for an IPv6 address)
+  user: repl                  # a user of the primary with the replica role
+  password: secret
+  primaryCA: /etc/zestdb/ca.pem   # with useSSL: the CA that signed the primary's certificate
+```
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `role` | primary | `primary` or `replica`. |
+| `primary` | | Replica only, required: the primary's address and `DBPort`. |
+| `user` / `password` | | Replica only, required: the primary's user it logs in as. |
+| `primaryCA` | "" | Replica only: with `useSSL`, the primary's certificate is checked against this CA file, host name included. Unset, the certificate is not checked, and a warning is logged. |
+| `allowedReplicas` | ".*" | Primary only: a regex the replicas' IP addresses must match (code `310` otherwise). |
+| `historySize` | 100000 | Primary only: how many writes it keeps in memory for the replicas that reconnect. A replica further behind gets a full sync. |
+
+- The block is read at startup only: a `reload` that changes it fails with code `402`.
+- The link uses TLS when `useSSL` is set, on both sides.
+- Expiry dates are replicated as absolute dates, and each instance expires its keys itself: keep the clocks in sync (NTP).
+- The replica's `password` is stored in plain text: protect its `config.yaml`, and give that user the `replica` role only.
 
 ## Rate limits
 
