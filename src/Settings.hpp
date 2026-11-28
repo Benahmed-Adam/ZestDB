@@ -115,6 +115,7 @@ namespace Zest {
         uint16_t primaryPort = 0;
         std::string user;
         std::string password;
+        std::string primaryCA; // with useSSL: the CA file the primary's certificate is checked against (unchecked if empty)
         // Primary side: the addresses allowed to replicate (a regex) and the number of events kept for a replica to catch up
         std::string allowedReplicasStr = ".*";
         size_t historySize = 100000;

@@ -74,6 +74,10 @@ In `fullsync` mode, the primary first archives its database, as `save` does (a f
 
 The archive file is deleted once it is sent, or when the link closes. If another archive or a restore is in progress, the primary closes the link and the replica retries later. A `restore` on the primary draws a new `historyId` and closes every replication link, so each replica gets a full sync at its next handshake.
 
+## Replica side
+
+An instance with `replication: role: replica` runs this client on its own thread. It restores the snapshot of a full sync in place of its database. Then it applies each frame's writes, syncs its WAL, and saves its position (`<historyId> <nextSeq>`) in `<DbPath>/replication.state`, so a restart resumes the stream. A link that fails, or stays silent for 5 seconds, is closed and retried after 1 second, then 2, up to 30. With `useSSL`, the primary's certificate is checked against `primaryCA`. If `primaryCA` is not set, the certificate is not checked and a warning is logged.
+
 ## Response format
 
 Each command yields one JSON object:

@@ -46,8 +46,17 @@ namespace Zest {
         return out;
     }
 
+    namespace {
+        thread_local bool applyingReplicated = false; // this thread runs a write received from the primary
+    } // namespace
+
     ZestDB::ZestDB()
-        : replaying(false) {
+        : ZestDB(fs::current_path()) {
+    }
+
+    ZestDB::ZestDB(const fs::path& configFolder)
+        : configDir(configFolder),
+          replaying(false) {
         ZestLog(LogLevel::Info, "Initializing ZestDB...");
         this->boot();
 
@@ -57,6 +66,9 @@ namespace Zest {
 
         this->replayWAL();
         this->socket = std::make_unique<Server>(this->ioCtx, this->settings.DBPort, *this);
+        if (this->settings.replication.replica) {
+            this->replicator = std::make_unique<Replicator>(*this, this->settings);
+        }
 
         ZestLog(LogLevel::Info, std::format("ZestDB initialized with {} shards", NUM_SHARDS));
 
@@ -209,6 +221,9 @@ namespace Zest {
         ZestLog(LogLevel::Info, "Exiting ZestDB...");
 
         this->ioCtx.stop();
+        if (this->replicator) {
+            this->replicator->stop();
+        }
         if (this->socket)
             this->socket->stop();
         if (this->srv)
@@ -298,7 +313,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::checkWrite(const std::string& key, const std::string& value) const {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -344,7 +359,24 @@ namespace Zest {
     }
 
     bool ZestDB::scripted() const {
-        return !this->replaying.load() && this->scriptEngine && this->scriptEngine->hasTriggers();
+        return !this->unchecked() && this->scriptEngine && this->scriptEngine->hasTriggers();
+    }
+
+    bool ZestDB::unchecked() const {
+        return this->replaying.load() || applyingReplicated;
+    }
+
+    ResultType ZestDB::applyReplicated(const std::string& command) {
+        applyingReplicated = true;
+        ResultType result;
+        try {
+            result = this->execCmd(command, Role::Admin, false);
+        } catch (...) {
+            applyingReplicated = false;
+            throw;
+        }
+        applyingReplicated = false;
+        return result;
     }
 
     bool ZestDB::logsRows() const {
@@ -498,7 +530,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::setTTL(const std::string& key, uint64_t expiresAt) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -522,7 +554,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::del(const std::string& key) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -555,7 +587,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::setBy(ValidationRule& valid, const std::string& value, bool perRow) {
-        const bool enforce = !this->replaying.load();
+        const bool enforce = !this->unchecked();
 
         if (enforce && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
@@ -590,7 +622,7 @@ namespace Zest {
     }
 
     ResultType ZestDB::delBy(ValidationRule& valid, bool perRow) {
-        if (!this->replaying.load() && this->settings.readOnly) {
+        if (!this->unchecked() && this->settings.readOnly) {
             return { ResultType::Code::ReadOnly };
         }
 

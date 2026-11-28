@@ -1,0 +1,113 @@
+#include <catch2/catch_all.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <thread>
+#include <vector>
+
+#include "ZestDB.hpp"
+
+using namespace Zest;
+namespace fs = std::filesystem;
+
+namespace {
+    /// One instance with its own folder, which survives a restart.
+    class Node {
+    public:
+        fs::path dir;
+        std::unique_ptr<ZestDB> db;
+        std::vector<std::thread> ioThreads;
+
+        Node(const fs::path& folder, unsigned short port, const std::string& replication)
+            : dir(folder) {
+            fs::create_directories(dir);
+            std::ofstream cfg(dir / "config.yaml");
+            cfg << "DbPath: " << (dir / "db").string() << "\n";
+            cfg << "DBPort: " << port << "\n";
+            cfg << "WebPort: " << port + 1 << "\n";
+            cfg << "ArchiveStoragePath: " << (dir / "archive").string() << "\n";
+            cfg << "AutoArchiveSaving: false\n";
+            cfg << "users:\n";
+            cfg << "  - user: repl\n";
+            cfg << "    role: replica\n";
+            cfg << "    password: p\n";
+            cfg << "replication:\n" << replication;
+        }
+
+        ~Node() {
+            this->stop();
+        }
+
+        void start() {
+            this->db = std::make_unique<ZestDB>(this->dir);
+            for (int i = 0; i < 2; i++) {
+                this->ioThreads.emplace_back([this] { this->db->ioContext().run(); });
+            }
+        }
+
+        void stop() {
+            if (!this->db) {
+                return;
+            }
+            this->db->stop();
+            for (auto& t : this->ioThreads) {
+                t.join();
+            }
+            this->ioThreads.clear();
+            this->db.reset();
+        }
+
+        /// True once `get key` answers a response holding `value`, within 20 s.
+        bool eventuallyHas(const std::string& key, const std::string& value) {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            while (std::chrono::steady_clock::now() < deadline) {
+                const ResultType r = this->db->execCmd("g " + key);
+                if (r.code == ResultType::Code::Success && r.response.find(value) != std::string::npos) {
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            return false;
+        }
+    };
+} // namespace
+
+TEST_CASE("A replica follows its primary across restarts of both", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replication";
+    fs::remove_all(root);
+    {
+        Node primary(root / "primary", 29631, "  historySize: 1000\n");
+        Node replica(root / "replica", 29633, "  role: replica\n  primary: 127.0.0.1:29631\n  user: repl\n  password: p\n");
+        primary.start();
+        replica.start();
+
+        REQUIRE(primary.db->execCmd(R"(s a "one")").code == ResultType::Code::Success);
+        CHECK(replica.eventuallyHas("a", "one"));
+        REQUIRE(replica.db->getReplicator() != nullptr);
+        CHECK(replica.db->getReplicator()->connected());
+
+        // The replica resumes from its saved position
+        replica.stop();
+        REQUIRE(primary.db->execCmd(R"(s b "two")").code == ResultType::Code::Success);
+        replica.start();
+        CHECK(replica.eventuallyHas("b", "two"));
+        CHECK(replica.eventuallyHas("a", "one"));
+
+        // A restarted primary has a new history: the replica gets a full sync
+        primary.stop();
+        primary.start();
+        REQUIRE(primary.db->execCmd(R"(s c "three")").code == ResultType::Code::Success);
+        CHECK(replica.eventuallyHas("c", "three"));
+        CHECK(replica.eventuallyHas("a", "one"));
+        CHECK(replica.eventuallyHas("b", "two"));
+
+        REQUIRE(primary.db->execCmd("d a").code == ResultType::Code::Success);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (replica.db->execCmd("g a").code != ResultType::Code::KeyNotFound && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        CHECK(replica.db->execCmd("g a").code == ResultType::Code::KeyNotFound);
+    }
+    fs::remove_all(root);
+}

@@ -146,6 +146,7 @@ namespace Zest {
             throw std::runtime_error(std::format("replication: primary must be host:port, not '{}'", primary));
         }
         r.primaryPort = static_cast<uint16_t>(port);
+        r.primaryCA = getOr<std::string>(block, "primaryCA", "");
         r.user = getOr<std::string>(block, "user", "");
         r.password = getOr<std::string>(block, "password", "");
         if (r.user.empty() || r.password.empty()) {
@@ -183,7 +184,7 @@ namespace Zest {
         Settings result;
         std::unordered_map<std::string, UserEntry> parsedUsers;
 
-        const fs::path current_path = fs::current_path().string();
+        const fs::path current_path = this->configDir;
         const std::string configName = "config.yaml";
 
         fs::path configPath = current_path / configName;
@@ -469,8 +470,8 @@ namespace Zest {
     }
 
     bool ZestDB::writeUsers(const std::unordered_map<std::string, UserEntry>& updated) {
-        const fs::path configPath = fs::current_path() / "config.yaml";
-        const fs::path tmpPath = fs::current_path() / "config.yaml.tmp";
+        const fs::path configPath = this->configDir / "config.yaml";
+        const fs::path tmpPath = this->configDir / "config.yaml.tmp";
         try {
             std::stringstream buffer;
             buffer << std::ifstream(configPath).rdbuf();
@@ -528,7 +529,7 @@ namespace Zest {
     }
 
     void ZestDB::setConfig() {
-        const fs::path current_path = fs::current_path();
+        const fs::path current_path = this->configDir;
         const std::string configName = "config.yaml";
         fs::path configPath = current_path / configName;
 

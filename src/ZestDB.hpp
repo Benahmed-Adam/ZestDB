@@ -13,6 +13,7 @@
 
 #include "RateLimiter.hpp"
 #include "ReplicationLog.hpp"
+#include "Replicator.hpp"
 #include "ScriptEngine.hpp"
 #include "Server.hpp"
 #include "Settings.hpp"
@@ -51,6 +52,8 @@ namespace Zest {
         /// Reads config.yaml, opens the shards, loads the scripts, replays the WAL, starts the TCP server, then starts
         /// the flush and archive threads and prepares the HTTP stats server (main() makes it listen).
         ZestDB();
+        /// Reads `config.yaml` from `configDir` instead of the current folder.
+        explicit ZestDB(const std::filesystem::path& configDir);
         /// Stops the database if stop() was not called.
         ~ZestDB();
 
@@ -175,6 +178,16 @@ namespace Zest {
         /// of the first write it does not hold, from which the replica streams. The caller deletes the file.
         /// @return false if another archive or a restore is in progress, or the archive could not be written.
         bool createReplicaSnapshot(std::filesystem::path& zipPath, uint64_t& seq);
+        /// On a replica: runs one write received from the primary, like the WAL replay does (no trigger, no check of
+        /// the value or of read-only mode), but logged in the local WAL.
+        ResultType applyReplicated(const std::string& command);
+        /// Replaces the database with the archive at `archivePath` (`restore` takes it from ArchiveStoragePath).
+        ResultType restoreArchive(const std::filesystem::path& archivePath);
+
+        /// The replica's link to its primary, or null on a primary.
+        const Replicator* getReplicator() const {
+            return this->replicator.get();
+        }
 
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {
@@ -268,6 +281,8 @@ namespace Zest {
 
         /// True when triggers must run: some are loaded and the WAL is not being replayed.
         bool scripted() const;
+        /// True while the WAL is replayed or a replicated write runs: the values were checked when first written.
+        bool unchecked() const;
         /// True when setby / delby must log each key they touch, not the command: for the triggers, or for the replicas.
         bool logsRows() const;
         /// Runs the `before set` triggers on `value` (which they may change), then checks the new value again.
@@ -351,6 +366,8 @@ namespace Zest {
         std::atomic<bool> archiving{ false }; // an archive or a restore is in progress: only one at a time
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<ReplicationLog> replicationLog;
+        std::unique_ptr<Replicator> replicator; // on a replica only
+        std::filesystem::path configDir;
         std::string historyId;
         mutable std::mutex historyMtx;
         /// Draws a new historyId and closes the replication links: the data changed without numbered writes (restore).

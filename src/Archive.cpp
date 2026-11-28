@@ -258,14 +258,21 @@ namespace Zest {
         }
 
         fs::path archivePath;
-        fs::path dbPath;
         {
             std::shared_lock<std::shared_mutex> lock(this->writeMtx);
             archivePath = this->settings.ArchiveStoragePath / zipname;
-            dbPath = this->settings.DbPath;
         }
+        return this->restoreArchive(archivePath);
+    }
+
+    ResultType ZestDB::restoreArchive(const fs::path& archivePath) {
         if (!fs::is_regular_file(archivePath)) {
             return { ResultType::Code::ArchiveNotFound };
+        }
+        fs::path dbPath;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->writeMtx);
+            dbPath = this->settings.DbPath;
         }
 
         if (this->archiving.exchange(true)) {
