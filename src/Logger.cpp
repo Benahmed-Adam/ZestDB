@@ -1,5 +1,6 @@
 #include "Logger.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <format>
 #include <iostream>
@@ -8,7 +9,7 @@
 
 namespace Zest {
 
-    static bool isDebug = true;
+    static std::atomic<bool> isDebug{ true }; // `scfg isDebug` and `reload` set it while other threads log
     static std::mutex logMutex;
 
     void setLoggerDebugMode(bool enabled) {
@@ -48,7 +49,7 @@ namespace Zest {
     }
 
     void ZestLog(LogLevel level, const std::string& message) {
-        if (!isDebug && level == LogLevel::Debug)
+        if (!isDebug.load(std::memory_order_relaxed) && level == LogLevel::Debug)
             return;
 
         auto now = std::chrono::system_clock::now();
