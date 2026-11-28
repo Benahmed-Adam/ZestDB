@@ -72,6 +72,7 @@ namespace Zest {
             LastAdmin = 309,
             ReplicaNotAllowed = 310,
             NotPrimary = 311,
+            ReplicaReadOnly = 312,
 
             UnknownConfigParam = 400,
             InvalidConfigValue = 401,

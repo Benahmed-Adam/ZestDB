@@ -75,6 +75,7 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 309 | `LastAdmin` | `user del` or `user role` would leave no admin. |
 | 310 | `ReplicaNotAllowed` | `replicate`: the replica's address does not match `allowedReplicas`. |
 | 311 | `NotPrimary` | `replicate`: this instance is itself a replica, and serves no replica. |
+| 312 | `ReplicaReadOnly` | A write, a `call` or a `restore` sent to a replica: its data comes from its primary only. |
 
 ## 4xx - Configuration
 

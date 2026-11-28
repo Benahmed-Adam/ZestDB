@@ -281,6 +281,10 @@ namespace Zest {
         if (role == Role::Replica || (spec.access == Access::Write && role == Role::Read) || (spec.access == Access::Admin && role != Role::Admin)) {
             return { ResultType::Code::PermissionDenied };
         }
+        // A replica takes its data from its primary only; `replicator` is set before any client connects
+        if (this->replicator && !this->unchecked() && (spec.access == Access::Write || cmd.name == "restore")) {
+            return { ResultType::Code::ReplicaReadOnly };
+        }
 
         // `reload` and `scfg` replace the settings: no other command may run meanwhile. `flush`, `save` and `restore`
         // take writeMtx themselves, exclusively, so they must not hold it already. Every other command shares it.

@@ -111,3 +111,26 @@ TEST_CASE("A replica follows its primary across restarts of both", "[replication
     }
     fs::remove_all(root);
 }
+
+TEST_CASE("A replica refuses its clients' writes", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replica_readonly";
+    fs::remove_all(root);
+    {
+        // No primary listens on 29635: the replicator keeps retrying, and stop() must not wait for its backoff
+        Node replica(root / "replica", 29637, "  role: replica\n  primary: 127.0.0.1:29635\n  user: repl\n  password: p\n");
+        replica.start();
+        CHECK(replica.db->execCmd(R"(s a "one")").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd("d a").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd(R"(sb "a.*" "x")").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd("incr n").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd("call f").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd("restore x.zip").code == ResultType::Code::ReplicaReadOnly);
+        CHECK(replica.db->execCmd("g a").code == ResultType::Code::KeyNotFound);
+        CHECK(replica.db->execCmd("f").code == ResultType::Code::Success);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        const auto before = std::chrono::steady_clock::now();
+        replica.stop();
+        CHECK(std::chrono::steady_clock::now() - before < std::chrono::seconds(1));
+    }
+    fs::remove_all(root);
+}

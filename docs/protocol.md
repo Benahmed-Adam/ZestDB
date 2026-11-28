@@ -76,7 +76,7 @@ The archive file is deleted once it is sent, or when the link closes. If another
 
 ## Replica side
 
-An instance with `replication: role: replica` runs this client on its own thread. It restores the snapshot of a full sync in place of its database. Then it applies each frame's writes, syncs its WAL, and saves its position (`<historyId> <nextSeq>`) in `<DbPath>/replication.state`, so a restart resumes the stream. A link that fails, or stays silent for 5 seconds, is closed and retried after 1 second, then 2, up to 30. With `useSSL`, the primary's certificate is checked against `primaryCA`. If `primaryCA` is not set, the certificate is not checked and a warning is logged.
+An instance with `replication: role: replica` runs this client on its own thread. It restores the snapshot of a full sync in place of its database. Then it applies each frame's writes, syncs its WAL, and saves its position (`<historyId> <nextSeq>`) in `<DbPath>/replication.state`, so a restart resumes the stream. A link that fails, or stays silent for 5 seconds, is closed and retried after 1 second, then 2, up to 30. A replica refuses every write, `call` and `restore` from its own clients with code `312`. Reads are served from its local copy. With `useSSL`, the primary's certificate is checked against `primaryCA`. If `primaryCA` is not set, the certificate is not checked and a warning is logged.
 
 ## Response format
 
