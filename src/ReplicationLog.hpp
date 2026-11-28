@@ -53,6 +53,8 @@ namespace Zest {
         /// Registers `wake`, called after each new event (it must only schedule work, not do it). @return its id.
         uint64_t subscribe(std::function<void()> wake);
         void unsubscribe(uint64_t id);
+        /// The replicas streaming from this log.
+        size_t subscriberCount();
         /// Calls every subscriber; ZestDB calls it after push(), once lock() is released.
         void notify();
 

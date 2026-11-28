@@ -79,6 +79,9 @@ The same HTTP server serves every statistic at `/metrics`, in the Prometheus tex
 | `zestdb_compactions_total` | counter | `shard` | Compactions run since startup. |
 | `zestdb_rate_limited_total` | counter | `user` | Commands refused by the user's rate or bandwidth limit (users with a limit only). |
 | `zestdb_connections` | gauge | | Open TCP client connections. |
+| `zestdb_replication_next_seq` | gauge | | On a primary, the sequence number of its next write. On a replica, the next one it expects. A replica's lag is its primary's value minus its own. |
+| `zestdb_replicas` | gauge | | Primary only: the replicas streaming from it. |
+| `zestdb_replication_connected` | gauge | | Replica only: `1` while its link to the primary is up. |
 
 `op` is one of `get`, `set`, `del`, `getby`, `setby`, `delby`, `exists`, `count`, `keys`. The `total` of `/` has no series of its own: sum over the labels instead. The counters restart from zero with the server, which `rate()` handles.
 

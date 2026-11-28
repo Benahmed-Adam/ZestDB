@@ -53,6 +53,11 @@ namespace Zest {
         this->subscribers.erase(id);
     }
 
+    size_t ReplicationLog::subscriberCount() {
+        std::lock_guard<std::mutex> lock(this->subscribersMtx);
+        return this->subscribers.size();
+    }
+
     void ReplicationLog::notify() {
         // Called outside the lock: a waker may drop the last reference to a session, whose destructor unsubscribes
         thread_local std::vector<std::function<void()>> wakers;

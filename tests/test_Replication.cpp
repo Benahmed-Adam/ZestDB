@@ -1,6 +1,7 @@
 #include <catch2/catch_all.hpp>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "ZestDB.hpp"
+#include "lib/json.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -169,6 +171,44 @@ TEST_CASE("A replica keeps the primary's absolute expiry dates", "[replication][
         CHECK(replica.db->execCmd("g short").code == ResultType::Code::KeyNotFound);
         CHECK(primary.db->execCmd("g short").code == ResultType::Code::KeyNotFound);
         CHECK(replica.eventuallyHas("long", "w"));
+    }
+    fs::remove_all(root);
+}
+
+TEST_CASE("info and /metrics show the replication state", "[replication][e2e]") {
+    const fs::path root = fs::temp_directory_path() / "zestdb_test_replication_info";
+    fs::remove_all(root);
+    {
+        Node primary(root / "primary", 29651, "  historySize: 1000\n");
+        Node replica(root / "replica", 29653, "  role: replica\n  primary: 127.0.0.1:29651\n  user: repl\n  password: p\n");
+        primary.start();
+        replica.start();
+        const auto info = [](Node& node) { return nlohmann::json::parse(node.db->execCmd("info").response).at("replication"); };
+
+        REQUIRE(primary.db->execCmd(R"(s a "one")").code == ResultType::Code::Success);
+        CHECK(replica.eventuallyHas("a", "one"));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (info(primary).at("replicas") != 1 && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        const auto p = info(primary);
+        CHECK(p.at("role") == "primary");
+        CHECK(p.at("replicas") == 1);
+        CHECK(p.at("historyId").get<std::string>().size() == 32);
+        const auto r = info(replica);
+        CHECK(r.at("role") == "replica");
+        CHECK(r.at("primary") == "127.0.0.1:29651");
+        CHECK(r.at("connected") == true);
+        CHECK(r.at("nextSeq") == p.at("nextSeq"));
+
+        const std::string seq = std::format("zestdb_replication_next_seq {}\n", p.at("nextSeq").get<uint64_t>());
+        const std::string primaryMetrics = primary.db->prometheusMetrics();
+        CHECK(primaryMetrics.find(seq) != std::string::npos);
+        CHECK(primaryMetrics.find("zestdb_replicas 1\n") != std::string::npos);
+        const std::string replicaMetrics = replica.db->prometheusMetrics();
+        CHECK(replicaMetrics.find(seq) != std::string::npos);
+        CHECK(replicaMetrics.find("zestdb_replication_connected 1\n") != std::string::npos);
     }
     fs::remove_all(root);
 }
