@@ -9,10 +9,13 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <variant>
 #include <vector>
+
+#include "Settings.hpp"
 
 namespace Zest {
 
@@ -67,6 +70,8 @@ namespace Zest {
         /// Runs one command. Before authentication, only `Authorization: <user>.<token>` is accepted. `should_close` is
         /// set when the connection must be closed after the reply (failed authentication, revoked user).
         std::string handle_command(const std::string& cmd, bool& should_close);
+        /// `replicate <historyId> <fromSeq>`, for the `replica` role only, once per session (see ZestDB::replicationHandshake).
+        ResultType handle_replicate(const std::string& cmd, Role role);
 
         /// Pushes the inactivity deadline back (AuthTimeout before authentication, IdleTimeout after).
         void touch();
@@ -96,6 +101,7 @@ namespace Zest {
         std::string username_;
         std::string tokenHash_; // of the token the session logged in with: a new password makes it stale
         bool authenticated_ = false;
+        bool replicating_ = false;             // a replica's link, past its `replicate` handshake: never idle-timed out
         std::shared_ptr<UserLimiter> limiter_; // the user's limits, looked up for each request (null: unlimited)
 
         /// Where the parsing of a discarded request stands.

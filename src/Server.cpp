@@ -69,6 +69,10 @@ namespace Zest {
     }
 
     void Session::touch() {
+        if (this->replicating_) {
+            this->deadline_ = std::chrono::steady_clock::time_point::max();
+            return;
+        }
         this->deadline_ = std::chrono::steady_clock::now() + (this->authenticated_ ? this->limits_.idleTimeout : this->limits_.authTimeout);
     }
 
@@ -336,12 +340,34 @@ namespace Zest {
             return ZestDB::responseToJson({ ResultType::Code::SessionRevoked });
         }
 
+        if (cmd == "replicate" || cmd.starts_with("replicate ")) {
+            return ZestDB::responseToJson(this->handle_replicate(cmd, *role));
+        }
+
         try {
             return ZestDB::responseToJson(this->db_.execCmd(cmd, *role, false, this->username_));
         } catch (const std::exception& e) {
             ZestLog(LogLevel::Error, std::format("Session: command failed with an exception: {}", e.what()));
             return ZestDB::responseToJson({ ResultType::Code::InternalError });
         }
+    }
+
+    ResultType Session::handle_replicate(const std::string& cmd, Role role) {
+        if (role != Role::Replica || this->replicating_) {
+            return { ResultType::Code::PermissionDenied };
+        }
+        std::istringstream in(cmd.substr(std::string_view("replicate").size()));
+        std::string historyId;
+        uint64_t fromSeq = 0;
+        if (!(in >> historyId >> fromSeq) || !(in >> std::ws).eof()) {
+            return { ResultType::Code::InvalidValueFormat };
+        }
+        ResultType result = this->db_.replicationHandshake(this->remote_ip_, historyId, fromSeq);
+        if (result.code == ResultType::Code::Success) {
+            this->replicating_ = true;
+            this->touch();
+        }
+        return result;
     }
 
     void Session::queue_write(const std::string& message, bool closeAfter) {

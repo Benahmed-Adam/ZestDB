@@ -37,6 +37,21 @@ A user is locked out for 60 seconds after 5 failed authentications. The lock is 
 
 Without `useSSL` the token travels in clear and a captured token can be replayed, so enable SSL outside a trusted network.
 
+## Replication handshake
+
+A replica opens an ordinary session, authenticates as a user that has the `replica` role, then sends:
+```
+replicate <historyId> <fromSeq>
+```
+- `historyId` is the history the replica last synced with (`-` for none), and `fromSeq` the sequence number of the first write it still needs.
+- The primary refuses the replica with code `310` if its address does not match `allowedReplicas`, and with code `311` if it is itself a replica. Any other user gets code `301`, and so does a second `replicate` on the same session.
+- On success, the response is `{"mode":"stream"|"fullsync","historyId":"...","nextSeq":N}`:
+  - `stream` when the primary still holds every write of that history from `fromSeq` on.
+  - `fullsync` otherwise: a new replica, a primary that restarted (each run has a new `historyId`, since the sequence numbers start over once the WAL is cleared), or a replica that fell too far behind (`historySize`).
+- The session then stays open for the replication stream, and the idle timeout no longer applies to it.
+
+The `replica` role runs no other command (code `301`).
+
 ## Response format
 
 Each command yields one JSON object:

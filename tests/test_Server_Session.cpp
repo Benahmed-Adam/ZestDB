@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ZestDB.hpp"
+#include "lib/json.hpp"
 
 using namespace Zest;
 namespace fs = std::filesystem;
@@ -54,6 +55,9 @@ public:
         cfg << "  - user: narrow\n";
         cfg << "    password: n\n";
         cfg << "    bandwidthLimit: 1KB\n";
+        cfg << "  - user: repl\n";
+        cfg << "    role: replica\n";
+        cfg << "    password: p\n";
     }
 
     SessionFixture() {
@@ -466,4 +470,60 @@ TEST_CASE_METHOD(SessionFixture, "A user added at runtime can log in", "[session
     Client c;
     REQUIRE(c.send("Authorization: carol." + sha256("carolc4rol")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
     REQUIRE(c.send(R"(s k "v")").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+}
+
+/// The JSON object a successful `replicate` answers with.
+static nlohmann::json replicateReply(const std::string& reply) {
+    auto outer = nlohmann::json::parse(reply);
+    REQUIRE(outer["code"] == 0);
+    return outer["response"];
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replica gets a full sync, then a stream once it knows the history", "[session][replication]") {
+    std::string historyId;
+    uint64_t nextSeq = 0;
+    {
+        Client c;
+        REQUIRE(c.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+        auto first = replicateReply(c.send("replicate - 0"));
+        REQUIRE(first["mode"] == "fullsync");
+        historyId = first["historyId"];
+        nextSeq = first["nextSeq"];
+        REQUIRE(historyId == db->getHistoryId());
+        // One handshake per session
+        REQUIRE(c.send("replicate - 0").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    }
+    REQUIRE(db->getReplicationLog().active());
+    REQUIRE(db->execCmd(R"(s k "v")").code == ResultType::Code::Success);
+
+    Client again;
+    REQUIRE(again.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    auto resumed = replicateReply(again.send(std::format("replicate {} {}", historyId, nextSeq)));
+    REQUIRE(resumed["mode"] == "stream");
+    REQUIRE(resumed["nextSeq"] == nextSeq + 1);
+
+    // Another history, or a position the log does not hold: full sync
+    Client other;
+    REQUIRE(other.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(replicateReply(other.send(std::format("replicate {} {}", historyId, nextSeq + 100)))["mode"] == "fullsync");
+}
+
+TEST_CASE_METHOD(SessionFixture, "Only the replica role may replicate, and it may do nothing else", "[session][replication]") {
+    Client bob;
+    REQUIRE(bob.send("Authorization: bob." + sha256("bobbob")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(bob.send("replicate - 0").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+
+    Client repl;
+    REQUIRE(repl.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    REQUIRE(repl.send("g k").find(codeOf(ResultType::Code::PermissionDenied)) != std::string::npos);
+    REQUIRE(repl.send("replicate abc").find(codeOf(ResultType::Code::InvalidValueFormat)) != std::string::npos);
+    REQUIRE(repl.send("replicate - 1 2").find(codeOf(ResultType::Code::InvalidValueFormat)) != std::string::npos);
+    REQUIRE_FALSE(db->getReplicationLog().active());
+}
+
+TEST_CASE_METHOD(SessionFixture, "A replication link is not closed by the idle timeout", "[session][replication]") {
+    Client repl;
+    REQUIRE(repl.send("Authorization: repl." + sha256("replp")).find(codeOf(ResultType::Code::Success)) != std::string::npos);
+    replicateReply(repl.send("replicate - 0"));
+    REQUIRE_FALSE(repl.closedWithin(std::chrono::milliseconds(3000))); // IdleTimeout is 2 s
 }

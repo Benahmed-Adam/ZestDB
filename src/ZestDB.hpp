@@ -159,6 +159,16 @@ namespace Zest {
             return *this->replicationLog;
         }
 
+        /// Random id of this run's history of writes: sequence numbers only mean something within one history id.
+        const std::string& getHistoryId() const {
+            return this->historyId;
+        }
+
+        /// `replicate <historyId> <fromSeq>` from a replica at `remoteIp`: checks it may replicate, starts the
+        /// replication log, then answers `{"mode":"stream"|"fullsync","historyId":..,"nextSeq":..}`. `stream` when the
+        /// log still holds every write from `fromSeq` of the same history, `fullsync` otherwise.
+        ResultType replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq);
+
         /// The active configuration. Read-only from outside: it changes through `scfg` and `reload`.
         const Settings& getSettings() const {
             return this->settings;
@@ -330,6 +340,7 @@ namespace Zest {
         std::atomic<bool> archiving{ false }; // an archive or a restore is in progress: only one at a time
         std::unique_ptr<ShardManager> shardManager;
         std::unique_ptr<ReplicationLog> replicationLog;
+        std::string historyId;
         std::unique_ptr<ScriptEngine> scriptEngine; // declared after shardManager, so it is destroyed first
         std::unique_ptr<Server> socket;
 

@@ -1629,3 +1629,18 @@ TEST_CASE("ZestDB keeps the replication log in sequence order under concurrent w
     REQUIRE(events.size() == 4000);
     REQUIRE(std::ranges::is_sorted(events, {}, &ReplicationEvent::seq));
 }
+
+TEST_CASE("ZestDB refuses a replica outside allowedReplicas, and replication from a replica", "[commands][replication]") {
+    SECTION("allowedReplicas") {
+        TempDbDir tmp("zestdb_test_repl_allowed", "replication:\n  allowedReplicas: '10\\.0\\..*'\n", 29621);
+        ZestDB db;
+        REQUIRE(db.replicationHandshake("127.0.0.1", "-", 0).code == ResultType::Code::ReplicaNotAllowed);
+        REQUIRE_FALSE(db.getReplicationLog().active());
+        REQUIRE(db.replicationHandshake("10.0.3.4", "-", 0).code == ResultType::Code::Success);
+    }
+    SECTION("a replica serves no replica") {
+        TempDbDir tmp("zestdb_test_repl_notprimary", "replication:\n  role: replica\n  primary: \"10.0.0.1:7321\"\n  user: repl\n  password: p\n", 29621);
+        ZestDB db;
+        REQUIRE(db.replicationHandshake("127.0.0.1", "-", 0).code == ResultType::Code::NotPrimary);
+    }
+}

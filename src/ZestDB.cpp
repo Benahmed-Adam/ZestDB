@@ -11,6 +11,7 @@
 #include <libzippp/libzippp.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <random>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -224,6 +225,10 @@ namespace Zest {
     void ZestDB::boot() {
         this->settings = this->loadConfig(this->users);
         this->replicationLog = std::make_unique<ReplicationLog>(this->settings.replication.historySize);
+        // A new id for each run: the sequence numbers restart once the WAL was cleared, so a replica's position in the
+        // previous run means nothing in this one
+        std::random_device rd;
+        this->historyId = std::format("{:08x}{:08x}{:08x}{:08x}", rd(), rd(), rd(), rd());
         {
             std::unique_lock<std::shared_mutex> usersLock(this->usersMtx);
             this->rebuildLimiters();
@@ -345,6 +350,22 @@ namespace Zest {
 
     bool ZestDB::logsRows() const {
         return this->scripted() || (!this->replaying.load() && this->replicationLog && this->replicationLog->active());
+    }
+
+    ResultType ZestDB::replicationHandshake(const std::string& remoteIp, const std::string& knownHistoryId, uint64_t fromSeq) {
+        if (this->settings.replication.replica) {
+            return { ResultType::Code::NotPrimary };
+        }
+        if (!std::regex_match(remoteIp, this->settings.AllowedReplicas)) {
+            ZestLog(LogLevel::Warning, std::format("Replication: {} is not in allowedReplicas", remoteIp));
+            return { ResultType::Code::ReplicaNotAllowed };
+        }
+        this->startReplicationLog();
+        std::vector<ReplicationEvent> none;
+        const bool stream = knownHistoryId == this->historyId && this->replicationLog->since(fromSeq, none, 0);
+        json reply = { { "mode", stream ? "stream" : "fullsync" }, { "historyId", this->historyId }, { "nextSeq", this->replicationLog->nextSeq() } };
+        ZestLog(LogLevel::Info, std::format("Replication: {} connected, {}", remoteIp, stream ? std::format("streaming from {}", fromSeq) : "full sync needed"));
+        return { ResultType::Code::Success, reply.dump(), 1 };
     }
 
     void ZestDB::startReplicationLog() {

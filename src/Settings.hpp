@@ -70,6 +70,8 @@ namespace Zest {
             InvalidUserName = 307,
             InvalidRole = 308,
             LastAdmin = 309,
+            ReplicaNotAllowed = 310,
+            NotPrimary = 311,
 
             UnknownConfigParam = 400,
             InvalidConfigValue = 401,

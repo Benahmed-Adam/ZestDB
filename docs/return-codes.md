@@ -71,8 +71,10 @@ The values are part of the protocol: a code is never renumbered or reused. They 
 | 305 | `UserExists` | `user add`: a user of that name already exists. |
 | 306 | `UserNotFound` | `user passwd`, `role` or `del`: no user of that name. |
 | 307 | `InvalidUserName` | `user add`: the name is empty, longer than 64 characters, or holds a `.`, a space, a quote or a backslash. |
-| 308 | `InvalidRole` | The role is not `read`, `write` or `admin`. |
+| 308 | `InvalidRole` | The role is not `read`, `write`, `admin` or `replica`. |
 | 309 | `LastAdmin` | `user del` or `user role` would leave no admin. |
+| 310 | `ReplicaNotAllowed` | `replicate`: the replica's address does not match `allowedReplicas`. |
+| 311 | `NotPrimary` | `replicate`: this instance is itself a replica, and serves no replica. |
 
 ## 4xx - Configuration
 
